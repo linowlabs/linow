@@ -59,6 +59,18 @@ interface VerificationSession {
   checkedAt: string;
 }
 
+interface ProofArtifactsSnapshot {
+  evidenceId?: string;
+  txDigest?: string;
+  packageId?: string;
+  commitment?: string;
+  blobReference?: string;
+  attestationId?: string;
+  verificationStatus?: "success" | "tampered";
+  checkedFileLabel?: string;
+  updatedAt: string;
+}
+
 const ISA_ASSERTIONS = [
   "Existence",
   "Completeness",
@@ -69,6 +81,8 @@ const ISA_ASSERTIONS = [
   "Occurrence",
   "Accuracy",
 ];
+
+const DEMO_PACKAGE_ID = "0x1a0f4c9e72b84f16c5e8127b4d90aa36linowpkg";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -247,6 +261,7 @@ export default function Home() {
     type: ViewId;
     steps: ProgressStep[];
   } | null>(null);
+  const [proofSnapshot, setProofSnapshot] = useState<ProofArtifactsSnapshot | null>(null);
 
   const handleToggleAssertion = (assertion: string) => {
     setRegAssertions((prev) =>
@@ -376,6 +391,14 @@ export default function Home() {
         encryptedMetadataSize: `${encryptedMetadata.ciphertext.byteLength} B`,
         sourceConfidence: "L2 - Company Upload",
       });
+      setProofSnapshot({
+        evidenceId: objectId,
+        txDigest,
+        packageId: DEMO_PACKAGE_ID,
+        commitment,
+        blobReference: blobId,
+        updatedAt: registeredAt,
+      });
     } catch (error) {
       const message =
         error instanceof Error
@@ -474,6 +497,17 @@ export default function Home() {
         checkedFileLabel,
         checkedAt,
       });
+      setProofSnapshot((prev) => ({
+        evidenceId: verifyRecordId,
+        txDigest: prev?.txDigest,
+        packageId: DEMO_PACKAGE_ID,
+        commitment: record.commitment,
+        blobReference: record.blobId,
+        attestationId: prev?.attestationId,
+        verificationStatus: "success",
+        checkedFileLabel,
+        updatedAt: checkedAt,
+      }));
       setAttestRecordId(verifyRecordId);
     } else {
       const checkedAt = new Date().toISOString().replace("T", " ").substring(0, 16);
@@ -497,6 +531,17 @@ export default function Home() {
         checkedFileLabel,
         checkedAt,
       });
+      setProofSnapshot((prev) => ({
+        evidenceId: verifyRecordId,
+        txDigest: prev?.txDigest,
+        packageId: DEMO_PACKAGE_ID,
+        commitment: record.commitment,
+        blobReference: record.blobId,
+        attestationId: prev?.attestationId,
+        verificationStatus: "tampered",
+        checkedFileLabel,
+        updatedAt: checkedAt,
+      }));
     }
 
     setIsVerifying(false);
@@ -572,6 +617,18 @@ export default function Home() {
       action: attestType,
       createdAt,
     });
+    const attestedRecord = registry.find((record) => record.id === attestRecordId);
+    setProofSnapshot((prev) => ({
+      evidenceId: attestRecordId,
+      txDigest,
+      packageId: DEMO_PACKAGE_ID,
+      commitment: attestedRecord?.commitment || prev?.commitment,
+      blobReference: attestedRecord?.blobId || prev?.blobReference,
+      attestationId,
+      verificationStatus: prev?.verificationStatus,
+      checkedFileLabel: prev?.checkedFileLabel,
+      updatedAt: createdAt,
+    }));
     setIsAttesting(false);
   };
 
@@ -685,6 +742,55 @@ export default function Home() {
           </div>
 
           <div className="workspace-content">
+            {proofSnapshot && (
+              <div className="result-card success">
+                <div className="result-header">
+                  <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="result-title success">Proof Output Surface</span>
+                </div>
+                <p className="result-message">
+                  Judge-facing artifacts from the latest shell action. These stay mock-linked until live integration lands.
+                </p>
+                <div className="proof-grid">
+                  <div className="proof-row">
+                    <span className="proof-label">Evidence ID</span>
+                    <span className="proof-value">{truncateValue(proofSnapshot.evidenceId || "n/a", 28)}</span>
+                  </div>
+                  <div className="proof-row">
+                    <span className="proof-label">Tx Digest</span>
+                    <span className="proof-value">{proofSnapshot.txDigest || "n/a"}</span>
+                  </div>
+                  <div className="proof-row">
+                    <span className="proof-label">Package ID</span>
+                    <span className="proof-value">{truncateValue(proofSnapshot.packageId || "n/a", 28)}</span>
+                  </div>
+                  <div className="proof-row">
+                    <span className="proof-label">Commitment</span>
+                    <span className="proof-value">{truncateValue(proofSnapshot.commitment || "n/a", 28)}</span>
+                  </div>
+                  <div className="proof-row">
+                    <span className="proof-label">Blob Reference</span>
+                    <span className="proof-value">{truncateValue(proofSnapshot.blobReference || "n/a", 28)}</span>
+                  </div>
+                  <div className="proof-row">
+                    <span className="proof-label">Attestation ID</span>
+                    <span className="proof-value">{truncateValue(proofSnapshot.attestationId || "pending", 28)}</span>
+                  </div>
+                  <div className="proof-row">
+                    <span className="proof-label">Verification</span>
+                    <span className={`proof-value ${proofSnapshot.verificationStatus === "tampered" ? "error" : "success"}`}>
+                      {proofSnapshot.verificationStatus || "pending"}
+                    </span>
+                  </div>
+                  <div className="proof-row">
+                    <span className="proof-label">Updated At</span>
+                    <span className="proof-value">{proofSnapshot.updatedAt}</span>
+                  </div>
+                </div>
+              </div>
+            )}
             {activeView === "register" && (
               <>
                 <div className="card">
@@ -831,6 +937,10 @@ export default function Home() {
                       <div className="proof-row">
                         <span className="proof-label">Tx Digest</span>
                         <span className="proof-value">{registerResult.txDigest}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Package ID</span>
+                        <span className="proof-value">{truncateValue(DEMO_PACKAGE_ID, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Walrus Blob</span>
@@ -1142,6 +1252,10 @@ export default function Home() {
                       <div className="proof-row">
                         <span className="proof-label">Tx Digest</span>
                         <span className="proof-value">{attestResult.txDigest}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Package ID</span>
+                        <span className="proof-value">{truncateValue(DEMO_PACKAGE_ID, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Reviewer</span>

@@ -197,3 +197,25 @@
   - Attestation IDs and transaction digests remain mock outputs until `J6-18`.
 - Follow-up needed:
   - Replace the session-gated prerequisite with real SDK-backed verification and attestation state during integration.
+
+## 2026-06-06 - Display Proof Outputs
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a unified proof-output surface that shows the latest evidence ID, tx digest, package ID, commitment, blob reference, attestation ID, and verification state.
+  - Extended the register and attestation result cards to include the demo package ID so proof artifacts are visible both locally and in the consolidated surface.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-17` is demo-facing, so the most important thing is a judge-readable proof view rather than scattering artifacts across multiple flow cards.
+  - A single proof surface makes the shell easier to narrate during the hackathon demo while staying honest that some values are still mock-linked until integration.
+
+### Tech Debt
+- Known shortcuts:
+  - The package ID is a shell placeholder until A finalizes the deployed contract/package values.
+  - The unified proof surface tracks only the latest action in session state.
+- Follow-up needed:
+  - Replace placeholder package and transaction outputs with real chain values during `J6-18`.
