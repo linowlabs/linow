@@ -128,3 +128,48 @@
   - The SDK build must run before the app build/dev flow.
 - Follow-up needed:
   - Keep the prebuild hook in place or add a repo-level workspace command so SDK changes stay in sync automatically.
+
+## 2026-06-06 - Build Verify Tamper Flow
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Refined the verify workspace into an explicit two-path demo: verify original file and verify modified file.
+  - Added clearer verification result details, including the checked file label and a reset path for repeated demos.
+  - Kept the verify flow honest to the product model by comparing against the recorded commitment without introducing a fake `Verified` evidence status.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-15` asks for evidence lookup, original-file verification, modified-file verification, and a visible mismatch state, so the UI now maps directly to that deliverable.
+  - Separate actions are easier for judges and collaborators to understand quickly than a generic tamper toggle.
+  - The flow stays mock-friendly while still using the real shared hashing helper for supplied verification files.
+
+### Tech Debt
+- Known shortcuts:
+  - Modified-file verification is still simulated in the shell by forcing a mismatch rather than loading a real mutated asset.
+- Follow-up needed:
+  - Replace the forced mismatch path with real SDK-backed verification inputs during `J6-18`.
+
+## 2026-06-06 - Silence Hydration Noise
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/layout.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added `suppressHydrationWarning` to the interactive form controls that browser extensions were decorating with extra attributes.
+  - Kept the root layout hydration guard in place so the page shell and its controls stay stable on first paint.
+
+### Reasoning
+- Why this approach was chosen:
+  - The mismatch was coming from browser-injected attributes like `fdprocessedid`, not from app state or rendering logic.
+  - Suppressing hydration warnings at the exact controls keeps the fix narrow and avoids changing the verify/register UI behavior.
+
+### Tech Debt
+- Known shortcuts:
+  - The warning can still appear in extension-heavy browsers, but it will no longer surface as a React hydration mismatch from our markup.
+- Follow-up needed:
+  - None for the current demo path unless a browser-specific regression appears.

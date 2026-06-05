@@ -209,13 +209,13 @@ export default function Home() {
 
   const [verifyRecordId, setVerifyRecordId] = useState(registry[0]?.id || "");
   const [verifyFile, setVerifyFile] = useState<File | null>(null);
-  const [verifyTamperSim, setVerifyTamperSim] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<{
     status: "idle" | "success" | "tampered";
     message: string;
     computedHash?: string;
     expectedHash?: string;
+    checkedFileLabel?: string;
   }>({ status: "idle", message: "" });
 
   const [attestRecordId, setAttestRecordId] = useState(registry[1]?.id || "");
@@ -375,7 +375,13 @@ export default function Home() {
     }
   };
 
-  const handleVerify = async () => {
+  const resetVerifyDraft = () => {
+    setVerifyFile(null);
+    setVerificationResult({ status: "idle", message: "" });
+    setOperationProgress((prev) => (prev?.type === "verify" ? null : prev));
+  };
+
+  const handleVerify = async (simulateTamper: boolean) => {
     if (!verifyRecordId || isVerifying) return;
 
     setIsVerifying(true);
@@ -405,10 +411,11 @@ export default function Home() {
     steps[1].status = "running";
     setOperationProgress({ type: "verify", steps: [...steps] });
     await delay(250);
+    const checkedFileLabel = verifyFile ? verifyFile.name : record.fileName || "Shell sample";
     steps[1] = {
       ...steps[1],
       status: "done",
-      detail: verifyFile ? verifyFile.name : record.fileName || "Shell sample",
+      detail: checkedFileLabel,
     };
 
     steps[2].status = "running";
@@ -419,7 +426,7 @@ export default function Home() {
     if (verifyFile) {
       computedHash = await hashFile(verifyFile);
     }
-    if (verifyTamperSim) {
+    if (simulateTamper) {
       computedHash = `f2a8d9e2b10a9c8f${record.commitment.substring(16)}`;
     }
 
@@ -438,6 +445,7 @@ export default function Home() {
           "Hash matches the recorded commitment. The supplied file is consistent with the evidence record.",
         computedHash,
         expectedHash: record.commitment,
+        checkedFileLabel,
       });
     } else {
       steps[2] = {
@@ -452,6 +460,7 @@ export default function Home() {
           "Tamper detected. The supplied file does not match the recorded commitment for this evidence item.",
         computedHash,
         expectedHash: record.commitment,
+        checkedFileLabel,
       });
     }
 
@@ -645,6 +654,7 @@ export default function Home() {
                         <input
                           type="file"
                           className="file-upload-input"
+                          suppressHydrationWarning
                           onChange={(event) => {
                             if (event.target.files?.[0]) {
                               setRegFile(event.target.files[0]);
@@ -660,6 +670,7 @@ export default function Home() {
                       <select
                         className="field-select"
                         value={regDocType}
+                        suppressHydrationWarning
                         onChange={(event) => setRegDocType(event.target.value)}
                       >
                         <option>Bank Statement</option>
@@ -676,6 +687,7 @@ export default function Home() {
                         type="text"
                         className="field-input"
                         value={regSource}
+                        suppressHydrationWarning
                         onChange={(event) => setRegSource(event.target.value)}
                         placeholder="e.g. Company Upload (L2)"
                       />
@@ -687,6 +699,7 @@ export default function Home() {
                         className="field-textarea"
                         rows={2}
                         value={regDesc}
+                        suppressHydrationWarning
                         onChange={(event) => setRegDesc(event.target.value)}
                         placeholder="e.g. Verification of Q2 bank reconciliation to support existence and accuracy."
                       />
@@ -712,6 +725,7 @@ export default function Home() {
                     <button
                       className="btn-primary"
                       disabled={isRegistering || !regFile || regAssertions.length === 0}
+                      suppressHydrationWarning
                       onClick={handleRegister}
                     >
                       {isRegistering ? (
@@ -723,7 +737,7 @@ export default function Home() {
                         "Upload & Register Evidence"
                       )}
                     </button>
-                    <button className="btn-secondary" onClick={resetRegisterDraft}>
+                    <button className="btn-secondary" suppressHydrationWarning onClick={resetRegisterDraft}>
                       Clear
                     </button>
                   </div>
@@ -799,6 +813,7 @@ export default function Home() {
                       <select
                         className="field-select"
                         value={verifyRecordId}
+                        suppressHydrationWarning
                         onChange={(event) => setVerifyRecordId(event.target.value)}
                       >
                         <option value="">-- Choose registered record --</option>
@@ -829,6 +844,7 @@ export default function Home() {
                         <input
                           type="file"
                           className="file-upload-input"
+                          suppressHydrationWarning
                           onChange={(event) => {
                             if (event.target.files?.[0]) {
                               setVerifyFile(event.target.files[0]);
@@ -839,26 +855,21 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className={`tamper-toggle${verifyTamperSim ? " active" : ""}`}>
+                  <div className="tamper-toggle">
                     <div className="tamper-info">
-                      <div className="tamper-title">Simulate File Tampering</div>
+                      <div className="tamper-title">Verification Modes</div>
                       <div className="tamper-desc">
-                        Force a mismatch to preview the tamper-detection state.
+                        Run a clean comparison against the recorded commitment or force a modified-file mismatch for the demo.
                       </div>
                     </div>
-                    <button
-                      className={`tamper-btn${verifyTamperSim ? " active" : ""}`}
-                      onClick={() => setVerifyTamperSim((prev) => !prev)}
-                    >
-                      {verifyTamperSim ? "Tampering Active" : "Simulate Tamper"}
-                    </button>
                   </div>
 
                   <div className="btn-actions">
                     <button
                       className="btn-primary"
                       disabled={isVerifying || !verifyRecordId}
-                      onClick={handleVerify}
+                      suppressHydrationWarning
+                      onClick={() => handleVerify(false)}
                     >
                       {isVerifying ? (
                         <>
@@ -866,8 +877,19 @@ export default function Home() {
                           <span>Verifying...</span>
                         </>
                       ) : (
-                        "Run Verification"
+                        "Verify Original File"
                       )}
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      disabled={isVerifying || !verifyRecordId}
+                      suppressHydrationWarning
+                      onClick={() => handleVerify(true)}
+                    >
+                      Verify Modified File
+                    </button>
+                    <button className="btn-secondary" suppressHydrationWarning onClick={resetVerifyDraft}>
+                      Clear
                     </button>
                   </div>
                 </div>
@@ -892,6 +914,12 @@ export default function Home() {
                     </div>
                     <p className="result-message">{verificationResult.message}</p>
                     <div className="proof-grid">
+                      <div className="proof-row">
+                        <span className="proof-label">Checked File</span>
+                        <span className="proof-value">
+                          {verificationResult.checkedFileLabel || "Shell sample"}
+                        </span>
+                      </div>
                       <div className="proof-row">
                         <span className="proof-label">Recorded Commitment</span>
                         <span className="proof-value">{truncateValue(verificationResult.expectedHash || "", 28)}</span>
@@ -918,6 +946,7 @@ export default function Home() {
                       <select
                         className="field-select"
                         value={attestRecordId}
+                        suppressHydrationWarning
                         onChange={(event) => setAttestRecordId(event.target.value)}
                       >
                         <option value="">-- Choose record to attest --</option>
@@ -935,6 +964,7 @@ export default function Home() {
                         type="text"
                         className="field-input mono"
                         value={attestReviewer}
+                        suppressHydrationWarning
                         onChange={(event) => setAttestReviewer(event.target.value)}
                         placeholder="0x..."
                       />
@@ -945,6 +975,7 @@ export default function Home() {
                       <select
                         className="field-select"
                         value={attestType}
+                        suppressHydrationWarning
                         onChange={(event) => setAttestType(event.target.value)}
                       >
                         <option value="EvidenceReviewed">Evidence reviewed</option>
@@ -959,6 +990,7 @@ export default function Home() {
                         type="text"
                         className="field-input"
                         disabled
+                        suppressHydrationWarning
                         value="L3 - Reviewer Wallet Attested"
                       />
                     </div>
@@ -969,6 +1001,7 @@ export default function Home() {
                         className="field-textarea"
                         rows={3}
                         value={attestNotes}
+                        suppressHydrationWarning
                         onChange={(event) => setAttestNotes(event.target.value)}
                         placeholder="Optional reviewer note or scope limitation."
                       />
@@ -979,6 +1012,7 @@ export default function Home() {
                     <button
                       className="btn-primary"
                       disabled={isAttesting || !attestRecordId}
+                      suppressHydrationWarning
                       onClick={handleAttest}
                     >
                       {isAttesting ? (
@@ -1073,22 +1107,24 @@ export default function Home() {
                           </td>
                           <td>
                             <div className="table-actions">
-                              <button
-                                className="table-action"
-                                onClick={() => {
-                                  setVerifyRecordId(record.id);
-                                  setVerificationResult({ status: "idle", message: "" });
+                      <button
+                        className="table-action"
+                        suppressHydrationWarning
+                        onClick={() => {
+                          setVerifyRecordId(record.id);
+                          setVerificationResult({ status: "idle", message: "" });
                                   setOperationProgress(null);
                                   setActiveView("verify");
                                 }}
                               >
                                 Verify
                               </button>
-                              <button
-                                className="table-action warn"
-                                onClick={() => {
-                                  setAttestRecordId(record.id);
-                                  setAttestResult(null);
+                      <button
+                        className="table-action warn"
+                        suppressHydrationWarning
+                        onClick={() => {
+                          setAttestRecordId(record.id);
+                          setAttestResult(null);
                                   setOperationProgress(null);
                                   setActiveView("attest");
                                 }}
