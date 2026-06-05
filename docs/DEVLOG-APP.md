@@ -173,3 +173,27 @@
   - The warning can still appear in extension-heavy browsers, but it will no longer surface as a React hydration mismatch from our markup.
 - Follow-up needed:
   - None for the current demo path unless a browser-specific regression appears.
+
+## 2026-06-06 - Build Attestation Flow
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Refined the attestation workspace so reviewer attestation is explicitly gated by a successful verification for the selected evidence item.
+  - Added a continuation path from successful verification into attestation, plus clearer attestation proof output details for the selected record, reviewer, action, and timestamp.
+  - Kept attestation as its own object in the shell model instead of leaking verification into `EvidenceRecord.status`.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-16` calls for reviewer attestation after verification, so the UI now reflects that dependency directly rather than presenting attestation as a standalone form.
+  - The reviewer flow is easier to demo when a successful verify action hands off into attestation with visible prerequisite messaging.
+  - This stays aligned with `AGENTS.md`: humans sign, attestation is separate from lifecycle status, and the product does not overclaim verification.
+
+### Tech Debt
+- Known shortcuts:
+  - Verification-to-attestation handoff is still in-memory session state and resets on refresh.
+  - Attestation IDs and transaction digests remain mock outputs until `J6-18`.
+- Follow-up needed:
+  - Replace the session-gated prerequisite with real SDK-backed verification and attestation state during integration.

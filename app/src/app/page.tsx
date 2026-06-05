@@ -52,6 +52,13 @@ interface RegisterResult {
   sourceConfidence: string;
 }
 
+interface VerificationSession {
+  evidenceId: string;
+  status: "success" | "tampered";
+  checkedFileLabel: string;
+  checkedAt: string;
+}
+
 const ISA_ASSERTIONS = [
   "Existence",
   "Completeness",
@@ -217,6 +224,8 @@ export default function Home() {
     expectedHash?: string;
     checkedFileLabel?: string;
   }>({ status: "idle", message: "" });
+  const [lastVerificationSession, setLastVerificationSession] =
+    useState<VerificationSession | null>(null);
 
   const [attestRecordId, setAttestRecordId] = useState(registry[1]?.id || "");
   const [attestReviewer, setAttestReviewer] = useState(
@@ -228,6 +237,10 @@ export default function Home() {
   const [attestResult, setAttestResult] = useState<{
     attestationId: string;
     txDigest: string;
+    evidenceId: string;
+    reviewer: string;
+    action: string;
+    createdAt: string;
   } | null>(null);
 
   const [operationProgress, setOperationProgress] = useState<{
@@ -381,6 +394,13 @@ export default function Home() {
     setOperationProgress((prev) => (prev?.type === "verify" ? null : prev));
   };
 
+  const resetAttestDraft = () => {
+    setAttestNotes("");
+    setAttestType("EvidenceReviewed");
+    setAttestResult(null);
+    setOperationProgress((prev) => (prev?.type === "attest" ? null : prev));
+  };
+
   const handleVerify = async (simulateTamper: boolean) => {
     if (!verifyRecordId || isVerifying) return;
 
@@ -433,6 +453,7 @@ export default function Home() {
     await delay(250);
 
     if (computedHash === record.commitment) {
+      const checkedAt = new Date().toISOString().replace("T", " ").substring(0, 16);
       steps[2] = {
         ...steps[2],
         status: "done",
@@ -447,7 +468,15 @@ export default function Home() {
         expectedHash: record.commitment,
         checkedFileLabel,
       });
+      setLastVerificationSession({
+        evidenceId: verifyRecordId,
+        status: "success",
+        checkedFileLabel,
+        checkedAt,
+      });
+      setAttestRecordId(verifyRecordId);
     } else {
+      const checkedAt = new Date().toISOString().replace("T", " ").substring(0, 16);
       steps[2] = {
         ...steps[2],
         status: "error",
@@ -462,6 +491,12 @@ export default function Home() {
         expectedHash: record.commitment,
         checkedFileLabel,
       });
+      setLastVerificationSession({
+        evidenceId: verifyRecordId,
+        status: "tampered",
+        checkedFileLabel,
+        checkedAt,
+      });
     }
 
     setIsVerifying(false);
@@ -469,6 +504,13 @@ export default function Home() {
 
   const handleAttest = async () => {
     if (!attestRecordId || isAttesting) return;
+    if (
+      !lastVerificationSession ||
+      lastVerificationSession.evidenceId !== attestRecordId ||
+      lastVerificationSession.status !== "success"
+    ) {
+      return;
+    }
 
     setIsAttesting(true);
     setAttestResult(null);
@@ -522,7 +564,14 @@ export default function Home() {
       ),
     );
 
-    setAttestResult({ attestationId, txDigest });
+    setAttestResult({
+      attestationId,
+      txDigest,
+      evidenceId: attestRecordId,
+      reviewer: attestReviewer,
+      action: attestType,
+      createdAt,
+    });
     setIsAttesting(false);
   };
 
@@ -563,6 +612,12 @@ export default function Home() {
   };
 
   const currentView = VIEWS.find((view) => view.id === activeView) ?? VIEWS[0];
+  const selectedRecordVerified =
+    lastVerificationSession?.evidenceId === attestRecordId &&
+    lastVerificationSession.status === "success";
+  const selectedRecordTampered =
+    lastVerificationSession?.evidenceId === attestRecordId &&
+    lastVerificationSession.status === "tampered";
 
   return (
     <main className="app-container">
@@ -931,6 +986,22 @@ export default function Home() {
                         </span>
                       </div>
                     </div>
+                    {verificationResult.status === "success" && (
+                      <div className="btn-actions">
+                        <button
+                          className="btn-secondary"
+                          suppressHydrationWarning
+                          onClick={() => {
+                            setAttestRecordId(verifyRecordId);
+                            setAttestResult(null);
+                            setOperationProgress(null);
+                            setActiveView("attest");
+                          }}
+                        >
+                          Continue to Attestation
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </>
@@ -940,6 +1011,18 @@ export default function Home() {
               <>
                 <div className="card">
                   <div className="card-section-title">Prepare Reviewer Attestation</div>
+                  <div className="tamper-toggle">
+                    <div className="tamper-info">
+                      <div className="tamper-title">Verification Prerequisite</div>
+                      <div className="tamper-desc">
+                        {selectedRecordVerified
+                          ? `Ready to attest. ${lastVerificationSession?.checkedFileLabel || "Selected file"} matched the recorded commitment at ${lastVerificationSession?.checkedAt}.`
+                          : selectedRecordTampered
+                            ? "Attestation is blocked because the latest verification for this record detected tampering."
+                            : "Run a successful verification for this evidence item before creating a reviewer attestation."}
+                      </div>
+                    </div>
+                  </div>
                   <div className="form-grid">
                     <div className="field">
                       <label className="field-label">Target Evidence Record</label>
@@ -1011,7 +1094,7 @@ export default function Home() {
                   <div className="btn-actions">
                     <button
                       className="btn-primary"
-                      disabled={isAttesting || !attestRecordId}
+                      disabled={isAttesting || !attestRecordId || !selectedRecordVerified}
                       suppressHydrationWarning
                       onClick={handleAttest}
                     >
@@ -1023,6 +1106,13 @@ export default function Home() {
                       ) : (
                         "Review and Sign"
                       )}
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      suppressHydrationWarning
+                      onClick={resetAttestDraft}
+                    >
+                      Clear
                     </button>
                   </div>
                 </div>
@@ -1042,12 +1132,28 @@ export default function Home() {
                     </p>
                     <div className="proof-grid">
                       <div className="proof-row">
+                        <span className="proof-label">Evidence ID</span>
+                        <span className="proof-value">{truncateValue(attestResult.evidenceId, 28)}</span>
+                      </div>
+                      <div className="proof-row">
                         <span className="proof-label">Attestation ID</span>
                         <span className="proof-value">{truncateValue(attestResult.attestationId, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Tx Digest</span>
                         <span className="proof-value">{attestResult.txDigest}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Reviewer</span>
+                        <span className="proof-value">{truncateValue(attestResult.reviewer, 28)}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Action</span>
+                        <span className="proof-value">{attestResult.action}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Created At</span>
+                        <span className="proof-value">{attestResult.createdAt}</span>
                       </div>
                     </div>
                   </div>
