@@ -1,1 +1,7 @@
 docs/docs-archive/
+
+node_modules/
+**/node_modules/
+**/dist/
+
+app/.next/

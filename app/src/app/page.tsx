@@ -1,10 +1,24 @@
 "use client";
 
 import React, { useState } from "react";
+import {
+  encryptFile,
+  encryptMetadata,
+  generateEncryptionKey,
+  hashFile,
+} from "@linow/sdk";
 
-/* ================================================================
-   Types
-   ================================================================ */
+type RecordStatus = "Registered" | "Superseded";
+type ViewId = "register" | "verify" | "attest" | "records";
+
+interface AttestationSummary {
+  id: string;
+  action: string;
+  reviewer: string;
+  note: string;
+  txDigest: string;
+  createdAt: string;
+}
 
 interface EvidenceRecord {
   id: string;
@@ -12,13 +26,14 @@ interface EvidenceRecord {
   type: string;
   source: string;
   commitment: string;
-  status: "Registered" | "UnderReview" | "Attested";
+  status: RecordStatus;
   blobId: string;
   assertions: string[];
   reviewer: string;
   notes: string;
   fileSize?: string;
   fileName?: string;
+  latestAttestation?: AttestationSummary;
 }
 
 interface ProgressStep {
@@ -27,11 +42,15 @@ interface ProgressStep {
   detail?: string;
 }
 
-type ViewId = "register" | "verify" | "attest" | "records";
-
-/* ================================================================
-   Constants
-   ================================================================ */
+interface RegisterResult {
+  objectId: string;
+  txDigest: string;
+  blobId: string;
+  commitment: string;
+  encryptedFileSize: string;
+  encryptedMetadataSize: string;
+  sourceConfidence: string;
+}
 
 const ISA_ASSERTIONS = [
   "Existence",
@@ -44,17 +63,100 @@ const ISA_ASSERTIONS = [
   "Accuracy",
 ];
 
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/* ================================================================
-   Component
-   ================================================================ */
+const VIEWS: {
+  id: ViewId;
+  label: string;
+  eyebrow: string;
+  title: string;
+  desc: string;
+  icon: React.ReactNode;
+}[] = [
+  {
+    id: "register",
+    label: "Upload Evidence",
+    eyebrow: "Company Portal",
+    title: "Register Audit Evidence",
+    desc: "Upload a document, hash it locally, encrypt it client-side, and prepare proof outputs for the chain flow.",
+    icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+      </svg>
+    ),
+  },
+  {
+    id: "verify",
+    label: "Verify Evidence",
+    eyebrow: "Verification Engine",
+    title: "Verify Evidence & Detect Tampering",
+    desc: "Compare a supplied file against the recorded commitment and surface tamper results clearly.",
+    icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+      </svg>
+    ),
+  },
+  {
+    id: "attest",
+    label: "Create Attestation",
+    eyebrow: "Auditor Workspace",
+    title: "Review & Attest Evidence",
+    desc: "Prepare a reviewer action after integrity checks are complete and record a separate attestation result.",
+    icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+      </svg>
+    ),
+  },
+  {
+    id: "records",
+    label: "Evidence Records",
+    eyebrow: "Registry",
+    title: "Evidence Registry",
+    desc: "Review the in-session evidence records and move directly into verification or attestation flows.",
+    icon: (
+      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+      </svg>
+    ),
+  },
+];
+
+function truncateValue(value: string, visible = 18): string {
+  return value.length > visible ? `${value.substring(0, visible)}...` : value;
+}
+
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function toMockDigest(seed: string): string {
+  return `SuiTx${seed.substring(0, 10).toUpperCase()}`;
+}
+
+function toMockObjectId(seed: string): string {
+  return `0x${seed.substring(0, 40)}`;
+}
+
+function toMockAttestationId(seed: string): string {
+  return `0xattest${seed.substring(0, 34)}`;
+}
+
+function toSourceLabel(source: string): string {
+  const trimmed = source.trim();
+
+  if (!trimmed) {
+    return "Company Upload (L2)";
+  }
+
+  return trimmed.includes("(L") ? trimmed : `${trimmed} (L2)`;
+}
 
 export default function Home() {
-  /* ---------- Navigation ---------- */
   const [activeView, setActiveView] = useState<ViewId>("register");
 
-  /* ---------- Registry (mock database) ---------- */
   const [registry, setRegistry] = useState<EvidenceRecord[]>([
     {
       id: "0x8df025a1768c34fde90184b2c15ea7728a01bf9e",
@@ -63,13 +165,21 @@ export default function Home() {
       source: "Company Upload (L2)",
       commitment:
         "4e82df4bc89f64e2a15998a12c15e882a0e98a12c15e882a0e98a12c15e882a0",
-      status: "Attested",
+      status: "Registered",
       blobId: "walrus::blob-a48df21b0e9d9e48f88c8e142e01df",
       assertions: ["Existence", "Completeness", "Accuracy"],
       reviewer: "0xa482e185c74fb90172bf4215e982c7104b28d2",
-      notes: "Verified Q2 bank reconcile balances. Matches ERP ledger export.",
-      fileSize: "1.4 MB",
+      notes: "Reviewer attested the evidence after checking ledger reconciliation support.",
+      fileSize: "1.40 MB",
       fileName: "Q2_Bank_Reconcile_ABC.pdf",
+      latestAttestation: {
+        id: "0xattesta48df21b0e9d9e48f88c8e14",
+        action: "EvidenceReviewed",
+        reviewer: "0xa482e185c74fb90172bf4215e982c7104b28d2",
+        note: "Reviewer attested the evidence after checking ledger reconciliation support.",
+        txDigest: "AttTxREVIEWA48D",
+        createdAt: "2026-06-05 15:02",
+      },
     },
     {
       id: "0x15fa9d832e185c74fb90172bf4215e982c7104b2",
@@ -82,30 +192,22 @@ export default function Home() {
       blobId: "walrus::blob-948f2191cf8e9d3d39fa10df8e76a1",
       assertions: ["Rights & Obligations", "Classification"],
       reviewer: "n/a",
-      notes: "Executed contract with Acme Corp for Cloud Services.",
-      fileSize: "2.8 MB",
+      notes: "Executed contract with Acme Corp for cloud services.",
+      fileSize: "2.80 MB",
       fileName: "Acme_Services_Agreement_Signed.pdf",
     },
   ]);
 
-  /* ---------- Register form ---------- */
   const [regFile, setRegFile] = useState<File | null>(null);
   const [regDocType, setRegDocType] = useState("Bank Statement");
   const [regSource, setRegSource] = useState("Company Upload (L2)");
   const [regDesc, setRegDesc] = useState("");
   const [regAssertions, setRegAssertions] = useState<string[]>(["Existence"]);
   const [isRegistering, setIsRegistering] = useState(false);
-  const [registerResult, setRegisterResult] = useState<{
-    objectId: string;
-    txDigest: string;
-    blobId: string;
-    commitment: string;
-  } | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registerResult, setRegisterResult] = useState<RegisterResult | null>(null);
 
-  /* ---------- Verify form ---------- */
-  const [verifyRecordId, setVerifyRecordId] = useState(
-    registry[0]?.id || ""
-  );
+  const [verifyRecordId, setVerifyRecordId] = useState(registry[0]?.id || "");
   const [verifyFile, setVerifyFile] = useState<File | null>(null);
   const [verifyTamperSim, setVerifyTamperSim] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -116,245 +218,314 @@ export default function Home() {
     expectedHash?: string;
   }>({ status: "idle", message: "" });
 
-  /* ---------- Attest form ---------- */
-  const [attestRecordId, setAttestRecordId] = useState(
-    registry[1]?.id || ""
-  );
+  const [attestRecordId, setAttestRecordId] = useState(registry[1]?.id || "");
   const [attestReviewer, setAttestReviewer] = useState(
-    "0xa482e185c74fb90172bf4215e982c7104b28d2"
+    "0xa482e185c74fb90172bf4215e982c7104b28d2",
   );
   const [attestNotes, setAttestNotes] = useState("");
-  const [attestType, setAttestType] = useState("EvidenceVerified (0)");
+  const [attestType, setAttestType] = useState("EvidenceReviewed");
   const [isAttesting, setIsAttesting] = useState(false);
   const [attestResult, setAttestResult] = useState<{
     attestationId: string;
     txDigest: string;
   } | null>(null);
 
-  /* ---------- Inline progress ---------- */
   const [operationProgress, setOperationProgress] = useState<{
     type: ViewId;
     steps: ProgressStep[];
   } | null>(null);
 
-  /* ================================================================
-     Handlers
-     ================================================================ */
-
   const handleToggleAssertion = (assertion: string) => {
     setRegAssertions((prev) =>
       prev.includes(assertion)
-        ? prev.filter((a) => a !== assertion)
-        : [...prev, assertion]
+        ? prev.filter((item) => item !== assertion)
+        : [...prev, assertion],
     );
+  };
+
+  const resetRegisterDraft = () => {
+    setRegFile(null);
+    setRegDocType("Bank Statement");
+    setRegSource("Company Upload (L2)");
+    setRegDesc("");
+    setRegAssertions(["Existence"]);
+    setRegisterError(null);
+    setRegisterResult(null);
+    setOperationProgress((prev) => (prev?.type === "register" ? null : prev));
   };
 
   const handleRegister = async () => {
     if (isRegistering) return;
+    if (!regFile) {
+      setRegisterError("Select a document before preparing the registration flow.");
+      return;
+    }
+    if (regAssertions.length === 0) {
+      setRegisterError("Select at least one ISA assertion for this evidence item.");
+      return;
+    }
+
     setIsRegistering(true);
+    setRegisterError(null);
     setRegisterResult(null);
 
-    const fName = regFile ? regFile.name : "unnamed_document.pdf";
-    const fSize = regFile
-      ? `${(regFile.size / (1024 * 1024)).toFixed(1)} MB`
-      : "1.2 MB";
+    const sourceLabel = toSourceLabel(regSource);
+    const metadata = {
+      fileName: regFile.name,
+      mediaType: regFile.type || "application/octet-stream",
+      documentType: regDocType,
+      description: regDesc || undefined,
+      claimedSource: sourceLabel,
+    };
 
     const steps: ProgressStep[] = [
       { label: "Computing SHA-256 hash", status: "pending" },
-      { label: "Encrypting with AES-256-GCM", status: "pending" },
-      { label: "Uploading encrypted blob to Walrus", status: "pending" },
-      { label: "Registering commitment on Sui via Tatum", status: "pending" },
+      { label: "Encrypting file and metadata", status: "pending" },
+      { label: "Preparing Walrus blob reference", status: "pending" },
+      { label: "Preparing Sui registration proof", status: "pending" },
     ];
 
-    steps[0].status = "running";
-    setOperationProgress({ type: "register", steps: [...steps] });
-    await delay(700);
-    const mockHash =
-      Math.random().toString(16).substring(2, 18) +
-      "4e82df4bc89f64e2a15998a12c15e882a0e98a12c15e882a0e98a12c15e882a0".substring(
-        16
-      );
-    steps[0] = {
-      ...steps[0],
-      status: "done",
-      detail: mockHash.substring(0, 16) + "…",
-    };
+    try {
+      steps[0].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      const commitment = await hashFile(regFile);
+      await delay(200);
+      steps[0] = {
+        ...steps[0],
+        status: "done",
+        detail: truncateValue(commitment),
+      };
 
-    steps[1].status = "running";
-    setOperationProgress({ type: "register", steps: [...steps] });
-    await delay(800);
-    steps[1] = { ...steps[1], status: "done" };
+      steps[1].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      const encryptionKey = await generateEncryptionKey();
+      const encryptedFile = await encryptFile(regFile, encryptionKey);
+      const encryptedMetadata = await encryptMetadata(metadata, encryptionKey);
+      await delay(200);
+      steps[1] = {
+        ...steps[1],
+        status: "done",
+        detail: `${formatMegabytes(encryptedFile.ciphertext.byteLength)} encrypted`,
+      };
 
-    steps[2].status = "running";
-    setOperationProgress({ type: "register", steps: [...steps] });
-    await delay(900);
-    const mockBlobId = `walrus::blob-${Math.random()
-      .toString(36)
-      .substring(2, 15)}${Math.random().toString(36).substring(2, 10)}`;
-    steps[2] = {
-      ...steps[2],
-      status: "done",
-      detail: mockBlobId.substring(0, 22) + "…",
-    };
+      steps[2].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      const blobSeed = await hashFile(encryptedFile.ciphertext);
+      const blobId = `walrus::blob-${blobSeed.substring(0, 28)}`;
+      await delay(150);
+      steps[2] = {
+        ...steps[2],
+        status: "done",
+        detail: truncateValue(blobId, 22),
+      };
 
-    steps[3].status = "running";
-    setOperationProgress({ type: "register", steps: [...steps] });
-    await delay(1000);
-    const mockTxDigest =
-      "SuiTx" + Math.random().toString(36).substring(2, 12).toUpperCase();
-    const mockObjectId =
-      "0x" +
-      Math.random().toString(16).substring(2, 18) +
-      Math.random().toString(16).substring(2, 24);
-    steps[3] = { ...steps[3], status: "done", detail: mockTxDigest };
-    setOperationProgress({ type: "register", steps: [...steps] });
+      steps[3].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      const txDigest = toMockDigest(commitment);
+      const objectId = toMockObjectId(blobSeed);
+      await delay(150);
+      steps[3] = {
+        ...steps[3],
+        status: "done",
+        detail: txDigest,
+      };
+      setOperationProgress({ type: "register", steps: [...steps] });
 
-    const newRecord: EvidenceRecord = {
-      id: mockObjectId,
-      date: new Date().toISOString().replace("T", " ").substring(0, 16),
-      type: regDocType,
-      source: regSource,
-      commitment: mockHash,
-      status: "Registered",
-      blobId: mockBlobId,
-      assertions: regAssertions,
-      reviewer: "n/a",
-      notes: regDesc || "No description provided.",
-      fileName: fName,
-      fileSize: fSize,
-    };
-    setRegistry((prev) => [newRecord, ...prev]);
+      const registeredAt = new Date().toISOString().replace("T", " ").substring(0, 16);
+      const newRecord: EvidenceRecord = {
+        id: objectId,
+        date: registeredAt,
+        type: regDocType,
+        source: sourceLabel,
+        commitment,
+        status: "Registered",
+        blobId,
+        assertions: regAssertions,
+        reviewer: "n/a",
+        notes: regDesc || "No description provided.",
+        fileName: regFile.name,
+        fileSize: formatMegabytes(regFile.size),
+      };
 
-    setRegisterResult({
-      objectId: mockObjectId,
-      txDigest: mockTxDigest,
-      blobId: mockBlobId,
-      commitment: mockHash,
-    });
-    setIsRegistering(false);
+      setRegistry((prev) => [
+        newRecord,
+        ...prev,
+      ]);
+      setVerifyRecordId(objectId);
+      setAttestRecordId(objectId);
+
+      setRegisterResult({
+        objectId,
+        txDigest,
+        blobId,
+        commitment,
+        encryptedFileSize: formatMegabytes(encryptedFile.ciphertext.byteLength),
+        encryptedMetadataSize: `${encryptedMetadata.ciphertext.byteLength} B`,
+        sourceConfidence: "L2 - Company Upload",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Registration flow failed while preparing local proof artifacts.";
+      setRegisterError(message);
+      setOperationProgress(null);
+    } finally {
+      setIsRegistering(false);
+    }
   };
 
   const handleVerify = async () => {
-    if (!verifyRecordId) return;
+    if (!verifyRecordId || isVerifying) return;
+
     setIsVerifying(true);
     setVerificationResult({ status: "idle", message: "" });
 
-    const record = registry.find((r) => r.id === verifyRecordId);
+    const record = registry.find((item) => item.id === verifyRecordId);
     if (!record) {
       setIsVerifying(false);
       return;
     }
 
     const steps: ProgressStep[] = [
-      { label: "Fetching EvidenceRecord from Sui", status: "pending" },
-      { label: "Downloading encrypted blob from Walrus", status: "pending" },
-      { label: "Decrypting and computing SHA-256 hash", status: "pending" },
+      { label: "Fetching recorded commitment", status: "pending" },
+      { label: "Preparing verification file", status: "pending" },
+      { label: "Computing comparison hash", status: "pending" },
     ];
 
     steps[0].status = "running";
     setOperationProgress({ type: "verify", steps: [...steps] });
-    await delay(600);
+    await delay(250);
     steps[0] = {
       ...steps[0],
       status: "done",
-      detail: record.id.substring(0, 14) + "…",
+      detail: truncateValue(record.id, 14),
     };
 
     steps[1].status = "running";
     setOperationProgress({ type: "verify", steps: [...steps] });
-    await delay(700);
-    steps[1] = { ...steps[1], status: "done", detail: record.fileSize };
+    await delay(250);
+    steps[1] = {
+      ...steps[1],
+      status: "done",
+      detail: verifyFile ? verifyFile.name : record.fileName || "Shell sample",
+    };
 
     steps[2].status = "running";
     setOperationProgress({ type: "verify", steps: [...steps] });
-    await delay(800);
 
+    let computedHash = record.commitment;
+
+    if (verifyFile) {
+      computedHash = await hashFile(verifyFile);
+    }
     if (verifyTamperSim) {
-      const computedHash =
-        "f2a8d9e2b10a9c8f" + record.commitment.substring(16);
-      steps[2] = { ...steps[2], status: "error", detail: "Mismatch" };
-      setOperationProgress({ type: "verify", steps: [...steps] });
-      setVerificationResult({
-        status: "tampered",
-        message:
-          "Document hash does not match the blockchain commitment. The file has been modified since registration.",
-        computedHash,
-        expectedHash: record.commitment,
-      });
-    } else {
-      steps[2] = { ...steps[2], status: "done", detail: "Match confirmed" };
+      computedHash = `f2a8d9e2b10a9c8f${record.commitment.substring(16)}`;
+    }
+
+    await delay(250);
+
+    if (computedHash === record.commitment) {
+      steps[2] = {
+        ...steps[2],
+        status: "done",
+        detail: "Hash matches",
+      };
       setOperationProgress({ type: "verify", steps: [...steps] });
       setVerificationResult({
         status: "success",
         message:
-          "Document hash matches the on-chain commitment exactly. The file is authentic and unchanged.",
-        computedHash: record.commitment,
+          "Hash matches the recorded commitment. The supplied file is consistent with the evidence record.",
+        computedHash,
+        expectedHash: record.commitment,
+      });
+    } else {
+      steps[2] = {
+        ...steps[2],
+        status: "error",
+        detail: "Tamper detected",
+      };
+      setOperationProgress({ type: "verify", steps: [...steps] });
+      setVerificationResult({
+        status: "tampered",
+        message:
+          "Tamper detected. The supplied file does not match the recorded commitment for this evidence item.",
+        computedHash,
         expectedHash: record.commitment,
       });
     }
+
     setIsVerifying(false);
   };
 
   const handleAttest = async () => {
-    if (!attestRecordId) return;
+    if (!attestRecordId || isAttesting) return;
+
     setIsAttesting(true);
     setAttestResult(null);
 
-    const record = registry.find((r) => r.id === attestRecordId);
-    if (!record) {
-      setIsAttesting(false);
-      return;
-    }
-
     const steps: ProgressStep[] = [
-      { label: "Preparing attestation parameters", status: "pending" },
-      { label: "Executing PTB on Sui via Tatum", status: "pending" },
+      { label: "Preparing reviewer statement", status: "pending" },
+      { label: "Preparing attestation proof", status: "pending" },
     ];
 
     steps[0].status = "running";
     setOperationProgress({ type: "attest", steps: [...steps] });
-    await delay(800);
-    steps[0] = { ...steps[0], status: "done" };
+    await delay(300);
+    steps[0] = {
+      ...steps[0],
+      status: "done",
+      detail: attestType,
+    };
 
     steps[1].status = "running";
     setOperationProgress({ type: "attest", steps: [...steps] });
-    await delay(600);
-    const mockTxDigest =
-      "AttTx" + Math.random().toString(36).substring(2, 12).toUpperCase();
-    const mockAttId =
-      "0x" + Math.random().toString(16).substring(2, 22) + "attest";
-    steps[1] = { ...steps[1], status: "done", detail: mockTxDigest };
+    await delay(300);
+
+    const attestationId = `0x${Math.random().toString(16).substring(2, 24)}attest`;
+    const txDigest = `AttTx${Math.random().toString(36).substring(2, 12).toUpperCase()}`;
+    const createdAt = new Date().toISOString().replace("T", " ").substring(0, 16);
+
+    steps[1] = {
+      ...steps[1],
+      status: "done",
+      detail: txDigest,
+    };
     setOperationProgress({ type: "attest", steps: [...steps] });
 
     setRegistry((prev) =>
-      prev.map((r) =>
-        r.id === attestRecordId
+      prev.map((record) =>
+        record.id === attestRecordId
           ? {
-              ...r,
-              status: "Attested" as const,
+              ...record,
               reviewer: attestReviewer,
               notes: attestNotes || "Attested via Linow Workspace.",
+              latestAttestation: {
+                id: toMockAttestationId(attestationId),
+                action: attestType,
+                reviewer: attestReviewer,
+                note: attestNotes || "Attested via Linow Workspace.",
+                txDigest,
+                createdAt,
+              },
             }
-          : r
-      )
+          : record,
+      ),
     );
 
-    setAttestResult({ attestationId: mockAttId, txDigest: mockTxDigest });
+    setAttestResult({ attestationId, txDigest });
     setIsAttesting(false);
   };
 
-  /* ================================================================
-     Render helpers
-     ================================================================ */
-
   const renderSteps = (viewType: ViewId) => {
     if (!operationProgress || operationProgress.type !== viewType) return null;
+
     return (
       <div className="progress-card">
         <div className="progress-title">Operation Progress</div>
         <div className="progress-steps">
-          {operationProgress.steps.map((step, i) => (
-            <div key={i} className="step">
+          {operationProgress.steps.map((step, index) => (
+            <div key={`${step.label}-${index}`} className="step">
               <div className={`step-icon ${step.status}`}>
                 {step.status === "done" && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -382,78 +553,10 @@ export default function Home() {
     );
   };
 
-  /* ================================================================
-     View configs
-     ================================================================ */
-
-  const views: {
-    id: ViewId;
-    label: string;
-    eyebrow: string;
-    title: string;
-    desc: string;
-    icon: React.ReactNode;
-  }[] = [
-    {
-      id: "register",
-      label: "Upload Evidence",
-      eyebrow: "Company Portal",
-      title: "Register Audit Evidence",
-      desc: "Upload a document to hash, encrypt, store on Walrus, and register a tamper-proof commitment on Sui.",
-      icon: (
-        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-        </svg>
-      ),
-    },
-    {
-      id: "verify",
-      label: "Verify Evidence",
-      eyebrow: "Verification Engine",
-      title: "Verify Evidence & Detect Tampering",
-      desc: "Compare a file against its Sui blockchain commitment. Detects any modification since registration.",
-      icon: (
-        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-        </svg>
-      ),
-    },
-    {
-      id: "attest",
-      label: "Create Attestation",
-      eyebrow: "Auditor Workspace",
-      title: "Review & Attest Evidence",
-      desc: "Independent reviewers attest to evidence by issuing a signed Attestation object on Sui.",
-      icon: (
-        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-        </svg>
-      ),
-    },
-    {
-      id: "records",
-      label: "Evidence Records",
-      eyebrow: "Registry",
-      title: "Evidence Registry",
-      desc: "All registered evidence records from this session.",
-      icon: (
-        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-        </svg>
-      ),
-    },
-  ];
-
-  const currentView = views.find((v) => v.id === activeView)!;
-
-  /* ================================================================
-     JSX
-     ================================================================ */
+  const currentView = VIEWS.find((view) => view.id === activeView) ?? VIEWS[0];
 
   return (
     <main className="app-container">
-      {/* ==================== TOP BAR ==================== */}
       <header className="topbar">
         <div className="topbar-left">
           <svg className="topbar-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -465,7 +568,7 @@ export default function Home() {
         <div className="topbar-right">
           <div className="topbar-status">
             <span className="status-dot" />
-            <span>Sui Testnet Connected</span>
+            <span>Sui Proof Path Pending Live Integration</span>
           </div>
           <div className="topbar-divider" />
           <div className="topbar-encryption">
@@ -478,41 +581,38 @@ export default function Home() {
         </div>
       </header>
 
-      {/* ==================== BODY ==================== */}
       <div className="app-body">
-        {/* ---------- Sidebar ---------- */}
         <aside className="sidebar">
           <div className="sidebar-section">
             <div className="sidebar-section-label">Evidence Flows</div>
             <nav className="sidebar-nav">
-              {views.map((v) => (
+              {VIEWS.map((view) => (
                 <div
-                  key={v.id}
-                  className={`nav-item${activeView === v.id ? " active" : ""}`}
-                  onClick={() => setActiveView(v.id)}
+                  key={view.id}
+                  className={`nav-item${activeView === view.id ? " active" : ""}`}
+                  onClick={() => setActiveView(view.id)}
                 >
-                  {v.icon}
-                  <span>{v.label}</span>
-                  {v.id === "records" && (
-                    <span className="nav-count">{registry.length}</span>
-                  )}
+                  {view.icon}
+                  <span>{view.label}</span>
+                  {view.id === "records" && <span className="nav-count">{registry.length}</span>}
                 </div>
               ))}
             </nav>
           </div>
 
           <div className="sidebar-footer">
-            <div className="guardrails-title">Guardrails</div>
-            <ul className="guardrails-list">
-              <li>Commitments are SHA-256 hashes of plaintext</li>
-              <li>Sui stores commitments, not raw evidence</li>
-              <li>Walrus blobs are encrypted client-side</li>
-              <li>Verification requires independent attester wallet</li>
-            </ul>
+            <div className="guardrails-block">
+              <div className="guardrails-title">Guardrails</div>
+              <ul className="guardrails-list">
+                <li>Commitments come from SHA-256 of the plaintext file.</li>
+                <li>Sui stores commitments and attestations, not raw evidence.</li>
+                <li>Walrus blobs must stay encrypted before storage.</li>
+                <li>Shell outputs are product placeholders until live integration lands.</li>
+              </ul>
+            </div>
           </div>
         </aside>
 
-        {/* ---------- Workspace ---------- */}
         <section className="workspace">
           <div className="workspace-header">
             <div className="workspace-eyebrow">{currentView.eyebrow}</div>
@@ -521,12 +621,11 @@ export default function Home() {
           </div>
 
           <div className="workspace-content">
-            {/* ============ REGISTER VIEW ============ */}
             {activeView === "register" && (
               <>
                 <div className="card">
+                  <div className="card-section-title">Prepare Evidence Registration</div>
                   <div className="form-grid">
-                    {/* File upload */}
                     <div className="field">
                       <label className="field-label">Select File</label>
                       <div className={`file-upload${regFile ? " has-file" : ""}`}>
@@ -546,20 +645,22 @@ export default function Home() {
                         <input
                           type="file"
                           className="file-upload-input"
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) setRegFile(e.target.files[0]);
+                          onChange={(event) => {
+                            if (event.target.files?.[0]) {
+                              setRegFile(event.target.files[0]);
+                              setRegisterError(null);
+                            }
                           }}
                         />
                       </div>
                     </div>
 
-                    {/* Doc type + source */}
                     <div className="field">
                       <label className="field-label">Document Type</label>
                       <select
                         className="field-select"
                         value={regDocType}
-                        onChange={(e) => setRegDocType(e.target.value)}
+                        onChange={(event) => setRegDocType(event.target.value)}
                       >
                         <option>Bank Statement</option>
                         <option>Vendor Contract</option>
@@ -575,34 +676,32 @@ export default function Home() {
                         type="text"
                         className="field-input"
                         value={regSource}
-                        onChange={(e) => setRegSource(e.target.value)}
-                        placeholder="e.g. Acme Corp Bank ERP"
+                        onChange={(event) => setRegSource(event.target.value)}
+                        placeholder="e.g. Company Upload (L2)"
                       />
                     </div>
 
-                    {/* Description — full width */}
                     <div className="field form-full">
                       <label className="field-label">Description / Audit Objective</label>
                       <textarea
                         className="field-textarea"
                         rows={2}
                         value={regDesc}
-                        onChange={(e) => setRegDesc(e.target.value)}
-                        placeholder="e.g. Verification of Q2 bank reconciliation to satisfy bank existence audit."
+                        onChange={(event) => setRegDesc(event.target.value)}
+                        placeholder="e.g. Verification of Q2 bank reconciliation to support existence and accuracy."
                       />
                     </div>
 
-                    {/* ISA Assertions — full width */}
                     <div className="field form-full">
                       <label className="field-label">ISA Assertions Covered</label>
                       <div className="assertions-grid">
-                        {ISA_ASSERTIONS.map((a) => (
+                        {ISA_ASSERTIONS.map((assertion) => (
                           <div
-                            key={a}
-                            className={`assertion-chip${regAssertions.includes(a) ? " selected" : ""}`}
-                            onClick={() => handleToggleAssertion(a)}
+                            key={assertion}
+                            className={`assertion-chip${regAssertions.includes(assertion) ? " selected" : ""}`}
+                            onClick={() => handleToggleAssertion(assertion)}
                           >
-                            {a}
+                            {assertion}
                           </div>
                         ))}
                       </div>
@@ -612,52 +711,53 @@ export default function Home() {
                   <div className="btn-actions">
                     <button
                       className="btn-primary"
-                      disabled={isRegistering}
+                      disabled={isRegistering || !regFile || regAssertions.length === 0}
                       onClick={handleRegister}
                     >
                       {isRegistering ? (
                         <>
                           <span className="spinner" />
-                          <span>Registering…</span>
+                          <span>Preparing Proof...</span>
                         </>
                       ) : (
                         "Upload & Register Evidence"
                       )}
                     </button>
-                    <button
-                      className="btn-secondary"
-                      onClick={() => {
-                        setRegFile(null);
-                        setRegDesc("");
-                        setRegAssertions(["Existence"]);
-                        setRegisterResult(null);
-                        setOperationProgress(null);
-                      }}
-                    >
+                    <button className="btn-secondary" onClick={resetRegisterDraft}>
                       Clear
                     </button>
                   </div>
                 </div>
 
-                {/* Progress steps */}
+                {registerError && (
+                  <div className="result-card error">
+                    <div className="result-header">
+                      <svg className="result-icon error" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="result-title error">Registration Blocked</span>
+                    </div>
+                    <p className="result-message">{registerError}</p>
+                  </div>
+                )}
+
                 {renderSteps("register")}
 
-                {/* Result card */}
                 {registerResult && (
                   <div className="result-card success">
                     <div className="result-header">
                       <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <span className="result-title success">Evidence Registered</span>
+                      <span className="result-title success">Registration Flow Prepared</span>
                     </div>
                     <p className="result-message">
-                      Document has been hashed, encrypted, stored on Walrus, and registered on Sui blockchain.
+                      Local hashing and encryption completed. Mock Walrus and Sui references were generated for the shell while live integration is still pending.
                     </p>
                     <div className="proof-grid">
                       <div className="proof-row">
                         <span className="proof-label">Evidence ID</span>
-                        <span className="proof-value">{registerResult.objectId.substring(0, 28)}…</span>
+                        <span className="proof-value">{truncateValue(registerResult.objectId, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Tx Digest</span>
@@ -665,11 +765,23 @@ export default function Home() {
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Walrus Blob</span>
-                        <span className="proof-value">{registerResult.blobId.substring(0, 28)}…</span>
+                        <span className="proof-value">{truncateValue(registerResult.blobId, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Commitment</span>
-                        <span className="proof-value">{registerResult.commitment.substring(0, 28)}…</span>
+                        <span className="proof-value">{truncateValue(registerResult.commitment, 28)}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Encrypted File</span>
+                        <span className="proof-value">{registerResult.encryptedFileSize}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Encrypted Metadata</span>
+                        <span className="proof-value">{registerResult.encryptedMetadataSize}</span>
+                      </div>
+                      <div className="proof-row">
+                        <span className="proof-label">Source Confidence</span>
+                        <span className="proof-value">{registerResult.sourceConfidence}</span>
                       </div>
                     </div>
                   </div>
@@ -677,22 +789,22 @@ export default function Home() {
               </>
             )}
 
-            {/* ============ VERIFY VIEW ============ */}
             {activeView === "verify" && (
               <>
                 <div className="card">
+                  <div className="card-section-title">Verify Evidence Integrity</div>
                   <div className="form-grid">
                     <div className="field">
                       <label className="field-label">Select Evidence Record</label>
                       <select
                         className="field-select"
                         value={verifyRecordId}
-                        onChange={(e) => setVerifyRecordId(e.target.value)}
+                        onChange={(event) => setVerifyRecordId(event.target.value)}
                       >
                         <option value="">-- Choose registered record --</option>
-                        {registry.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.type} — {r.id.substring(0, 10)}… ({r.date})
+                        {registry.map((record) => (
+                          <option key={record.id} value={record.id}>
+                            {record.type} - {truncateValue(record.id, 10)} ({record.date})
                           </option>
                         ))}
                       </select>
@@ -706,36 +818,37 @@ export default function Home() {
                         </svg>
                         <div className="file-upload-text">
                           <div className="file-upload-name">
-                            {verifyFile ? verifyFile.name : "Click to load test file"}
+                            {verifyFile ? verifyFile.name : "Click to load comparison file"}
                           </div>
                           <div className="file-upload-hint">
                             {verifyFile
                               ? `${(verifyFile.size / 1024).toFixed(1)} KB`
-                              : "Load file to verify against chain"}
+                              : "Optional for shell verification"}
                           </div>
                         </div>
                         <input
                           type="file"
                           className="file-upload-input"
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) setVerifyFile(e.target.files[0]);
+                          onChange={(event) => {
+                            if (event.target.files?.[0]) {
+                              setVerifyFile(event.target.files[0]);
+                            }
                           }}
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* Tamper toggle */}
                   <div className={`tamper-toggle${verifyTamperSim ? " active" : ""}`}>
                     <div className="tamper-info">
                       <div className="tamper-title">Simulate File Tampering</div>
                       <div className="tamper-desc">
-                        Modify a byte before verification to trigger a hash mismatch.
+                        Force a mismatch to preview the tamper-detection state.
                       </div>
                     </div>
                     <button
                       className={`tamper-btn${verifyTamperSim ? " active" : ""}`}
-                      onClick={() => setVerifyTamperSim(!verifyTamperSim)}
+                      onClick={() => setVerifyTamperSim((prev) => !prev)}
                     >
                       {verifyTamperSim ? "Tampering Active" : "Simulate Tamper"}
                     </button>
@@ -750,7 +863,7 @@ export default function Home() {
                       {isVerifying ? (
                         <>
                           <span className="spinner" />
-                          <span>Verifying…</span>
+                          <span>Verifying...</span>
                         </>
                       ) : (
                         "Run Verification"
@@ -759,16 +872,10 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Progress steps */}
                 {renderSteps("verify")}
 
-                {/* Verification result */}
                 {verificationResult.status !== "idle" && (
-                  <div
-                    className={`result-card ${
-                      verificationResult.status === "success" ? "success" : "error"
-                    }`}
-                  >
+                  <div className={`result-card ${verificationResult.status === "success" ? "success" : "error"}`}>
                     <div className="result-header">
                       {verificationResult.status === "success" ? (
                         <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -779,32 +886,20 @@ export default function Home() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
                       )}
-                      <span
-                        className={`result-title ${
-                          verificationResult.status === "success" ? "success" : "error"
-                        }`}
-                      >
-                        {verificationResult.status === "success"
-                          ? "Integrity Verified"
-                          : "Tamper Detected"}
+                      <span className={`result-title ${verificationResult.status === "success" ? "success" : "error"}`}>
+                        {verificationResult.status === "success" ? "Hash Matches" : "Tamper Detected"}
                       </span>
                     </div>
                     <p className="result-message">{verificationResult.message}</p>
                     <div className="proof-grid">
                       <div className="proof-row">
-                        <span className="proof-label">On-Chain Commitment</span>
-                        <span className="proof-value">
-                          {verificationResult.expectedHash?.substring(0, 28)}…
-                        </span>
+                        <span className="proof-label">Recorded Commitment</span>
+                        <span className="proof-value">{truncateValue(verificationResult.expectedHash || "", 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Computed Hash</span>
-                        <span
-                          className={`proof-value ${
-                            verificationResult.status === "success" ? "success" : "error"
-                          }`}
-                        >
-                          {verificationResult.computedHash?.substring(0, 28)}…
+                        <span className={`proof-value ${verificationResult.status === "success" ? "success" : "error"}`}>
+                          {truncateValue(verificationResult.computedHash || "", 28)}
                         </span>
                       </div>
                     </div>
@@ -813,22 +908,22 @@ export default function Home() {
               </>
             )}
 
-            {/* ============ ATTEST VIEW ============ */}
             {activeView === "attest" && (
               <>
                 <div className="card">
+                  <div className="card-section-title">Prepare Reviewer Attestation</div>
                   <div className="form-grid">
                     <div className="field">
                       <label className="field-label">Target Evidence Record</label>
                       <select
                         className="field-select"
                         value={attestRecordId}
-                        onChange={(e) => setAttestRecordId(e.target.value)}
+                        onChange={(event) => setAttestRecordId(event.target.value)}
                       >
                         <option value="">-- Choose record to attest --</option>
-                        {registry.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.type} — {r.id.substring(0, 10)}… ({r.status})
+                        {registry.map((record) => (
+                          <option key={record.id} value={record.id}>
+                            {record.type} - {truncateValue(record.id, 10)} ({record.latestAttestation ? "Attestation on file" : record.status})
                           </option>
                         ))}
                       </select>
@@ -840,27 +935,21 @@ export default function Home() {
                         type="text"
                         className="field-input mono"
                         value={attestReviewer}
-                        onChange={(e) => setAttestReviewer(e.target.value)}
-                        placeholder="0x…"
+                        onChange={(event) => setAttestReviewer(event.target.value)}
+                        placeholder="0x..."
                       />
                     </div>
 
                     <div className="field">
-                      <label className="field-label">Attestation Type</label>
+                      <label className="field-label">Attestation Action</label>
                       <select
                         className="field-select"
                         value={attestType}
-                        onChange={(e) => setAttestType(e.target.value)}
+                        onChange={(event) => setAttestType(event.target.value)}
                       >
-                        <option value="EvidenceVerified (0)">
-                          EvidenceVerified (0) — Verification complete
-                        </option>
-                        <option value="HashConfirmed (2)">
-                          HashConfirmed (2) — Integrity match only
-                        </option>
-                        <option value="Rejected (3)">
-                          Rejected (3) — Audit issue flagged
-                        </option>
+                        <option value="EvidenceReviewed">Evidence reviewed</option>
+                        <option value="HashConfirmed">Hash confirmed</option>
+                        <option value="IssueFlagged">Issue flagged</option>
                       </select>
                     </div>
 
@@ -870,12 +959,7 @@ export default function Home() {
                         type="text"
                         className="field-input"
                         disabled
-                        value={
-                          registry.find((r) => r.id === attestRecordId)?.source ===
-                          "Company Upload (L2)"
-                            ? "L3 — Reviewer Wallet Attested"
-                            : "L0 — Integrity Proof"
-                        }
+                        value="L3 - Reviewer Wallet Attested"
                       />
                     </div>
 
@@ -885,8 +969,8 @@ export default function Home() {
                         className="field-textarea"
                         rows={3}
                         value={attestNotes}
-                        onChange={(e) => setAttestNotes(e.target.value)}
-                        placeholder="e.g. Checked bank ledger reconciliation against client records. Balance matches with zero variance."
+                        onChange={(event) => setAttestNotes(event.target.value)}
+                        placeholder="Optional reviewer note or scope limitation."
                       />
                     </div>
                   </div>
@@ -900,36 +984,32 @@ export default function Home() {
                       {isAttesting ? (
                         <>
                           <span className="spinner" />
-                          <span>Executing…</span>
+                          <span>Preparing...</span>
                         </>
                       ) : (
-                        "Sign & Record Attestation"
+                        "Review and Sign"
                       )}
                     </button>
                   </div>
                 </div>
 
-                {/* Progress steps */}
                 {renderSteps("attest")}
 
-                {/* Attest result */}
                 {attestResult && (
                   <div className="result-card success">
                     <div className="result-header">
                       <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <span className="result-title success">Attestation Recorded</span>
+                      <span className="result-title success">Attestation Prepared</span>
                     </div>
                     <p className="result-message">
-                      Reviewer attestation has been signed and registered on Sui blockchain.
+                      Reviewer action captured in the shell and ready to map to a live attestation object later.
                     </p>
                     <div className="proof-grid">
                       <div className="proof-row">
                         <span className="proof-label">Attestation ID</span>
-                        <span className="proof-value">
-                          {attestResult.attestationId.substring(0, 28)}…
-                        </span>
+                        <span className="proof-value">{truncateValue(attestResult.attestationId, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Tx Digest</span>
@@ -941,14 +1021,11 @@ export default function Home() {
               </>
             )}
 
-            {/* ============ RECORDS VIEW ============ */}
             {activeView === "records" && (
               <>
                 <div className="table-header-row">
                   <span />
-                  <span className="record-count-badge">
-                    {registry.length} Records
-                  </span>
+                  <span className="record-count-badge">{registry.length} Records</span>
                 </div>
 
                 <div className="table-wrapper">
@@ -958,88 +1035,70 @@ export default function Home() {
                         <th>Record ID / Date</th>
                         <th>Type</th>
                         <th>Assertions</th>
-                        <th>Status</th>
+                        <th>Lifecycle</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {registry.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="empty-state">
-                            No evidence registered yet. Go to Upload Evidence to start.
+                      {registry.map((record) => (
+                        <tr key={record.id}>
+                          <td>
+                            <div className="record-id">{truncateValue(record.id, 16)}</div>
+                            <div className="record-meta">{record.date}</div>
+                          </td>
+                          <td>
+                            <span>{record.type}</span>
+                            <div className="record-meta">{record.fileName || "file_upload"}</div>
+                          </td>
+                          <td>
+                            <div className="assertion-tags">
+                              {record.assertions.map((assertion) => (
+                                <span key={assertion} className="assertion-tag">
+                                  {assertion}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td>
+                            <span
+                              className={`badge ${record.status === "Superseded" ? "review" : "registered"}`}
+                            >
+                              {record.status}
+                            </span>
+                            {record.latestAttestation && (
+                              <div className="record-meta">
+                                Attested by {truncateValue(record.latestAttestation.reviewer, 14)}
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            <div className="table-actions">
+                              <button
+                                className="table-action"
+                                onClick={() => {
+                                  setVerifyRecordId(record.id);
+                                  setVerificationResult({ status: "idle", message: "" });
+                                  setOperationProgress(null);
+                                  setActiveView("verify");
+                                }}
+                              >
+                                Verify
+                              </button>
+                              <button
+                                className="table-action warn"
+                                onClick={() => {
+                                  setAttestRecordId(record.id);
+                                  setAttestResult(null);
+                                  setOperationProgress(null);
+                                  setActiveView("attest");
+                                }}
+                              >
+                                {record.latestAttestation ? "Re-attest" : "Attest"}
+                              </button>
+                            </div>
                           </td>
                         </tr>
-                      ) : (
-                        registry.map((record) => (
-                          <tr key={record.id}>
-                            <td>
-                              <div className="record-id">
-                                {record.id.substring(0, 16)}…
-                              </div>
-                              <div className="record-meta">{record.date}</div>
-                            </td>
-                            <td>
-                              <span>{record.type}</span>
-                              <div className="record-meta">
-                                {record.fileName || "file_upload"}
-                              </div>
-                            </td>
-                            <td>
-                              <div className="assertion-tags">
-                                {record.assertions.map((a) => (
-                                  <span key={a} className="assertion-tag">
-                                    {a}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-                            <td>
-                              <span
-                                className={`badge ${
-                                  record.status === "Attested"
-                                    ? "attested"
-                                    : record.status === "UnderReview"
-                                    ? "review"
-                                    : "registered"
-                                }`}
-                              >
-                                {record.status}
-                              </span>
-                            </td>
-                            <td>
-                              <div className="table-actions">
-                                <button
-                                  className="table-action"
-                                  onClick={() => {
-                                    setVerifyRecordId(record.id);
-                                    setVerificationResult({
-                                      status: "idle",
-                                      message: "",
-                                    });
-                                    setOperationProgress(null);
-                                    setActiveView("verify");
-                                  }}
-                                >
-                                  Verify
-                                </button>
-                                {record.status !== "Attested" && (
-                                  <button
-                                    className="table-action warn"
-                                    onClick={() => {
-                                      setAttestRecordId(record.id);
-                                      setAttestResult(null);
-                                      setOperationProgress(null);
-                                      setActiveView("attest");
-                                    }}
-                                  >
-                                    Attest
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      )}
+                      ))}
                     </tbody>
                   </table>
                 </div>

@@ -1,4 +1,4 @@
-export { createLinowClient } from "./client";
+export { createLinowClient } from "./client.js";
 export {
   decryptFile,
   decryptJson,
@@ -10,15 +10,15 @@ export {
   generateEncryptionKey,
   hashFile,
   importEncryptionKey,
-} from "./crypto";
-export type { EncryptedPayload } from "./crypto";
-export type { LinowClient, LinowClientHandlers } from "./client";
+} from "./crypto.js";
+export type { EncryptedPayload } from "./crypto.js";
+export type { LinowClient, LinowClientHandlers } from "./client.js";
 export {
   ASSERTION_IDS,
   EVIDENCE_STATUS_VALUES,
   RETENTION_STATUS_VALUES,
   SOURCE_CONFIDENCE_LEVELS,
-} from "./types";
+} from "./types.js";
 export type {
   AssertionId,
   AttestationId,
@@ -46,4 +46,4 @@ export type {
   VerificationResult,
   VerifyEvidenceInput,
   WalletAddress,
-} from "./types";
+} from "./types.js";

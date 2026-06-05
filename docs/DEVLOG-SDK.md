@@ -58,3 +58,53 @@
 - Follow-up needed:
   - Add commitment helpers for the post-hackathon salted model once the product path needs it.
   - Wire these utilities into `register` and `verify` flows after the UI shell and Walrus integration are ready.
+
+## 2026-06-06 - Emit SDK Package Build
+
+### Change
+- Files touched:
+  - `sdk/package.json`
+  - `sdk/tsconfig.json`
+  - `sdk/dist/*`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Switched the SDK from declaration-only output to a real JavaScript package build.
+  - Exported the public API from `dist/` so the app can consume the SDK as a normal local package instead of importing source files directly.
+
+### Reasoning
+- Why this approach was chosen:
+  - The app client bundle could not reliably consume raw SDK source from outside the app project on Windows with Next 16.
+  - Emitting a real package build keeps a single source of truth for the shared crypto helpers and client boundary.
+  - The built package is easier for the app bundler to resolve than a cross-project source import.
+
+### Tech Debt
+- Known shortcuts:
+  - `dist/` is generated locally and should stay untracked.
+- Follow-up needed:
+  - Keep the SDK build step in the app workflow so the package stays fresh during development.
+
+## 2026-06-06 - Fix SDK ESM Package Resolution
+
+### Change
+- Files touched:
+  - `.gitignore`
+  - `sdk/package.json`
+  - `sdk/package-lock.json`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added TypeScript as an SDK dev dependency so the SDK build script works from any workspace context.
+  - Updated SDK root exports to use `.js` specifiers so the emitted ESM package resolves correctly through Node and Next.
+  - Added ignore rules for generated `node_modules`, `dist`, and Next build output.
+
+### Reasoning
+- Why this approach was chosen:
+  - The app could import `@linow/sdk` only after the built SDK root file stopped emitting extensionless ESM imports.
+  - Making the SDK build self-contained avoids relying on another package's local `tsc` binary.
+  - Ignoring generated output keeps the branch focused on source and package metadata.
+
+### Tech Debt
+- Known shortcuts:
+  - The app currently uses webpack for local package resolution because Turbopack was not resolving the linked SDK cleanly on Windows.
+- Follow-up needed:
+  - Revisit Turbopack after the repo has a fuller workspace setup or once Next's linked-package behavior is more predictable.
