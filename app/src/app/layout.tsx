@@ -17,6 +17,10 @@ export const metadata: Metadata = {
   title: "Linow Evidence Workspace",
   description:
     "Verifiable audit evidence on Sui — upload, verify, and attest documents with tamper-proof blockchain commitments.",
+  icons: {
+    icon: "/mascot.png",
+    apple: "/mascot.png",
+  },
 };
 
 export default function RootLayout({

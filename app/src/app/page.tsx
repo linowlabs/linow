@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import {
   createAttestationFlow,
   createRegisterEvidenceFlow,
@@ -244,56 +245,11 @@ const serverTatumRead = {
   },
 };
 
-function createTamperedBlob(file: File): Blob {
-  return new Blob([file, new Uint8Array([0])], {
-    type: file.type || "application/octet-stream",
-  });
-}
-
 export default function Home() {
   const wallet = useWalletBridge();
   const [activeView, setActiveView] = useState<ViewId>("register");
 
-  const [registry, setRegistry] = useState<EvidenceRecord[]>([
-    {
-      id: "0x8df025a1768c34fde90184b2c15ea7728a01bf9e",
-      date: "2026-06-05 14:15",
-      type: "Bank Statement",
-      source: "Company Upload (L2)",
-      commitment:
-        "4e82df4bc89f64e2a15998a12c15e882a0e98a12c15e882a0e98a12c15e882a0",
-      status: "Registered",
-      blobId: "walrus::blob-a48df21b0e9d9e48f88c8e142e01df",
-      assertions: ["Existence", "Completeness", "Accuracy"],
-      reviewer: "0xa482e185c74fb90172bf4215e982c7104b28d2",
-      notes: "Reviewer attested the evidence after checking ledger reconciliation support.",
-      fileSize: "1.40 MB",
-      fileName: "Q2_Bank_Reconcile_ABC.pdf",
-      latestAttestation: {
-        id: "0xattesta48df21b0e9d9e48f88c8e14",
-        action: "EvidenceReviewed",
-        reviewer: "0xa482e185c74fb90172bf4215e982c7104b28d2",
-        note: "Reviewer attested the evidence after checking ledger reconciliation support.",
-        txDigest: "AttTxREVIEWA48D",
-        createdAt: "2026-06-05 15:02",
-      },
-    },
-    {
-      id: "0x15fa9d832e185c74fb90172bf4215e982c7104b2",
-      date: "2026-06-05 18:30",
-      type: "Vendor Contract",
-      source: "Company Upload (L2)",
-      commitment:
-        "a93b8e72c019d5c58a649d8e78a6ff62fb16e882c15e882c15e882c15e882a0e",
-      status: "Registered",
-      blobId: "walrus::blob-948f2191cf8e9d3d39fa10df8e76a1",
-      assertions: ["Rights & Obligations", "Classification"],
-      reviewer: "n/a",
-      notes: "Executed contract with Acme Corp for cloud services.",
-      fileSize: "2.80 MB",
-      fileName: "Acme_Services_Agreement_Signed.pdf",
-    },
-  ]);
+  const [registry, setRegistry] = useState<EvidenceRecord[]>([]);
 
   const [regFile, setRegFile] = useState<File | null>(null);
   const [regDocType, setRegDocType] = useState("Bank Statement");
@@ -318,11 +274,8 @@ export default function Home() {
     useState<VerificationSession | null>(null);
 
   const [attestRecordId, setAttestRecordId] = useState(registry[1]?.id || "");
-  const [attestReviewer, setAttestReviewer] = useState(
-    "0xa482e185c74fb90172bf4215e982c7104b28d2",
-  );
   const [attestNotes, setAttestNotes] = useState("");
-  const [attestType, setAttestType] = useState("EvidenceReviewed");
+  const [attestType, setAttestType] = useState("HashConfirmed");
   const [isAttesting, setIsAttesting] = useState(false);
   const [attestError, setAttestError] = useState<string | null>(null);
   const [attestResult, setAttestResult] = useState<{
@@ -513,13 +466,13 @@ export default function Home() {
 
   const resetAttestDraft = () => {
     setAttestNotes("");
-    setAttestType("EvidenceReviewed");
+    setAttestType("HashConfirmed");
     setAttestError(null);
     setAttestResult(null);
     setOperationProgress((prev) => (prev?.type === "attest" ? null : prev));
   };
 
-  const handleVerify = async (simulateTamper: boolean) => {
+  const handleVerify = async () => {
     if (!verifyRecordId || isVerifying) return;
 
     setIsVerifying(true);
@@ -563,12 +516,7 @@ export default function Home() {
 
       steps[1].status = "running";
       setOperationProgress({ type: "verify", steps: [...steps] });
-      const checkedFileLabel = simulateTamper
-        ? `${sourceContent.name || record.fileName || "evidence"} + byte`
-        : sourceContent.name || record.fileName || "Evidence file";
-      const content = simulateTamper && sourceContent instanceof File
-        ? createTamperedBlob(sourceContent)
-        : sourceContent;
+      const checkedFileLabel = sourceContent.name || record.fileName || "Evidence file";
       steps[1] = {
         ...steps[1],
         status: "done",
@@ -579,7 +527,7 @@ export default function Home() {
       setOperationProgress({ type: "verify", steps: [...steps] });
       const result = await verifyEvidence({
         evidenceId: verifyRecordId,
-        content,
+        content: sourceContent,
       });
       const checkedAt = result.checkedAt.replace("T", " ").substring(0, 16);
 
@@ -824,11 +772,11 @@ export default function Home() {
     <main className="app-container">
       <header className="topbar">
         <div className="topbar-left">
-          <svg className="topbar-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-          </svg>
+          <div className="topbar-logo-wrap">
+            <Image className="topbar-logo" src="/mascot.png" alt="Linow mascot" width={22} height={22} priority />
+          </div>
           <span className="topbar-brand">Linow</span>
-          <span className="topbar-badge">TESTNET v0.2</span>
+          <span className="topbar-badge">TESTNET v0.1</span>
         </div>
         <div className="topbar-right">
           <div className="topbar-status">
@@ -1167,9 +1115,9 @@ export default function Home() {
 
                   <div className="tamper-toggle">
                     <div className="tamper-info">
-                      <div className="tamper-title">Verification Modes</div>
+                      <div className="tamper-title">File comparison</div>
                       <div className="tamper-desc">
-                        Run a clean comparison against the recorded commitment or force a modified-file mismatch for the demo.
+                        Verify the selected file against the recorded commitment. Use the original CSV to confirm a match, or upload your edited copy to confirm tamper detection.
                       </div>
                     </div>
                   </div>
@@ -1179,7 +1127,7 @@ export default function Home() {
                       className="btn-primary"
                       disabled={isVerifying || !verifyRecordId}
                       suppressHydrationWarning
-                      onClick={() => handleVerify(false)}
+                      onClick={handleVerify}
                     >
                       {isVerifying ? (
                         <>
@@ -1187,16 +1135,8 @@ export default function Home() {
                           <span>Verifying...</span>
                         </>
                       ) : (
-                        "Verify Original File"
+                        "Verify"
                       )}
-                    </button>
-                    <button
-                      className="btn-secondary"
-                      disabled={isVerifying || !verifyRecordId}
-                      suppressHydrationWarning
-                      onClick={() => handleVerify(true)}
-                    >
-                      Verify Modified File
                     </button>
                     <button className="btn-secondary" suppressHydrationWarning onClick={resetVerifyDraft}>
                       Clear
@@ -1298,15 +1238,9 @@ export default function Home() {
 
                     <div className="field">
                       <label className="field-label">Reviewer Wallet Address</label>
-                      <input
-                        type="text"
-                        className="field-input mono"
-                        value={signerAddress || attestReviewer}
-                        suppressHydrationWarning
-                        onChange={(event) => setAttestReviewer(event.target.value)}
-                        disabled={Boolean(signerAddress)}
-                        placeholder="0x..."
-                      />
+                      <div className="field-input mono field-display">
+                        {signerAddress ? truncateValue(signerAddress, 34) : "Connect your wallet"}
+                      </div>
                     </div>
 
                     <div className="field">
@@ -1317,21 +1251,17 @@ export default function Home() {
                         suppressHydrationWarning
                         onChange={(event) => setAttestType(event.target.value)}
                       >
-                        <option value="EvidenceReviewed">Evidence reviewed</option>
                         <option value="HashConfirmed">Hash confirmed</option>
+                        <option value="EvidenceReviewed">Evidence reviewed</option>
                         <option value="IssueFlagged">Issue flagged</option>
                       </select>
                     </div>
 
                     <div className="field">
                       <label className="field-label">Source Confidence</label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        disabled
-                        suppressHydrationWarning
-                        value="L3 - Reviewer Wallet Attested"
-                      />
+                      <div className="field-input mono field-display" suppressHydrationWarning>
+                        L3 - Reviewer Wallet Attested
+                      </div>
                     </div>
 
                     <div className="field form-full">
@@ -1452,67 +1382,80 @@ export default function Home() {
                       </tr>
                     </thead>
                     <tbody>
-                      {registry.map((record) => (
-                        <tr key={record.id}>
-                          <td>
-                            <div className="record-id">{truncateValue(record.id, 16)}</div>
-                            <div className="record-meta">{record.date}</div>
-                          </td>
-                          <td>
-                            <span>{record.type}</span>
-                            <div className="record-meta">{record.fileName || "file_upload"}</div>
-                          </td>
-                          <td>
-                            <div className="assertion-tags">
-                              {record.assertions.map((assertion) => (
-                                <span key={assertion} className="assertion-tag">
-                                  {assertion}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td>
-                            <span
-                              className={`badge ${record.status === "Superseded" ? "review" : "registered"}`}
-                            >
-                              {record.status}
-                            </span>
-                            {record.latestAttestation && (
-                              <div className="record-meta">
-                                Attested by {truncateValue(record.latestAttestation.reviewer, 14)}
+                      {registry.length > 0 ? (
+                        registry.map((record) => (
+                          <tr key={record.id}>
+                            <td>
+                              <div className="record-id">{truncateValue(record.id, 16)}</div>
+                              <div className="record-meta">{record.date}</div>
+                            </td>
+                            <td>
+                              <span>{record.type}</span>
+                              <div className="record-meta">{record.fileName || "file_upload"}</div>
+                            </td>
+                            <td>
+                              <div className="assertion-tags">
+                                {record.assertions.map((assertion) => (
+                                  <span key={assertion} className="assertion-tag">
+                                    {assertion}
+                                  </span>
+                                ))}
                               </div>
-                            )}
-                          </td>
-                          <td>
-                            <div className="table-actions">
-                      <button
-                        className="table-action"
-                        suppressHydrationWarning
-                        onClick={() => {
-                          setVerifyRecordId(record.id);
-                          setVerificationResult({ status: "idle", message: "" });
-                                  setOperationProgress(null);
-                                  setActiveView("verify");
-                                }}
+                            </td>
+                            <td>
+                              <span
+                                className={`badge ${record.status === "Superseded" ? "review" : "registered"}`}
                               >
-                                Verify
-                              </button>
-                      <button
-                        className="table-action warn"
-                        suppressHydrationWarning
-                        onClick={() => {
-                          setAttestRecordId(record.id);
-                          setAttestResult(null);
-                                  setOperationProgress(null);
-                                  setActiveView("attest");
-                                }}
-                              >
-                                {record.latestAttestation ? "Re-attest" : "Attest"}
-                              </button>
+                                {record.status}
+                              </span>
+                              {record.latestAttestation && (
+                                <div className="record-meta">
+                                  Attested by {truncateValue(record.latestAttestation.reviewer, 14)}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <div className="table-actions">
+                                <button
+                                  className="table-action"
+                                  suppressHydrationWarning
+                                  onClick={() => {
+                                    setVerifyRecordId(record.id);
+                                    setVerificationResult({ status: "idle", message: "" });
+                                    setOperationProgress(null);
+                                    setActiveView("verify");
+                                  }}
+                                >
+                                  Verify
+                                </button>
+                                <button
+                                  className="table-action warn"
+                                  suppressHydrationWarning
+                                  onClick={() => {
+                                    setAttestRecordId(record.id);
+                                    setAttestResult(null);
+                                    setOperationProgress(null);
+                                    setActiveView("attest");
+                                  }}
+                                >
+                                  {record.latestAttestation ? "Re-attest" : "Attest"}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={5}>
+                            <div className="empty-state">
+                              <div className="empty-state-title">No evidence records yet</div>
+                              <div className="record-meta">
+                                Register a file first, then it will appear here for verification and attestation.
+                              </div>
                             </div>
                           </td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
                 </div>

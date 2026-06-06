@@ -1,0 +1,5 @@
+record_id,posting_date,vendor,description,amount_usd,category,source_confidence
+AR-2026-06-001,2026-06-03,Northwind Trading,Monthly shipment settlement,18450.00,Revenue reconciliation,L2
+AR-2026-06-002,2026-06-04,Blue Peak Logistics,Inbound freight invoice,3925.75,Expense support,L2
+AR-2026-06-003,2026-06-05,Southline Services,Retention adjustment memo,1200.00,Journal support,L2
+AR-2026-06-004,2026-06-05,Orchid Office Supplies,Office consumables batch,486.20,Expense support,L2
