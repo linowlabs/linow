@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "npm --prefix ../sdk run build",
-    "prebuild": "npm --prefix ../sdk run build",
+    "predev": "npm --prefix ../sdk install && npm --prefix ../sdk run build",
+    "prebuild": "npm --prefix ../sdk install && npm --prefix ../sdk run build",
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",

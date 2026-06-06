@@ -389,3 +389,23 @@
   - Dismissing the proof panel only clears the in-session proof snapshot; it does not affect the registered record or attestation data.
 - Follow-up needed:
   - Consider a dedicated proof/details drawer if the demo grows beyond one active evidence record.
+
+## 2026-06-06 - Install SDK Dependencies During App Build
+
+### Change
+- Files touched:
+  - `app/package.json`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Updated the app `predev` and `prebuild` scripts to install SDK dependencies before building the sibling SDK package.
+
+### Reasoning
+- Why this approach was chosen:
+  - Vercel installs dependencies inside `app/`, but the app build also compiles the sibling `sdk/` package.
+  - Without an explicit SDK install step, the SDK TypeScript build cannot resolve `@mysten/sui` during deployment.
+
+### Tech Debt
+- Known shortcuts:
+  - This adds a little extra install time before app builds in exchange for reliable monorepo deployment.
+- Follow-up needed:
+  - Revisit with npm workspaces or a root package manager setup if the monorepo grows.
