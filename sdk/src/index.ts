@@ -1,4 +1,17 @@
 export { createLinowClient } from "./client";
+export {
+  decryptFile,
+  decryptJson,
+  decryptMetadata,
+  encryptFile,
+  encryptJson,
+  encryptMetadata,
+  exportEncryptionKey,
+  generateEncryptionKey,
+  hashFile,
+  importEncryptionKey,
+} from "./crypto";
+export type { EncryptedPayload } from "./crypto";
 export type { LinowClient, LinowClientHandlers } from "./client";
 export {
   ASSERTION_IDS,

@@ -30,3 +30,31 @@
 - Follow-up needed:
   - Align final return payloads with A once the contracts and RPC wrapper exist.
   - Add implementation adapters and usage examples from the Next.js app once the shared SDK wiring begins.
+
+## 2026-06-05 - Build Crypto Utilities
+
+### Change
+- Files touched:
+  - `sdk/src/crypto.ts`
+  - `sdk/src/index.ts`
+  - `sdk/package.json`
+  - `sdk/tsconfig.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added Web Crypto utilities for `SHA-256` hashing, `AES-256-GCM` file encryption/decryption, and metadata encryption helpers.
+  - Exported key generation, key import/export, and encrypted payload types through the public SDK surface.
+  - Kept the crypto API browser-friendly and aligned with the project doc's randomized IV requirement for Walrus uploads.
+
+### Reasoning
+- Why this approach was chosen:
+  - The June 6 flow needs client-side hashing and encryption before Walrus or Sui integration can work.
+  - Web Crypto is built-in, modern, and already matches the project architecture in `MASTER.md`.
+  - Returning binary payloads keeps the helpers reusable for both Walrus upload code and future adapter layers.
+
+### Tech Debt
+- Known shortcuts:
+  - The current helpers use raw `SHA-256(file)` for the hackathon path and do not yet implement the production salted commitment scheme.
+  - Metadata encryption currently serializes JSON directly and does not include schema versioning yet.
+- Follow-up needed:
+  - Add commitment helpers for the post-hackathon salted model once the product path needs it.
+  - Wire these utilities into `register` and `verify` flows after the UI shell and Walrus integration are ready.
