@@ -135,3 +135,31 @@
   - Live Tatum calls still require a real `TATUM_API_KEY`.
 - Follow-up needed:
   - Use this adapter in `J6-10` through `J6-12` after the Walrus wrapper and transaction-building path are ready.
+
+## 2026-06-06 - Add Walrus HTTP Adapter
+
+### Change
+- Files touched:
+  - `sdk/src/walrus.ts`
+  - `sdk/src/index.ts`
+  - `sdk/package.json`
+  - `.env.example`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added a dependency-free Walrus HTTP adapter with `uploadEncryptedBlob` and `readEncryptedBlob` helpers.
+  - Exported the adapter through the SDK root and `@linow/sdk/walrus` subpath.
+  - Documented the default Walrus testnet publisher and aggregator URLs in `.env.example`.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-09` needs encrypted blob upload/download before the SDK can replace app-side mock storage references.
+  - The adapter API is intentionally named around encrypted blobs so callers do not accidentally treat Walrus as private storage.
+  - Using the public Walrus HTTP publisher and aggregator keeps the hackathon path light while still using real Walrus infrastructure.
+
+### Tech Debt
+- Known shortcuts:
+  - The adapter does not encrypt content itself; callers must use the existing crypto helpers before upload.
+  - Public publisher availability and retention are testnet-dependent, so production will likely need a managed publisher or direct SDK flow.
+- Follow-up needed:
+  - Wire `uploadEncryptedBlob` and `readEncryptedBlob` into `J6-10` and `J6-11`.
+  - Consider adding blob-status checks once the demo flow has the core register and verify path working.

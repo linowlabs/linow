@@ -1,5 +1,6 @@
 export { createLinowClient } from "./client.js";
 export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";
+export { createWalrusClient, WALRUS_HTTP_ENDPOINTS } from "./walrus.js";
 export {
   decryptFile,
   decryptJson,
@@ -24,6 +25,16 @@ export type {
   TatumSuiClientConfig,
   TatumSuiNetwork,
 } from "./tatum.js";
+export type {
+  EncryptedBlobContent,
+  UploadEncryptedBlobInput,
+  WalrusBlobEvent,
+  WalrusBlobObject,
+  WalrusClient,
+  WalrusClientConfig,
+  WalrusNetwork,
+  WalrusUploadResult,
+} from "./walrus.js";
 export {
   ASSERTION_IDS,
   EVIDENCE_STATUS_VALUES,
