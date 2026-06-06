@@ -37,6 +37,7 @@ The result is a machine-checkable evidence trail: the document stays private, Wa
 
 ## Repo Layout
 
+- `contracts/` - Sui Move package for evidence and attestation objects
 - `app/` - Next.js workspace and product UI
 - `sdk/` - shared client boundary and crypto helpers
 - `docs/` - project docs, task archives, and design notes
