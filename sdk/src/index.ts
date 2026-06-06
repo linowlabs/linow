@@ -1,4 +1,12 @@
 export { createLinowClient } from "./client.js";
+export {
+  createRegisterEvidenceClient,
+  createRegisterEvidenceFlow,
+  createRegisterEvidenceFlowFromEnv,
+  createRegisterEvidenceHandler,
+  createSuiRegisterOnChainHandler,
+  serializeEncryptedPayload,
+} from "./register.js";
 export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";
 export { createWalrusClient, WALRUS_HTTP_ENDPOINTS } from "./walrus.js";
 export {
@@ -15,6 +23,21 @@ export {
 } from "./crypto.js";
 export type { EncryptedPayload } from "./crypto.js";
 export type { LinowClient, LinowClientHandlers } from "./client.js";
+export type {
+  CreateRegisterEvidenceFlowConfig,
+  CreateRegisterEvidenceFlowFromEnvConfig,
+  CreateRegisterEvidenceHandlerConfig,
+  CreateSuiRegisterOnChainHandlerConfig,
+  RegisterEvidenceEnvironment,
+  RegisterEvidenceChainInput,
+  RegisterEvidenceChainResult,
+  RegisterEvidencePreparedArtifacts,
+  RegisterEvidenceWithArtifactsResult,
+  SignRegisterEvidenceTransaction,
+  SignRegisterEvidenceTransactionInput,
+  SignRegisterEvidenceTransactionResult,
+  SerializedEncryptedPayload,
+} from "./register.js";
 export type {
   ExecuteTransactionBlockInput,
   JsonValue,

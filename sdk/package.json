@@ -12,11 +12,15 @@
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
     "./crypto": "./dist/crypto.js",
+    "./register": "./dist/register.js",
     "./tatum": "./dist/tatum.js",
     "./walrus": "./dist/walrus.js",
     "./types": "./dist/types.js"
   },
   "devDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.17.0"
   }
 }
