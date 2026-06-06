@@ -247,3 +247,34 @@
 - Follow-up needed:
   - In `J6-18`, pass the connected wallet's signing function into `createRegisterEvidenceFlowFromEnv`.
   - Run a live testnet smoke test once the wallet bridge is available.
+
+## 2026-06-06 - Add Verify Evidence SDK Flow
+
+### Change
+- Files touched:
+  - `sdk/src/verify.ts`
+  - `sdk/src/index.ts`
+  - `sdk/src/types.ts`
+  - `sdk/src/crypto.ts`
+  - `sdk/package.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `createVerifyEvidenceHandler` to hash a supplied file and compare it against the on-chain evidence commitment.
+  - Added `createSuiGetEvidenceHandler` to fetch and parse `EvidenceRecord` Move objects through Tatum `sui_getObject`.
+  - Added env-driven and client-shaped helpers for SDK consumers: `createVerifyEvidenceFlow`, `createVerifyEvidenceFlowFromEnv`, and `createVerifyEvidenceClient`.
+  - Exported the verification API through the SDK root and `@linow/sdk/verify` subpath.
+  - Updated `BinaryContent` to accept browser `Blob`/`File` inputs and represented the contract's under-review status without adding a verified evidence status.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-11` is a read-only integrity check, so it only needs Tatum object reads and local SHA-256 hashing.
+  - The verification result stays honest: a hash match proves consistency with the registered commitment, not document truth, source authenticity, or audit sufficiency.
+  - Keeping object parsing in the SDK gives the app a stable product result instead of exposing raw Sui JSON-RPC response shapes.
+
+### Tech Debt
+- Known shortcuts:
+  - Encrypted metadata is not decrypted during verification, so fetched evidence snapshots include a placeholder metadata description.
+  - Walrus encrypted blob retrieval is not required for hash comparison yet and remains a follow-up for richer proof display.
+- Follow-up needed:
+  - Wire this handler into the app during `J6-18`.
+  - Add a live testnet smoke test with a real registered evidence ID after the wallet registration path is available.

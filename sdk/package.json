@@ -14,6 +14,7 @@
     "./crypto": "./dist/crypto.js",
     "./register": "./dist/register.js",
     "./tatum": "./dist/tatum.js",
+    "./verify": "./dist/verify.js",
     "./walrus": "./dist/walrus.js",
     "./types": "./dist/types.js"
   },

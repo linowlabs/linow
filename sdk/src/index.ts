@@ -7,6 +7,14 @@ export {
   createSuiRegisterOnChainHandler,
   serializeEncryptedPayload,
 } from "./register.js";
+export {
+  createSuiGetEvidenceHandler,
+  createVerifyEvidenceClient,
+  createVerifyEvidenceFlow,
+  createVerifyEvidenceFlowFromEnv,
+  createVerifyEvidenceHandler,
+  parseEvidenceRecordObject,
+} from "./verify.js";
 export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";
 export { createWalrusClient, WALRUS_HTTP_ENDPOINTS } from "./walrus.js";
 export {
@@ -38,6 +46,13 @@ export type {
   SignRegisterEvidenceTransactionResult,
   SerializedEncryptedPayload,
 } from "./register.js";
+export type {
+  CreateSuiGetEvidenceHandlerConfig,
+  CreateVerifyEvidenceFlowConfig,
+  CreateVerifyEvidenceFlowFromEnvConfig,
+  CreateVerifyEvidenceHandlerConfig,
+  VerifyEvidenceEnvironment,
+} from "./verify.js";
 export type {
   ExecuteTransactionBlockInput,
   JsonValue,

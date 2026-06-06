@@ -11,6 +11,7 @@ export type SourceConfidenceLevel = (typeof SOURCE_CONFIDENCE_LEVELS)[number];
 
 export const EVIDENCE_STATUS_VALUES = [
   "registered",
+  "underReview",
   "superseded",
 ] as const;
 
@@ -38,7 +39,7 @@ export type BlobId = string;
 export type WalletAddress = string;
 export type IsoTimestamp = string;
 
-export type BinaryContent = ArrayBuffer | Uint8Array;
+export type BinaryContent = ArrayBuffer | Uint8Array | Blob;
 
 export interface EvidenceMetadata {
   fileName: string;
