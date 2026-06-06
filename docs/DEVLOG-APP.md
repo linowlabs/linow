@@ -323,23 +323,69 @@
 - Follow-up needed:
   - Hard refresh or open a fresh tab/incognito if the browser keeps showing the stale favicon.
 
-## 2026-06-06 - Resolve Wallet Transaction Bytes Before Signing
+## 2026-06-06 - Resolve Wallet Transaction Before Signing
 
 ### Change
 - Files touched:
   - `app/src/app/wallet-provider.tsx`
   - `docs/DEVLOG-APP.md`
 - Summary:
-  - Updated the wallet signing bridge to build Sui transaction bytes with the active dApp Kit client before asking the connected wallet to sign.
+  - Updated the wallet signing bridge to resolve Sui gas and object inputs with the active dApp Kit client before asking the connected wallet to sign.
+  - Kept the resolved transaction on the DApp Kit transaction-object path so Slush extension wallets can use the legacy `signTransactionBlock` fallback.
   - Kept the SDK signer callback contract unchanged, so register and attestation flows both benefit from the app-level fix.
 
 ### Reasoning
 - Why this approach was chosen:
   - Slush was receiving an unresolved transaction with null gas fields during the register evidence flow.
-  - Building bytes in the app resolves sender, gas price, budget, payment, and object inputs before human signing, while preserving the "Agent proposes, human signs, chain proves" boundary.
+  - Resolving the transaction in the app sets sender, gas price, budget, payment, and object inputs before human signing, while preserving the "Agent proposes, human signs, chain proves" boundary.
 
 ### Tech Debt
 - Known shortcuts:
   - This still depends on the connected wallet account having testnet SUI gas available.
 - Follow-up needed:
   - Add a preflight balance/network check if missing testnet funds remains a common demo blocker.
+
+## 2026-06-06 - Load Root Env For App API Routes
+
+### Change
+- Files touched:
+  - `app/src/lib/server-env.ts`
+  - `app/src/app/api/sui/execute/route.ts`
+  - `app/src/app/api/sui/object/route.ts`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a server-only env helper that loads the repository root `.env` for the Next app.
+  - Updated Sui execute/read API routes to use the helper when creating the server-side Tatum client.
+
+### Reasoning
+- Why this approach was chosen:
+  - During local monorepo runs, `next dev` starts inside `app/`, while the configured `.env` lives at the repository root.
+  - Loading the root env keeps `TATUM_API_KEY` server-side and avoids duplicating secrets into `app/.env`.
+
+### Tech Debt
+- Known shortcuts:
+  - The helper assumes the app package lives one directory below the repository root.
+- Follow-up needed:
+  - If the monorepo layout changes, update the root path resolution or move to a shared env package.
+
+## 2026-06-06 - Make Proof Output Dismissible
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Scoped the proof output surface away from the records table view.
+  - Added a dismiss button so users can hide the latest proof output after capturing it.
+
+### Reasoning
+- Why this approach was chosen:
+  - The proof panel is useful for the live demo, but showing it in every workspace section made the UI feel noisy after a successful flow.
+  - Clearing the snapshot keeps the existing state model simple and lets the next live action repopulate fresh proof artifacts.
+
+### Tech Debt
+- Known shortcuts:
+  - Dismissing the proof panel only clears the in-session proof snapshot; it does not affect the registered record or attestation data.
+- Follow-up needed:
+  - Consider a dedicated proof/details drawer if the demo grows beyond one active evidence record.

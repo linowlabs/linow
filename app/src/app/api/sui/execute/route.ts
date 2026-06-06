@@ -1,4 +1,5 @@
 import { createTatumSuiClient, type ExecuteTransactionBlockInput } from "@linow/sdk";
+import { getServerEnv } from "@/lib/server-env";
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
@@ -24,7 +25,8 @@ export async function POST(request: Request) {
 }
 
 function createServerTatumClient() {
-  const apiKey = process.env.TATUM_API_KEY;
+  const apiKey = getServerEnv("TATUM_API_KEY");
+  const network = getServerEnv("TATUM_SUI_NETWORK");
 
   if (!apiKey) {
     throw new Error("TATUM_API_KEY is not configured on the server.");
@@ -32,9 +34,9 @@ function createServerTatumClient() {
 
   return createTatumSuiClient({
     apiKey,
-    network: process.env.TATUM_SUI_NETWORK === "mainnet" || process.env.TATUM_SUI_NETWORK === "devnet"
-      ? process.env.TATUM_SUI_NETWORK
+    network: network === "mainnet" || network === "devnet"
+      ? network
       : "testnet",
-    endpoint: process.env.TATUM_SUI_ENDPOINT || undefined,
+    endpoint: getServerEnv("TATUM_SUI_ENDPOINT") || undefined,
   });
 }

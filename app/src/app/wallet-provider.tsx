@@ -2,7 +2,6 @@
 
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { DAppKitProvider, useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
-import { toBase64 } from "@mysten/sui/utils";
 import { dAppKit } from "@/lib/dapp-kit";
 import { WalletBridgeProvider } from "@/lib/wallet-context";
 
@@ -23,14 +22,10 @@ function ConnectedWalletBridge({ children }: { children: React.ReactNode }) {
 
           if (typeof transaction !== "string") {
             transaction.setSenderIfNotSet(account.address);
+            await transaction.build({ client });
           }
 
-          const resolvedTransaction =
-            typeof transaction === "string"
-              ? transaction
-              : toBase64(await transaction.build({ client }));
-
-          const signed = await kit.signTransaction({ transaction: resolvedTransaction });
+          const signed = await kit.signTransaction({ transaction });
           return {
             bytes: signed.bytes,
             signature: signed.signature,

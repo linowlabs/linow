@@ -767,6 +767,7 @@ export default function Home() {
   const selectedRecordTampered =
     lastVerificationSession?.evidenceId === attestRecordId &&
     lastVerificationSession.status === "tampered";
+  const showProofSnapshot = proofSnapshot && activeView !== "records";
 
   return (
     <main className="app-container">
@@ -835,13 +836,24 @@ export default function Home() {
           </div>
 
           <div className="workspace-content">
-            {proofSnapshot && (
+            {showProofSnapshot && proofSnapshot && (
               <div className="result-card success">
                 <div className="result-header">
-                  <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span className="result-title success">Proof Output Surface</span>
+                  <div className="result-heading">
+                    <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="result-title success">Proof Output Surface</span>
+                  </div>
+                  <button
+                    className="result-dismiss"
+                    type="button"
+                    suppressHydrationWarning
+                    aria-label="Dismiss proof output"
+                    onClick={() => setProofSnapshot(null)}
+                  >
+                    x
+                  </button>
                 </div>
                 <p className="result-message">
                   Judge-facing artifacts from the latest live SDK action.
