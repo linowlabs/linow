@@ -1,4 +1,5 @@
 export { createLinowClient } from "./client.js";
+export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";
 export {
   decryptFile,
   decryptJson,
@@ -13,6 +14,16 @@ export {
 } from "./crypto.js";
 export type { EncryptedPayload } from "./crypto.js";
 export type { LinowClient, LinowClientHandlers } from "./client.js";
+export type {
+  ExecuteTransactionBlockInput,
+  JsonValue,
+  SuiObjectReadOptions,
+  TatumJsonRpcError,
+  TatumJsonRpcResponse,
+  TatumSuiClient,
+  TatumSuiClientConfig,
+  TatumSuiNetwork,
+} from "./tatum.js";
 export {
   ASSERTION_IDS,
   EVIDENCE_STATUS_VALUES,

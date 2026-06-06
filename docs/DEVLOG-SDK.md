@@ -108,3 +108,30 @@
   - The app currently uses webpack for local package resolution because Turbopack was not resolving the linked SDK cleanly on Windows.
 - Follow-up needed:
   - Revisit Turbopack after the repo has a fuller workspace setup or once Next's linked-package behavior is more predictable.
+
+## 2026-06-06 - Add Tatum Sui RPC Adapter
+
+### Change
+- Files touched:
+  - `sdk/src/tatum.ts`
+  - `sdk/src/index.ts`
+  - `sdk/package.json`
+  - `.env.example`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added a dependency-free Tatum Sui JSON-RPC adapter with `getObject`, `executeTransactionBlock`, and generic `call` helpers.
+  - Exported the adapter through the SDK root and `@linow/sdk/tatum` subpath.
+  - Documented the required Tatum environment variables in `.env.example`.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-07` needs a thin Tatum transport boundary before the real register, verify, and attest SDK flows can be wired.
+  - The adapter stays signer-agnostic: it can submit signed transaction bytes, but it does not hold private keys, mnemonics, or raw evidence.
+  - Keeping the wrapper on raw JSON-RPC avoids adding a Sui SDK dependency until the integration flow proves it needs one.
+
+### Tech Debt
+- Known shortcuts:
+  - The adapter is transport-only and does not yet build PTBs for `register_evidence` or `create_attestation`.
+  - Live Tatum calls still require a real `TATUM_API_KEY`.
+- Follow-up needed:
+  - Use this adapter in `J6-10` through `J6-12` after the Walrus wrapper and transaction-building path are ready.

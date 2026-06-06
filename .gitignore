@@ -6,3 +6,5 @@ node_modules/
 contracts/**/build/
 
 app/.next/
+
+.env

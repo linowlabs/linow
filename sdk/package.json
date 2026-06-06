@@ -12,6 +12,7 @@
     ".": "./dist/index.js",
     "./client": "./dist/client.js",
     "./crypto": "./dist/crypto.js",
+    "./tatum": "./dist/tatum.js",
     "./types": "./dist/types.js"
   },
   "devDependencies": {
