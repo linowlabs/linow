@@ -1,0 +1,10 @@
+[package]
+name = "Linow"
+version = "0.0.1"
+edition = "2024.beta"
+published-at = "0x6b800d28cc87423198e6b35516885f9c6155a680424ac28aa47f59eabd2994d5"
+
+[addresses]
+linow = "0x0"
+
+[dependencies]

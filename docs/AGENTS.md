@@ -30,48 +30,31 @@ Keep this framing consistent across code, docs, UI copy, and demos.
 
 ## 3. Git Workflow
 
-Use a monorepo during hackathons.
+This project is using a monorepo during hackathons.
 
+I as maintainer own Git operations. You must not run Git state-changing commands unless explicitly asked, including `git add`, `git commit`, `git push`, `git pull`, `git merge`, `git rebase`, `git tag`, or branch creation/deletion.
+
+You may inspect Git state when useful with read-only commands like `git status`, `git diff`, or `git log`.
+
+Branch model:
 - `main` = stable, deployable, judge-facing
 - `develop` = integration branch
 - feature branches branch off `develop`
 - only merge to `main` when the demo path works
 
-Branch naming:
+## 4. Framework Version Awareness
 
-```txt
-area/type/scope
-````
+This project may use recent versions of Next.js, Sui, Walrus, and related SDKs whose APIs may differ from model training data.
 
-Examples:
+Before writing framework-specific code:
 
-```txt
-web3/feat/evidence-contract
-web3/chore/init-sui
-app/chore/init-nextjs
-app/feat/upload-evidence
-sdk/feat/crypto-utils
-agent/feat/gap-analysis
-infra/chore/env-example
-```
+- Check the installed package version.
+- Prefer project-local docs, generated docs, or official docs over memory.
+- For Next.js, follow the App Router conventions unless the project explicitly uses Pages Router.
+- Heed deprecation warnings.
+- Do not introduce outdated APIs such as old routing patterns, deprecated config options, or legacy examples without verifying them first.
 
-For docs and demo branches, use:
-
-```txt
-docs/tatum-readme
-docs/isa-mapping
-demo/tatum-script
-demo/sample-evidence
-```
-
-Use tags for finalized hackathon submissions:
-
-```txt
-v0.1-tatum
-v0.2-sui-overflow
-```
-
-## 4. Persistent Context & Memory
+## 5. Persistent Context & Memory
 
 Since our context resets between sessions, we use files to track our brain.
 
