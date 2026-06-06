@@ -163,3 +163,148 @@
 - Follow-up needed:
   - Wire `uploadEncryptedBlob` and `readEncryptedBlob` into `J6-10` and `J6-11`.
   - Consider adding blob-status checks once the demo flow has the core register and verify path working.
+
+## 2026-06-06 - Compose Register Evidence Flow
+
+### Change
+- Files touched:
+  - `sdk/src/register.ts`
+  - `sdk/src/index.ts`
+  - `sdk/package.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `createRegisterEvidenceHandler` to compose local hashing, AES-GCM encryption, Walrus encrypted blob upload, and an injected on-chain registration function.
+  - Added encrypted payload serialization so the IV and ciphertext can be stored together without exposing plaintext.
+  - Exported the register flow through the SDK root and `@linow/sdk/register` subpath.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-10` needs the register pipeline to use real crypto and Walrus storage before the app replaces mock registration outputs.
+  - The SDK still respects "Agent proposes, human signs, chain proves" by requiring an injected `registerOnChain` handler instead of holding keys or signing internally.
+  - Keeping encryption key ownership outside the helper avoids silently creating evidence that cannot be decrypted later.
+
+### Tech Debt
+- Known shortcuts:
+  - The chain step is injected and not yet backed by a concrete PTB builder/signer.
+  - The helper can export the AES key only when explicitly requested for demo plumbing.
+- Follow-up needed:
+  - Wire `registerOnChain` to the wallet/Tatum transaction path.
+  - Feed this handler into the app registration flow during `J6-18`.
+
+## 2026-06-06 - Add Register Evidence PTB Handler
+
+### Change
+- Files touched:
+  - `sdk/package.json`
+  - `sdk/package-lock.json`
+  - `sdk/src/register.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added the official `@mysten/sui` TypeScript SDK dependency for PTB construction.
+  - Added `createSuiRegisterOnChainHandler` to build a `register_evidence` transaction, transfer the returned `EvidenceRecord` to the signer, request an injected wallet signature, and submit signed bytes through Tatum.
+  - Added execution parsing for the created `EvidenceRecord` ID and transaction digest.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-10` needs the on-chain half of registration without letting the SDK own signing keys.
+  - The handler preserves the project boundary: the SDK prepares the transaction, the user wallet signs it, and Tatum submits the signed transaction.
+  - Returning and transferring the `EvidenceRecord` in the PTB keeps the Move function composable while producing an owned object for later reads.
+
+### Tech Debt
+- Known shortcuts:
+  - The handler currently assumes testnet for wallet signing.
+  - `registeredAt` is reported from the client timestamp until the integration layer maps the chain event timestamp directly.
+- Follow-up needed:
+  - Wire this handler into the app wallet flow during `J6-18`.
+  - Add a small integration smoke test once a browser wallet signing path is present.
+
+## 2026-06-06 - Finish End-to-End Register Evidence SDK Flow
+
+### Change
+- Files touched:
+  - `.env.example`
+  - `sdk/src/register.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `createRegisterEvidenceFlow` to compose Tatum, Walrus, encryption, and Sui registration into one runnable SDK register handler.
+  - Added `createRegisterEvidenceFlowFromEnv` so package ID, Tatum, and Walrus settings can be sourced from the project's environment variables.
+  - Added `createRegisterEvidenceClient` for wiring the real register handler into the shared `LinowClient` shape.
+  - Made the Sui signing chain configurable from the selected Tatum network instead of assuming testnet internally.
+  - Documented `LINOW_PACKAGE_ID`, `NEXT_PUBLIC_LINOW_PACKAGE_ID`, and optional endpoint overrides in `.env.example`.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-10` needs a real upload -> encrypt -> Walrus -> wallet-signed Sui registration path without forcing the app UI work from `J6-18` into this branch.
+  - Keeping `signTransaction` injected preserves the project boundary: the SDK prepares and submits, while a human-controlled wallet signs.
+  - Environment-driven construction keeps the demo setup simple while still allowing tests or app code to inject mock Tatum/Walrus clients.
+
+### Tech Debt
+- Known shortcuts:
+  - The SDK still needs a browser wallet adapter from the app layer before the UI can call this flow directly.
+  - The client timestamp is still used as `registeredAt` until `J6-11`/`J6-18` map chain timestamps cleanly.
+- Follow-up needed:
+  - In `J6-18`, pass the connected wallet's signing function into `createRegisterEvidenceFlowFromEnv`.
+  - Run a live testnet smoke test once the wallet bridge is available.
+
+## 2026-06-06 - Add Verify Evidence SDK Flow
+
+### Change
+- Files touched:
+  - `sdk/src/verify.ts`
+  - `sdk/src/index.ts`
+  - `sdk/src/types.ts`
+  - `sdk/src/crypto.ts`
+  - `sdk/package.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `createVerifyEvidenceHandler` to hash a supplied file and compare it against the on-chain evidence commitment.
+  - Added `createSuiGetEvidenceHandler` to fetch and parse `EvidenceRecord` Move objects through Tatum `sui_getObject`.
+  - Added env-driven and client-shaped helpers for SDK consumers: `createVerifyEvidenceFlow`, `createVerifyEvidenceFlowFromEnv`, and `createVerifyEvidenceClient`.
+  - Exported the verification API through the SDK root and `@linow/sdk/verify` subpath.
+  - Updated `BinaryContent` to accept browser `Blob`/`File` inputs and represented the contract's under-review status without adding a verified evidence status.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-11` is a read-only integrity check, so it only needs Tatum object reads and local SHA-256 hashing.
+  - The verification result stays honest: a hash match proves consistency with the registered commitment, not document truth, source authenticity, or audit sufficiency.
+  - Keeping object parsing in the SDK gives the app a stable product result instead of exposing raw Sui JSON-RPC response shapes.
+
+### Tech Debt
+- Known shortcuts:
+  - Encrypted metadata is not decrypted during verification, so fetched evidence snapshots include a placeholder metadata description.
+  - Walrus encrypted blob retrieval is not required for hash comparison yet and remains a follow-up for richer proof display.
+- Follow-up needed:
+  - Wire this handler into the app during `J6-18`.
+  - Add a live testnet smoke test with a real registered evidence ID after the wallet registration path is available.
+
+## 2026-06-06 - Add Attestation SDK Flow
+
+### Change
+- Files touched:
+  - `sdk/src/attest.ts`
+  - `sdk/src/index.ts`
+  - `sdk/src/types.ts`
+  - `sdk/package.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `createAttestEvidenceHandler` to encrypt reviewer notes and prepare a product-shaped attestation result.
+  - Added `createSuiAttestationHandler` to build a `create_attestation` PTB, request an injected wallet signature, submit signed bytes through Tatum, and parse the created `Attestation` object ID.
+  - Added env-driven and client-shaped helpers: `createAttestationFlow`, `createAttestationFlowFromEnv`, and `createAttestationClient`.
+  - Exported the attestation API through the SDK root and `@linow/sdk/attest` subpath.
+  - Added typed attestation actions and optional source confidence fields to the shared SDK model.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-12` needs reviewer attestations to be signed by a human wallet while the SDK prepares and submits the transaction through existing Tatum infrastructure.
+  - Reviewer notes are encrypted before being sent on-chain so private review context is not stored as plaintext.
+  - The default attestation action is `hashConfirmed`, which fits the project boundary better than implying document truth or audit sufficiency.
+
+### Tech Debt
+- Known shortcuts:
+  - The SDK does not yet enforce that an attestation follows a successful verification result; the app should gate that flow during `J6-18`.
+  - `createdAt` is still derived from the client after transaction submission until the integration layer maps chain event timestamps.
+- Follow-up needed:
+  - Wire this handler into the app wallet flow during `J6-18`.
+  - Run a live testnet smoke test after the browser wallet signing bridge is available.

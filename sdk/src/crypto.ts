@@ -4,6 +4,7 @@ const AES_ALGORITHM = "AES-GCM";
 const IV_LENGTH_BYTES = 12;
 const HASH_ALGORITHM = "SHA-256";
 type ByteArray = Uint8Array<ArrayBuffer>;
+type BinaryBytes = ArrayBuffer | Uint8Array;
 
 export interface EncryptedPayload {
   algorithm: typeof AES_ALGORITHM;
@@ -11,7 +12,7 @@ export interface EncryptedPayload {
   iv: ByteArray;
 }
 
-type BinaryInput = BinaryContent | Blob;
+type BinaryInput = BinaryContent;
 
 export async function generateEncryptionKey(): Promise<CryptoKey> {
   return getCrypto().subtle.generateKey(
@@ -29,7 +30,7 @@ export async function exportEncryptionKey(key: CryptoKey): Promise<Uint8Array> {
   return new Uint8Array(rawKey);
 }
 
-export async function importEncryptionKey(rawKey: BinaryContent): Promise<CryptoKey> {
+export async function importEncryptionKey(rawKey: BinaryBytes): Promise<CryptoKey> {
   return getCrypto().subtle.importKey(
     "raw",
     normalizeBytes(rawKey),
@@ -132,7 +133,7 @@ async function toArrayBufferAsync(content: BinaryInput): Promise<ArrayBuffer> {
   return content instanceof Blob ? content.arrayBuffer() : normalizeBytes(content).buffer;
 }
 
-function normalizeBytes(content: BinaryContent): ByteArray {
+function normalizeBytes(content: BinaryBytes): ByteArray {
   if (content instanceof Uint8Array) {
     return Uint8Array.from(content) as ByteArray;
   }
