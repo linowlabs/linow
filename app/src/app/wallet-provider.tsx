@@ -1,12 +1,14 @@
 "use client";
 
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
-import { DAppKitProvider, useCurrentAccount, useDAppKit } from "@mysten/dapp-kit-react";
+import { DAppKitProvider, useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
+import { toBase64 } from "@mysten/sui/utils";
 import { dAppKit } from "@/lib/dapp-kit";
 import { WalletBridgeProvider } from "@/lib/wallet-context";
 
 function ConnectedWalletBridge({ children }: { children: React.ReactNode }) {
   const account = useCurrentAccount();
+  const client = useCurrentClient();
   const kit = useDAppKit();
 
   return (
@@ -15,7 +17,20 @@ function ConnectedWalletBridge({ children }: { children: React.ReactNode }) {
         address: account?.address,
         connectButton: <ConnectButton />,
         async signTransaction({ transaction }) {
-          const signed = await kit.signTransaction({ transaction });
+          if (!account) {
+            throw new Error("Connect a Sui wallet before signing transactions.");
+          }
+
+          if (typeof transaction !== "string") {
+            transaction.setSenderIfNotSet(account.address);
+          }
+
+          const resolvedTransaction =
+            typeof transaction === "string"
+              ? transaction
+              : toBase64(await transaction.build({ client }));
+
+          const signed = await kit.signTransaction({ transaction: resolvedTransaction });
           return {
             bytes: signed.bytes,
             signature: signed.signature,

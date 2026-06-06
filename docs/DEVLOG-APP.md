@@ -322,3 +322,24 @@
   - Browsers can cache favicons aggressively, so the first refresh may still show the old icon.
 - Follow-up needed:
   - Hard refresh or open a fresh tab/incognito if the browser keeps showing the stale favicon.
+
+## 2026-06-06 - Resolve Wallet Transaction Bytes Before Signing
+
+### Change
+- Files touched:
+  - `app/src/app/wallet-provider.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Updated the wallet signing bridge to build Sui transaction bytes with the active dApp Kit client before asking the connected wallet to sign.
+  - Kept the SDK signer callback contract unchanged, so register and attestation flows both benefit from the app-level fix.
+
+### Reasoning
+- Why this approach was chosen:
+  - Slush was receiving an unresolved transaction with null gas fields during the register evidence flow.
+  - Building bytes in the app resolves sender, gas price, budget, payment, and object inputs before human signing, while preserving the "Agent proposes, human signs, chain proves" boundary.
+
+### Tech Debt
+- Known shortcuts:
+  - This still depends on the connected wallet account having testnet SUI gas available.
+- Follow-up needed:
+  - Add a preflight balance/network check if missing testnet funds remains a common demo blocker.
