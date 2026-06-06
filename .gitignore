@@ -3,5 +3,6 @@ docs/docs-archive/
 node_modules/
 **/node_modules/
 **/dist/
+contracts/**/build/
 
 app/.next/
