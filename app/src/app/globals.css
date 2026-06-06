@@ -114,8 +114,9 @@ input, textarea, select {
 .topbar-logo {
   width: 22px;
   height: 22px;
-  color: var(--accent);
   filter: drop-shadow(0 0 6px rgba(48, 153, 241, 0.2));
+  object-fit: contain;
+  border-radius: 5px;
 }
 
 .topbar-brand {
@@ -506,6 +507,16 @@ input, textarea, select {
   font-size: 0.8rem;
 }
 
+.field-display {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  word-break: break-word;
+  color: rgba(221, 240, 246, 0.62);
+  background: rgba(18, 35, 47, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 .field-select {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%233099F1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
@@ -789,8 +800,34 @@ input, textarea, select {
 .result-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+.result-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.result-dismiss {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(3, 7, 12, 0.32);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.result-dismiss:hover {
+  background: rgba(3, 7, 12, 0.5);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text-light);
 }
 
 .result-icon {

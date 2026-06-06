@@ -255,3 +255,137 @@
 - Follow-up needed:
   - Run a live browser smoke test with a funded testnet wallet and real Tatum key.
   - Add fuller user-facing guidance if wallet network mismatch or missing testnet funds becomes a common demo issue.
+
+## 2026-06-06 - Swap Header Mascot Asset
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Replaced the header shield SVG with the user-provided mascot image.
+  - Kept the brand lockup and version badge intact, while sizing the mascot to fit the existing icon slot.
+
+### Reasoning
+- Why this approach was chosen:
+  - The mascot belongs in the top-left brand mark where the shield icon already lived.
+  - Using the file directly keeps the current UI structure steady while giving the header a stronger brand signal.
+
+### Tech Debt
+- Known shortcuts:
+  - The mascot asset is still stored under the app route folder rather than a shared static `public/` folder.
+- Follow-up needed:
+  - If we want broader reuse later, move the image into `app/public/` and reference it from a stable public URL.
+
+## 2026-06-06 - Use Mascot As App Icon
+
+### Change
+- Files touched:
+  - `app/public/mascot.png`
+  - `app/src/app/layout.tsx`
+  - `app/src/app/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Copied the mascot asset into the app public folder.
+  - Pointed the header brand mark and Next metadata icons at the same public mascot file so the browser tab icon matches the top-left logo.
+
+### Reasoning
+- Why this approach was chosen:
+  - Next metadata icons work best from `public/`, and the browser tab should share the same visual asset as the header mark.
+  - Keeping one public copy avoids confusion about which file powers the app icon.
+
+### Tech Debt
+- Known shortcuts:
+  - The old route-local mascot copy was removed, but the asset is still a large PNG, so it may be heavier than a tiny favicon would normally be.
+- Follow-up needed:
+  - If load time or crispness becomes an issue, generate a smaller favicon-sized variant from the same mascot art later.
+
+## 2026-06-06 - Replace App Router Favicon
+
+### Change
+- Files touched:
+  - `app/src/app/icon.png`
+  - `app/src/app/favicon.ico`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Replaced the old App Router `.ico` favicon with the mascot image as `icon.png`.
+  - Removed the legacy `favicon.ico` so Next serves the mascot from the icon route.
+
+### Reasoning
+- Why this approach was chosen:
+  - In the App Router, a lingering `favicon.ico` can keep winning over metadata changes, so the icon asset itself needed to move.
+  - `icon.png` is the cleaner long-term choice for this mascot art.
+
+### Tech Debt
+- Known shortcuts:
+  - Browsers can cache favicons aggressively, so the first refresh may still show the old icon.
+- Follow-up needed:
+  - Hard refresh or open a fresh tab/incognito if the browser keeps showing the stale favicon.
+
+## 2026-06-06 - Resolve Wallet Transaction Before Signing
+
+### Change
+- Files touched:
+  - `app/src/app/wallet-provider.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Updated the wallet signing bridge to resolve Sui gas and object inputs with the active dApp Kit client before asking the connected wallet to sign.
+  - Kept the resolved transaction on the DApp Kit transaction-object path so Slush extension wallets can use the legacy `signTransactionBlock` fallback.
+  - Kept the SDK signer callback contract unchanged, so register and attestation flows both benefit from the app-level fix.
+
+### Reasoning
+- Why this approach was chosen:
+  - Slush was receiving an unresolved transaction with null gas fields during the register evidence flow.
+  - Resolving the transaction in the app sets sender, gas price, budget, payment, and object inputs before human signing, while preserving the "Agent proposes, human signs, chain proves" boundary.
+
+### Tech Debt
+- Known shortcuts:
+  - This still depends on the connected wallet account having testnet SUI gas available.
+- Follow-up needed:
+  - Add a preflight balance/network check if missing testnet funds remains a common demo blocker.
+
+## 2026-06-06 - Load Root Env For App API Routes
+
+### Change
+- Files touched:
+  - `app/src/lib/server-env.ts`
+  - `app/src/app/api/sui/execute/route.ts`
+  - `app/src/app/api/sui/object/route.ts`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a server-only env helper that loads the repository root `.env` for the Next app.
+  - Updated Sui execute/read API routes to use the helper when creating the server-side Tatum client.
+
+### Reasoning
+- Why this approach was chosen:
+  - During local monorepo runs, `next dev` starts inside `app/`, while the configured `.env` lives at the repository root.
+  - Loading the root env keeps `TATUM_API_KEY` server-side and avoids duplicating secrets into `app/.env`.
+
+### Tech Debt
+- Known shortcuts:
+  - The helper assumes the app package lives one directory below the repository root.
+- Follow-up needed:
+  - If the monorepo layout changes, update the root path resolution or move to a shared env package.
+
+## 2026-06-06 - Make Proof Output Dismissible
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Scoped the proof output surface away from the records table view.
+  - Added a dismiss button so users can hide the latest proof output after capturing it.
+
+### Reasoning
+- Why this approach was chosen:
+  - The proof panel is useful for the live demo, but showing it in every workspace section made the UI feel noisy after a successful flow.
+  - Clearing the snapshot keeps the existing state model simple and lets the next live action repopulate fresh proof artifacts.
+
+### Tech Debt
+- Known shortcuts:
+  - Dismissing the proof panel only clears the in-session proof snapshot; it does not affect the registered record or attestation data.
+- Follow-up needed:
+  - Consider a dedicated proof/details drawer if the demo grows beyond one active evidence record.
