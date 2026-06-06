@@ -99,3 +99,24 @@
 - Follow-up needed:
   - Decide during SDK/Tatum integration whether `create_attestation` should borrow an `EvidenceRecord` to enforce target type.
   - Add reviewer role checks later if an `AccessGrant` or audit engagement model lands.
+
+## 2026-06-06 - Publish Move Package
+
+### Change
+- Files touched:
+  - `contracts/Linow/Move.toml`
+  - `docs/DEVLOG-WEB3.md`
+- Summary:
+  - Published the `Linow` Move package to Sui testnet and recorded the resulting package ID in `Move.toml`.
+  - Kept the package metadata aligned with the on-chain deployment so later SDK/Tatum work can reference a single source of truth.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-06` is the deployment checkpoint for the June 6 flow, so the package ID belongs in the package manifest where the build and integration code can find it.
+  - Recording the package ID in the repo makes the contract side reproducible for the next steps without exposing any sensitive wallet material.
+
+### Tech Debt
+- Known shortcuts:
+  - The package is deployed, but the later Tatum/RPC integration still needs to read and call it directly.
+- Follow-up needed:
+  - Use the recorded package ID when wiring `J6-07` and later client calls.
