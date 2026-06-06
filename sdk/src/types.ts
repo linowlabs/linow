@@ -9,6 +9,15 @@ export const SOURCE_CONFIDENCE_LEVELS = [
 
 export type SourceConfidenceLevel = (typeof SOURCE_CONFIDENCE_LEVELS)[number];
 
+export const ATTESTATION_TYPE_VALUES = [
+  "evidenceVerified",
+  "packReviewed",
+  "hashConfirmed",
+  "rejected",
+] as const;
+
+export type AttestationType = (typeof ATTESTATION_TYPE_VALUES)[number];
+
 export const EVIDENCE_STATUS_VALUES = [
   "registered",
   "underReview",
@@ -121,6 +130,8 @@ export interface VerificationResult {
 export interface AttestEvidenceInput {
   evidenceId: EvidenceId;
   reviewerAddress: WalletAddress;
+  attestationType?: AttestationType;
+  sourceConfidence?: SourceConfidenceLevel;
   note?: string;
 }
 
@@ -128,6 +139,8 @@ export interface AttestationRecord {
   id: AttestationId;
   evidenceId: EvidenceId;
   reviewerAddress: WalletAddress;
+  attestationType?: AttestationType;
+  sourceConfidence?: SourceConfidenceLevel;
   createdAt: IsoTimestamp;
   note?: string;
   transactionDigest?: TransactionDigest;

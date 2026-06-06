@@ -1,5 +1,12 @@
 export { createLinowClient } from "./client.js";
 export {
+  createAttestationClient,
+  createAttestationFlow,
+  createAttestationFlowFromEnv,
+  createAttestEvidenceHandler,
+  createSuiAttestationHandler,
+} from "./attest.js";
+export {
   createRegisterEvidenceClient,
   createRegisterEvidenceFlow,
   createRegisterEvidenceFlowFromEnv,
@@ -30,6 +37,20 @@ export {
   importEncryptionKey,
 } from "./crypto.js";
 export type { EncryptedPayload } from "./crypto.js";
+export type {
+  AttestationChainInput,
+  AttestationChainResult,
+  AttestationEnvironment,
+  AttestationPreparedArtifacts,
+  AttestEvidenceWithArtifactsResult,
+  CreateAttestationFlowConfig,
+  CreateAttestationFlowFromEnvConfig,
+  CreateAttestEvidenceHandlerConfig,
+  CreateSuiAttestationHandlerConfig,
+  SignAttestationTransaction,
+  SignAttestationTransactionInput,
+  SignAttestationTransactionResult,
+} from "./attest.js";
 export type { LinowClient, LinowClientHandlers } from "./client.js";
 export type {
   CreateRegisterEvidenceFlowConfig,
@@ -74,6 +95,7 @@ export type {
   WalrusUploadResult,
 } from "./walrus.js";
 export {
+  ATTESTATION_TYPE_VALUES,
   ASSERTION_IDS,
   EVIDENCE_STATUS_VALUES,
   RETENTION_STATUS_VALUES,
@@ -83,6 +105,7 @@ export type {
   AssertionId,
   AttestationId,
   AttestationRecord,
+  AttestationType,
   AttestEvidenceInput,
   AttestEvidenceResult,
   BinaryContent,

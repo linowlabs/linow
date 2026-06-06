@@ -278,3 +278,33 @@
 - Follow-up needed:
   - Wire this handler into the app during `J6-18`.
   - Add a live testnet smoke test with a real registered evidence ID after the wallet registration path is available.
+
+## 2026-06-06 - Add Attestation SDK Flow
+
+### Change
+- Files touched:
+  - `sdk/src/attest.ts`
+  - `sdk/src/index.ts`
+  - `sdk/src/types.ts`
+  - `sdk/package.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `createAttestEvidenceHandler` to encrypt reviewer notes and prepare a product-shaped attestation result.
+  - Added `createSuiAttestationHandler` to build a `create_attestation` PTB, request an injected wallet signature, submit signed bytes through Tatum, and parse the created `Attestation` object ID.
+  - Added env-driven and client-shaped helpers: `createAttestationFlow`, `createAttestationFlowFromEnv`, and `createAttestationClient`.
+  - Exported the attestation API through the SDK root and `@linow/sdk/attest` subpath.
+  - Added typed attestation actions and optional source confidence fields to the shared SDK model.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-12` needs reviewer attestations to be signed by a human wallet while the SDK prepares and submits the transaction through existing Tatum infrastructure.
+  - Reviewer notes are encrypted before being sent on-chain so private review context is not stored as plaintext.
+  - The default attestation action is `hashConfirmed`, which fits the project boundary better than implying document truth or audit sufficiency.
+
+### Tech Debt
+- Known shortcuts:
+  - The SDK does not yet enforce that an attestation follows a successful verification result; the app should gate that flow during `J6-18`.
+  - `createdAt` is still derived from the client after transaction submission until the integration layer maps chain event timestamps.
+- Follow-up needed:
+  - Wire this handler into the app wallet flow during `J6-18`.
+  - Run a live testnet smoke test after the browser wallet signing bridge is available.

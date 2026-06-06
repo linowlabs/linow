@@ -10,6 +10,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./attest": "./dist/attest.js",
     "./client": "./dist/client.js",
     "./crypto": "./dist/crypto.js",
     "./register": "./dist/register.js",
