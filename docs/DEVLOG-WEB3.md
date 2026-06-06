@@ -46,3 +46,30 @@
   - The structs still rely on warning suppression until the next contract tasks start using their fields.
 - Follow-up needed:
   - Remove the suppression once the module implements real constructors, updates, and reads for these objects.
+
+## 2026-06-06 - Implement EvidenceRecord Registration
+
+### Change
+- Files touched:
+  - `contracts/Linow/Move.toml`
+  - `contracts/Linow/sources/evidence.move`
+  - `docs/DEVLOG-WEB3.md`
+- Summary:
+  - Added `register_evidence` to create and return an `EvidenceRecord` with commitment, encrypted blob pointer, encrypted metadata, ISA assertions, lifecycle status, registrant, timestamp, and optional audit pack link.
+  - Added an `EvidenceRegistered` event with the evidence ID, registrant, and timestamp for later Tatum/RPC parsing.
+  - Added read helpers for the `EvidenceRecord` fields and removed the unused-field suppression from that struct.
+  - Removed the explicit Sui framework dependency from `Move.toml` because the installed Sui CLI now injects the standard Sui dependencies automatically.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-04` needs the on-chain evidence object creation path, while hashing, encryption, Walrus upload, and transaction submission stay outside the Move module.
+  - The function initializes `status` as `Registered` and does not introduce a `Verified` state, keeping verification tied to later reviewer attestations.
+  - Returning the object keeps the function composable for PTBs, while the event gives the SDK/Tatum layer a simple way to find the created object without storing plaintext evidence or metadata on-chain.
+
+### Tech Debt
+- Known shortcuts:
+  - Validation is intentionally minimal: only the SHA-256 commitment length is enforced for the hackathon path.
+  - The returned object must be transferred or otherwise handled by the caller's PTB and is not yet linked into an `AuditPack`.
+- Follow-up needed:
+  - Implement `create_attestation` for `J6-05`.
+  - Decide whether later integration needs stronger validation for assertion IDs, blob pointer encoding, or metadata schema versioning.
