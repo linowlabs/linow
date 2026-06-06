@@ -46,3 +46,77 @@
   - The structs still rely on warning suppression until the next contract tasks start using their fields.
 - Follow-up needed:
   - Remove the suppression once the module implements real constructors, updates, and reads for these objects.
+
+## 2026-06-06 - Implement EvidenceRecord Registration
+
+### Change
+- Files touched:
+  - `contracts/Linow/Move.toml`
+  - `contracts/Linow/sources/evidence.move`
+  - `docs/DEVLOG-WEB3.md`
+- Summary:
+  - Added `register_evidence` to create and return an `EvidenceRecord` with commitment, encrypted blob pointer, encrypted metadata, ISA assertions, lifecycle status, registrant, timestamp, and optional audit pack link.
+  - Added an `EvidenceRegistered` event with the evidence ID, registrant, and timestamp for later Tatum/RPC parsing.
+  - Added read helpers for the `EvidenceRecord` fields and removed the unused-field suppression from that struct.
+  - Removed the explicit Sui framework dependency from `Move.toml` because the installed Sui CLI now injects the standard Sui dependencies automatically.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-04` needs the on-chain evidence object creation path, while hashing, encryption, Walrus upload, and transaction submission stay outside the Move module.
+  - The function initializes `status` as `Registered` and does not introduce a `Verified` state, keeping verification tied to later reviewer attestations.
+  - Returning the object keeps the function composable for PTBs, while the event gives the SDK/Tatum layer a simple way to find the created object without storing plaintext evidence or metadata on-chain.
+
+### Tech Debt
+- Known shortcuts:
+  - Validation is intentionally minimal: only the SHA-256 commitment length is enforced for the hackathon path.
+  - The returned object must be transferred or otherwise handled by the caller's PTB and is not yet linked into an `AuditPack`.
+- Follow-up needed:
+  - Implement `create_attestation` for `J6-05`.
+  - Decide whether later integration needs stronger validation for assertion IDs, blob pointer encoding, or metadata schema versioning.
+
+## 2026-06-06 - Implement Attestation Creation
+
+### Change
+- Files touched:
+  - `contracts/Linow/sources/evidence.move`
+  - `docs/DEVLOG-WEB3.md`
+- Summary:
+  - Added `create_attestation` to create and return a reviewer-signed `Attestation` linked to a target evidence ID.
+  - Added minimal validation for attestation type and source confidence enum ranges.
+  - Added an `AttestationCreated` event and read helpers for attestation fields.
+  - Removed the unused-field suppression from the `Attestation` struct now that its fields are used by helper functions.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-05` needs attestation as its own trust object, not a mutation of `EvidenceRecord.status`.
+  - The function uses the transaction sender as the reviewer wallet and records timestamped encrypted notes, matching the June 6 schema without storing plaintext review notes.
+  - Returning the object keeps the function composable for PTBs, while the event gives Tatum/SDK integration a clear proof artifact to parse later.
+
+### Tech Debt
+- Known shortcuts:
+  - The function accepts a target `ID` directly and does not yet prove that the ID belongs to an `EvidenceRecord`.
+  - It does not prevent the original registrant from self-attesting because role/access policy is outside the current June 6 contract scope.
+- Follow-up needed:
+  - Decide during SDK/Tatum integration whether `create_attestation` should borrow an `EvidenceRecord` to enforce target type.
+  - Add reviewer role checks later if an `AccessGrant` or audit engagement model lands.
+
+## 2026-06-06 - Publish Move Package
+
+### Change
+- Files touched:
+  - `contracts/Linow/Move.toml`
+  - `docs/DEVLOG-WEB3.md`
+- Summary:
+  - Published the `Linow` Move package to Sui testnet and recorded the resulting package ID in `Move.toml`.
+  - Kept the package metadata aligned with the on-chain deployment so later SDK/Tatum work can reference a single source of truth.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-06` is the deployment checkpoint for the June 6 flow, so the package ID belongs in the package manifest where the build and integration code can find it.
+  - Recording the package ID in the repo makes the contract side reproducible for the next steps without exposing any sensitive wallet material.
+
+### Tech Debt
+- Known shortcuts:
+  - The package is deployed, but the later Tatum/RPC integration still needs to read and call it directly.
+- Follow-up needed:
+  - Use the recorded package ID when wiring `J6-07` and later client calls.
