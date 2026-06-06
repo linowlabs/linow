@@ -2,11 +2,18 @@
 
 import React, { useState } from "react";
 import {
-  encryptFile,
-  encryptMetadata,
+  createAttestationFlow,
+  createRegisterEvidenceFlow,
+  createVerifyEvidenceFlow,
   generateEncryptionKey,
-  hashFile,
+  type AssertionId,
+  type AttestationType,
+  type ExecuteTransactionBlockInput,
+  type JsonValue,
+  type SourceConfidenceLevel,
+  type SuiObjectReadOptions,
 } from "@linow/sdk";
+import { useWalletBridge } from "@/lib/wallet-context";
 
 type RecordStatus = "Registered" | "Superseded";
 type ViewId = "register" | "verify" | "attest" | "records";
@@ -33,6 +40,7 @@ interface EvidenceRecord {
   notes: string;
   fileSize?: string;
   fileName?: string;
+  sourceFile?: File;
   latestAttestation?: AttestationSummary;
 }
 
@@ -82,7 +90,9 @@ const ISA_ASSERTIONS = [
   "Accuracy",
 ];
 
-const DEMO_PACKAGE_ID = "0x1a0f4c9e72b84f16c5e8127b4d90aa36linowpkg";
+const PACKAGE_ID =
+  process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID ??
+  "0x6b800d28cc87423198e6b35516885f9c6155a680424ac28aa47f59eabd2994d5";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -153,18 +163,6 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function toMockDigest(seed: string): string {
-  return `SuiTx${seed.substring(0, 10).toUpperCase()}`;
-}
-
-function toMockObjectId(seed: string): string {
-  return `0x${seed.substring(0, 40)}`;
-}
-
-function toMockAttestationId(seed: string): string {
-  return `0xattest${seed.substring(0, 34)}`;
-}
-
 function toSourceLabel(source: string): string {
   const trimmed = source.trim();
 
@@ -175,7 +173,85 @@ function toSourceLabel(source: string): string {
   return trimmed.includes("(L") ? trimmed : `${trimmed} (L2)`;
 }
 
+function toAssertionId(assertion: string): AssertionId {
+  const index = ISA_ASSERTIONS.indexOf(assertion);
+
+  if (index < 0) {
+    throw new Error(`Unsupported ISA assertion: ${assertion}`);
+  }
+
+  return index as AssertionId;
+}
+
+function toAttestationType(action: string): AttestationType {
+  if (action === "IssueFlagged") {
+    return "rejected";
+  }
+
+  if (action === "EvidenceReviewed") {
+    return "evidenceVerified";
+  }
+
+  return "hashConfirmed";
+}
+
+function toAttestationLabel(value: AttestationType): string {
+  const labels: Record<AttestationType, string> = {
+    evidenceVerified: "Evidence reviewed",
+    packReviewed: "Pack reviewed",
+    hashConfirmed: "Hash confirmed",
+    rejected: "Issue flagged",
+  };
+
+  return labels[value];
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : `Request failed with HTTP ${response.status}.`,
+    );
+  }
+
+  return payload as TResponse;
+}
+
+const serverTatumExecute = {
+  executeTransactionBlock(input: ExecuteTransactionBlockInput) {
+    return postJson<JsonValue>("/api/sui/execute", input);
+  },
+};
+
+const serverTatumRead = {
+  getObject(objectId: string, options?: SuiObjectReadOptions) {
+    return postJson<JsonValue>("/api/sui/object", { objectId, options });
+  },
+};
+
+function createTamperedBlob(file: File): Blob {
+  return new Blob([file, new Uint8Array([0])], {
+    type: file.type || "application/octet-stream",
+  });
+}
+
 export default function Home() {
+  const wallet = useWalletBridge();
   const [activeView, setActiveView] = useState<ViewId>("register");
 
   const [registry, setRegistry] = useState<EvidenceRecord[]>([
@@ -248,6 +324,7 @@ export default function Home() {
   const [attestNotes, setAttestNotes] = useState("");
   const [attestType, setAttestType] = useState("EvidenceReviewed");
   const [isAttesting, setIsAttesting] = useState(false);
+  const [attestError, setAttestError] = useState<string | null>(null);
   const [attestResult, setAttestResult] = useState<{
     attestationId: string;
     txDigest: string;
@@ -262,6 +339,9 @@ export default function Home() {
     steps: ProgressStep[];
   } | null>(null);
   const [proofSnapshot, setProofSnapshot] = useState<ProofArtifactsSnapshot | null>(null);
+  const signerAddress = wallet.address ?? "";
+
+  const signTransaction = wallet.signTransaction;
 
   const handleToggleAssertion = (assertion: string) => {
     setRegAssertions((prev) =>
@@ -284,6 +364,10 @@ export default function Home() {
 
   const handleRegister = async () => {
     if (isRegistering) return;
+    if (!signerAddress) {
+      setRegisterError("Connect a Sui wallet before registering evidence.");
+      return;
+    }
     if (!regFile) {
       setRegisterError("Select a document before preparing the registration flow.");
       return;
@@ -309,38 +393,53 @@ export default function Home() {
     const steps: ProgressStep[] = [
       { label: "Computing SHA-256 hash", status: "pending" },
       { label: "Encrypting file and metadata", status: "pending" },
-      { label: "Preparing Walrus blob reference", status: "pending" },
-      { label: "Preparing Sui registration proof", status: "pending" },
+      { label: "Uploading encrypted blob to Walrus", status: "pending" },
+      { label: "Signing and submitting Sui registration", status: "pending" },
     ];
 
     try {
       steps[0].status = "running";
       setOperationProgress({ type: "register", steps: [...steps] });
-      const commitment = await hashFile(regFile);
-      await delay(200);
+      const encryptionKey = await generateEncryptionKey();
+      const registerEvidence = createRegisterEvidenceFlow({
+        packageId: PACKAGE_ID,
+        signerAddress,
+        signTransaction,
+        encryptionKey,
+        tatum: serverTatumExecute,
+        walrusNetwork: "testnet",
+        walrusPublisherUrl: process.env.NEXT_PUBLIC_WALRUS_PUBLISHER_URL,
+        walrusAggregatorUrl: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL,
+      });
+
       steps[0] = {
         ...steps[0],
         status: "done",
-        detail: truncateValue(commitment),
+        detail: "Prepared locally",
       };
 
       steps[1].status = "running";
       setOperationProgress({ type: "register", steps: [...steps] });
-      const encryptionKey = await generateEncryptionKey();
-      const encryptedFile = await encryptFile(regFile, encryptionKey);
-      const encryptedMetadata = await encryptMetadata(metadata, encryptionKey);
-      await delay(200);
       steps[1] = {
         ...steps[1],
         status: "done",
-        detail: `${formatMegabytes(encryptedFile.ciphertext.byteLength)} encrypted`,
+        detail: "AES-GCM ready",
       };
 
       steps[2].status = "running";
       setOperationProgress({ type: "register", steps: [...steps] });
-      const blobSeed = await hashFile(encryptedFile.ciphertext);
-      const blobId = `walrus::blob-${blobSeed.substring(0, 28)}`;
-      await delay(150);
+      const result = await registerEvidence({
+        content: regFile,
+        metadata,
+        assertions: regAssertions.map(toAssertionId),
+        signerAddress,
+      });
+      const commitment = result.evidence.commitment;
+      const blobId = result.evidence.blobId ?? result.evidence.proof?.walrusBlobId ?? "n/a";
+      const objectId = result.evidence.id;
+      const txDigest = result.transactionDigest ?? result.evidence.proof?.transactionDigest ?? "n/a";
+      const registeredAt = result.evidence.registeredAt ?? new Date().toISOString();
+
       steps[2] = {
         ...steps[2],
         status: "done",
@@ -349,9 +448,6 @@ export default function Home() {
 
       steps[3].status = "running";
       setOperationProgress({ type: "register", steps: [...steps] });
-      const txDigest = toMockDigest(commitment);
-      const objectId = toMockObjectId(blobSeed);
-      await delay(150);
       steps[3] = {
         ...steps[3],
         status: "done",
@@ -359,10 +455,10 @@ export default function Home() {
       };
       setOperationProgress({ type: "register", steps: [...steps] });
 
-      const registeredAt = new Date().toISOString().replace("T", " ").substring(0, 16);
+      const registeredAtLabel = registeredAt.replace("T", " ").substring(0, 16);
       const newRecord: EvidenceRecord = {
         id: objectId,
-        date: registeredAt,
+        date: registeredAtLabel,
         type: regDocType,
         source: sourceLabel,
         commitment,
@@ -373,6 +469,7 @@ export default function Home() {
         notes: regDesc || "No description provided.",
         fileName: regFile.name,
         fileSize: formatMegabytes(regFile.size),
+        sourceFile: regFile,
       };
 
       setRegistry((prev) => [
@@ -387,23 +484,20 @@ export default function Home() {
         txDigest,
         blobId,
         commitment,
-        encryptedFileSize: formatMegabytes(encryptedFile.ciphertext.byteLength),
-        encryptedMetadataSize: `${encryptedMetadata.ciphertext.byteLength} B`,
+        encryptedFileSize: `${result.artifacts.encryptedFile.ciphertext.length} B`,
+        encryptedMetadataSize: `${result.artifacts.encryptedMetadata.ciphertext.length} B`,
         sourceConfidence: "L2 - Company Upload",
       });
       setProofSnapshot({
         evidenceId: objectId,
         txDigest,
-        packageId: DEMO_PACKAGE_ID,
+        packageId: PACKAGE_ID,
         commitment,
         blobReference: blobId,
-        updatedAt: registeredAt,
+        updatedAt: registeredAtLabel,
       });
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Registration flow failed while preparing local proof artifacts.";
+      const message = getErrorMessage(error, "Registration failed while calling live infrastructure.");
       setRegisterError(message);
       setOperationProgress(null);
     } finally {
@@ -420,6 +514,7 @@ export default function Home() {
   const resetAttestDraft = () => {
     setAttestNotes("");
     setAttestType("EvidenceReviewed");
+    setAttestError(null);
     setAttestResult(null);
     setOperationProgress((prev) => (prev?.type === "attest" ? null : prev));
   };
@@ -436,119 +531,148 @@ export default function Home() {
       return;
     }
 
+    const sourceContent = verifyFile ?? record.sourceFile;
+    if (!sourceContent) {
+      setVerificationResult({
+        status: "tampered",
+        message: "Load the original evidence file before running live verification for this record.",
+      });
+      setIsVerifying(false);
+      return;
+    }
+
     const steps: ProgressStep[] = [
-      { label: "Fetching recorded commitment", status: "pending" },
+      { label: "Fetching on-chain EvidenceRecord", status: "pending" },
       { label: "Preparing verification file", status: "pending" },
       { label: "Computing comparison hash", status: "pending" },
     ];
 
-    steps[0].status = "running";
-    setOperationProgress({ type: "verify", steps: [...steps] });
-    await delay(250);
-    steps[0] = {
-      ...steps[0],
-      status: "done",
-      detail: truncateValue(record.id, 14),
-    };
-
-    steps[1].status = "running";
-    setOperationProgress({ type: "verify", steps: [...steps] });
-    await delay(250);
-    const checkedFileLabel = verifyFile ? verifyFile.name : record.fileName || "Shell sample";
-    steps[1] = {
-      ...steps[1],
-      status: "done",
-      detail: checkedFileLabel,
-    };
-
-    steps[2].status = "running";
-    setOperationProgress({ type: "verify", steps: [...steps] });
-
-    let computedHash = record.commitment;
-
-    if (verifyFile) {
-      computedHash = await hashFile(verifyFile);
-    }
-    if (simulateTamper) {
-      computedHash = `f2a8d9e2b10a9c8f${record.commitment.substring(16)}`;
-    }
-
-    await delay(250);
-
-    if (computedHash === record.commitment) {
-      const checkedAt = new Date().toISOString().replace("T", " ").substring(0, 16);
-      steps[2] = {
-        ...steps[2],
-        status: "done",
-        detail: "Hash matches",
-      };
+    try {
+      steps[0].status = "running";
       setOperationProgress({ type: "verify", steps: [...steps] });
-      setVerificationResult({
-        status: "success",
-        message:
-          "Hash matches the recorded commitment. The supplied file is consistent with the evidence record.",
-        computedHash,
-        expectedHash: record.commitment,
-        checkedFileLabel,
+      const verifyEvidence = createVerifyEvidenceFlow({
+        tatum: serverTatumRead,
+        packageId: PACKAGE_ID,
       });
-      setLastVerificationSession({
+
+      steps[0] = {
+        ...steps[0],
+        status: "done",
+        detail: truncateValue(record.id, 14),
+      };
+
+      steps[1].status = "running";
+      setOperationProgress({ type: "verify", steps: [...steps] });
+      const checkedFileLabel = simulateTamper
+        ? `${sourceContent.name || record.fileName || "evidence"} + byte`
+        : sourceContent.name || record.fileName || "Evidence file";
+      const content = simulateTamper && sourceContent instanceof File
+        ? createTamperedBlob(sourceContent)
+        : sourceContent;
+      steps[1] = {
+        ...steps[1],
+        status: "done",
+        detail: checkedFileLabel,
+      };
+
+      steps[2].status = "running";
+      setOperationProgress({ type: "verify", steps: [...steps] });
+      const result = await verifyEvidence({
         evidenceId: verifyRecordId,
-        status: "success",
-        checkedFileLabel,
-        checkedAt,
+        content,
       });
-      setProofSnapshot((prev) => ({
-        evidenceId: verifyRecordId,
-        txDigest: prev?.txDigest,
-        packageId: DEMO_PACKAGE_ID,
-        commitment: record.commitment,
-        blobReference: record.blobId,
-        attestationId: prev?.attestationId,
-        verificationStatus: "success",
-        checkedFileLabel,
-        updatedAt: checkedAt,
-      }));
-      setAttestRecordId(verifyRecordId);
-    } else {
-      const checkedAt = new Date().toISOString().replace("T", " ").substring(0, 16);
+      const checkedAt = result.checkedAt.replace("T", " ").substring(0, 16);
+
+      if (result.isMatch) {
+        steps[2] = {
+          ...steps[2],
+          status: "done",
+          detail: "Hash matches",
+        };
+        setOperationProgress({ type: "verify", steps: [...steps] });
+        setVerificationResult({
+          status: "success",
+          message:
+            "Hash matches the recorded Sui commitment. The supplied file is consistent with the evidence record.",
+          computedHash: result.actualCommitment,
+          expectedHash: result.expectedCommitment,
+          checkedFileLabel,
+        });
+        setLastVerificationSession({
+          evidenceId: verifyRecordId,
+          status: "success",
+          checkedFileLabel,
+          checkedAt,
+        });
+        setProofSnapshot((prev) => ({
+          evidenceId: verifyRecordId,
+          txDigest: prev?.txDigest,
+          packageId: PACKAGE_ID,
+          commitment: result.expectedCommitment,
+          blobReference: result.evidence?.blobId ?? record.blobId,
+          attestationId: prev?.attestationId,
+          verificationStatus: "success",
+          checkedFileLabel,
+          updatedAt: checkedAt,
+        }));
+        setAttestRecordId(verifyRecordId);
+      } else {
+        const checkedAt = result.checkedAt.replace("T", " ").substring(0, 16);
+        steps[2] = {
+          ...steps[2],
+          status: "error",
+          detail: "Tamper detected",
+        };
+        setOperationProgress({ type: "verify", steps: [...steps] });
+        setVerificationResult({
+          status: "tampered",
+          message:
+            "Tamper detected. The supplied file does not match the recorded Sui commitment for this evidence item.",
+          computedHash: result.actualCommitment,
+          expectedHash: result.expectedCommitment,
+          checkedFileLabel,
+        });
+        setLastVerificationSession({
+          evidenceId: verifyRecordId,
+          status: "tampered",
+          checkedFileLabel,
+          checkedAt,
+        });
+        setProofSnapshot((prev) => ({
+          evidenceId: verifyRecordId,
+          txDigest: prev?.txDigest,
+          packageId: PACKAGE_ID,
+          commitment: result.expectedCommitment,
+          blobReference: result.evidence?.blobId ?? record.blobId,
+          attestationId: prev?.attestationId,
+          verificationStatus: "tampered",
+          checkedFileLabel,
+          updatedAt: checkedAt,
+        }));
+      }
+    } catch (error) {
       steps[2] = {
         ...steps[2],
         status: "error",
-        detail: "Tamper detected",
+        detail: "Verification failed",
       };
       setOperationProgress({ type: "verify", steps: [...steps] });
       setVerificationResult({
         status: "tampered",
-        message:
-          "Tamper detected. The supplied file does not match the recorded commitment for this evidence item.",
-        computedHash,
+        message: getErrorMessage(error, "Verification failed while calling live infrastructure."),
         expectedHash: record.commitment,
-        checkedFileLabel,
       });
-      setLastVerificationSession({
-        evidenceId: verifyRecordId,
-        status: "tampered",
-        checkedFileLabel,
-        checkedAt,
-      });
-      setProofSnapshot((prev) => ({
-        evidenceId: verifyRecordId,
-        txDigest: prev?.txDigest,
-        packageId: DEMO_PACKAGE_ID,
-        commitment: record.commitment,
-        blobReference: record.blobId,
-        attestationId: prev?.attestationId,
-        verificationStatus: "tampered",
-        checkedFileLabel,
-        updatedAt: checkedAt,
-      }));
+    } finally {
+      setIsVerifying(false);
     }
-
-    setIsVerifying(false);
   };
 
   const handleAttest = async () => {
     if (!attestRecordId || isAttesting) return;
+    if (!signerAddress) {
+      setAttestError("Connect a Sui wallet before creating an attestation.");
+      return;
+    }
     if (
       !lastVerificationSession ||
       lastVerificationSession.evidenceId !== attestRecordId ||
@@ -558,6 +682,7 @@ export default function Home() {
     }
 
     setIsAttesting(true);
+    setAttestError(null);
     setAttestResult(null);
 
     const steps: ProgressStep[] = [
@@ -565,71 +690,90 @@ export default function Home() {
       { label: "Preparing attestation proof", status: "pending" },
     ];
 
-    steps[0].status = "running";
-    setOperationProgress({ type: "attest", steps: [...steps] });
-    await delay(300);
-    steps[0] = {
-      ...steps[0],
-      status: "done",
-      detail: attestType,
-    };
+    try {
+      steps[0].status = "running";
+      setOperationProgress({ type: "attest", steps: [...steps] });
+      const encryptionKey = await generateEncryptionKey();
+      const createAttestation = createAttestationFlow({
+        packageId: PACKAGE_ID,
+        signerAddress,
+        signTransaction,
+        encryptionKey,
+        tatum: serverTatumExecute,
+      });
+      const attestationType = toAttestationType(attestType);
+      steps[0] = {
+        ...steps[0],
+        status: "done",
+        detail: toAttestationLabel(attestationType),
+      };
 
-    steps[1].status = "running";
-    setOperationProgress({ type: "attest", steps: [...steps] });
-    await delay(300);
+      steps[1].status = "running";
+      setOperationProgress({ type: "attest", steps: [...steps] });
+      const result = await createAttestation({
+        evidenceId: attestRecordId,
+        reviewerAddress: signerAddress,
+        attestationType,
+        sourceConfidence: "L3" satisfies SourceConfidenceLevel,
+        note: attestNotes || "Attested via Linow Workspace.",
+      });
+      const attestationId = result.attestation.id;
+      const txDigest = result.attestation.transactionDigest ?? "n/a";
+      const createdAt = result.attestation.createdAt.replace("T", " ").substring(0, 16);
 
-    const attestationId = `0x${Math.random().toString(16).substring(2, 24)}attest`;
-    const txDigest = `AttTx${Math.random().toString(36).substring(2, 12).toUpperCase()}`;
-    const createdAt = new Date().toISOString().replace("T", " ").substring(0, 16);
+      steps[1] = {
+        ...steps[1],
+        status: "done",
+        detail: txDigest,
+      };
+      setOperationProgress({ type: "attest", steps: [...steps] });
 
-    steps[1] = {
-      ...steps[1],
-      status: "done",
-      detail: txDigest,
-    };
-    setOperationProgress({ type: "attest", steps: [...steps] });
+      setRegistry((prev) =>
+        prev.map((record) =>
+          record.id === attestRecordId
+            ? {
+                ...record,
+                reviewer: signerAddress,
+                notes: attestNotes || "Attested via Linow Workspace.",
+                latestAttestation: {
+                  id: attestationId,
+                  action: toAttestationLabel(attestationType),
+                  reviewer: signerAddress,
+                  note: attestNotes || "Attested via Linow Workspace.",
+                  txDigest,
+                  createdAt,
+                },
+              }
+            : record,
+        ),
+      );
 
-    setRegistry((prev) =>
-      prev.map((record) =>
-        record.id === attestRecordId
-          ? {
-              ...record,
-              reviewer: attestReviewer,
-              notes: attestNotes || "Attested via Linow Workspace.",
-              latestAttestation: {
-                id: toMockAttestationId(attestationId),
-                action: attestType,
-                reviewer: attestReviewer,
-                note: attestNotes || "Attested via Linow Workspace.",
-                txDigest,
-                createdAt,
-              },
-            }
-          : record,
-      ),
-    );
-
-    setAttestResult({
-      attestationId,
-      txDigest,
-      evidenceId: attestRecordId,
-      reviewer: attestReviewer,
-      action: attestType,
-      createdAt,
-    });
-    const attestedRecord = registry.find((record) => record.id === attestRecordId);
-    setProofSnapshot((prev) => ({
-      evidenceId: attestRecordId,
-      txDigest,
-      packageId: DEMO_PACKAGE_ID,
-      commitment: attestedRecord?.commitment || prev?.commitment,
-      blobReference: attestedRecord?.blobId || prev?.blobReference,
-      attestationId,
-      verificationStatus: prev?.verificationStatus,
-      checkedFileLabel: prev?.checkedFileLabel,
-      updatedAt: createdAt,
-    }));
-    setIsAttesting(false);
+      setAttestResult({
+        attestationId,
+        txDigest,
+        evidenceId: attestRecordId,
+        reviewer: signerAddress,
+        action: toAttestationLabel(attestationType),
+        createdAt,
+      });
+      const attestedRecord = registry.find((record) => record.id === attestRecordId);
+      setProofSnapshot((prev) => ({
+        evidenceId: attestRecordId,
+        txDigest,
+        packageId: PACKAGE_ID,
+        commitment: attestedRecord?.commitment || prev?.commitment,
+        blobReference: attestedRecord?.blobId || prev?.blobReference,
+        attestationId,
+        verificationStatus: prev?.verificationStatus,
+        checkedFileLabel: prev?.checkedFileLabel,
+        updatedAt: createdAt,
+      }));
+    } catch (error) {
+      setAttestError(getErrorMessage(error, "Attestation failed while calling live infrastructure."));
+      setOperationProgress(null);
+    } finally {
+      setIsAttesting(false);
+    }
   };
 
   const renderSteps = (viewType: ViewId) => {
@@ -689,7 +833,7 @@ export default function Home() {
         <div className="topbar-right">
           <div className="topbar-status">
             <span className="status-dot" />
-            <span>Sui Proof Path Pending Live Integration</span>
+            <span>{signerAddress ? `Connected ${truncateValue(signerAddress, 14)}` : "Connect wallet for live Sui proofs"}</span>
           </div>
           <div className="topbar-divider" />
           <div className="topbar-encryption">
@@ -699,6 +843,7 @@ export default function Home() {
             </svg>
             <span>AES-256-GCM</span>
           </div>
+          {wallet.connectButton}
         </div>
       </header>
 
@@ -728,7 +873,7 @@ export default function Home() {
                 <li>Commitments come from SHA-256 of the plaintext file.</li>
                 <li>Sui stores commitments and attestations, not raw evidence.</li>
                 <li>Walrus blobs must stay encrypted before storage.</li>
-                <li>Shell outputs are product placeholders until live integration lands.</li>
+                <li>Live proof outputs come from the SDK, Tatum, Walrus, and Sui testnet.</li>
               </ul>
             </div>
           </div>
@@ -751,7 +896,7 @@ export default function Home() {
                   <span className="result-title success">Proof Output Surface</span>
                 </div>
                 <p className="result-message">
-                  Judge-facing artifacts from the latest shell action. These stay mock-linked until live integration lands.
+                  Judge-facing artifacts from the latest live SDK action.
                 </p>
                 <div className="proof-grid">
                   <div className="proof-row">
@@ -885,7 +1030,7 @@ export default function Home() {
                   <div className="btn-actions">
                     <button
                       className="btn-primary"
-                      disabled={isRegistering || !regFile || regAssertions.length === 0}
+                      disabled={isRegistering || !signerAddress || !regFile || regAssertions.length === 0}
                       suppressHydrationWarning
                       onClick={handleRegister}
                     >
@@ -927,7 +1072,7 @@ export default function Home() {
                       <span className="result-title success">Registration Flow Prepared</span>
                     </div>
                     <p className="result-message">
-                      Local hashing and encryption completed. Mock Walrus and Sui references were generated for the shell while live integration is still pending.
+                      File hashing, encryption, Walrus storage, and Sui registration completed through the live SDK flow.
                     </p>
                     <div className="proof-grid">
                       <div className="proof-row">
@@ -940,7 +1085,7 @@ export default function Home() {
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Package ID</span>
-                        <span className="proof-value">{truncateValue(DEMO_PACKAGE_ID, 28)}</span>
+                        <span className="proof-value">{truncateValue(PACKAGE_ID, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Walrus Blob</span>
@@ -1156,9 +1301,10 @@ export default function Home() {
                       <input
                         type="text"
                         className="field-input mono"
-                        value={attestReviewer}
+                        value={signerAddress || attestReviewer}
                         suppressHydrationWarning
                         onChange={(event) => setAttestReviewer(event.target.value)}
+                        disabled={Boolean(signerAddress)}
                         placeholder="0x..."
                       />
                     </div>
@@ -1204,7 +1350,7 @@ export default function Home() {
                   <div className="btn-actions">
                     <button
                       className="btn-primary"
-                      disabled={isAttesting || !attestRecordId || !selectedRecordVerified}
+                      disabled={isAttesting || !signerAddress || !attestRecordId || !selectedRecordVerified}
                       suppressHydrationWarning
                       onClick={handleAttest}
                     >
@@ -1226,6 +1372,18 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+
+                {attestError && (
+                  <div className="result-card error">
+                    <div className="result-header">
+                      <svg className="result-icon error" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="result-title error">Attestation Blocked</span>
+                    </div>
+                    <p className="result-message">{attestError}</p>
+                  </div>
+                )}
 
                 {renderSteps("attest")}
 
@@ -1255,7 +1413,7 @@ export default function Home() {
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Package ID</span>
-                        <span className="proof-value">{truncateValue(DEMO_PACKAGE_ID, 28)}</span>
+                        <span className="proof-value">{truncateValue(PACKAGE_ID, 28)}</span>
                       </div>
                       <div className="proof-row">
                         <span className="proof-label">Reviewer</span>

@@ -219,3 +219,39 @@
   - The unified proof surface tracks only the latest action in session state.
 - Follow-up needed:
   - Replace placeholder package and transaction outputs with real chain values during `J6-18`.
+
+## 2026-06-06 - Integrate Real SDK Flows Into UI
+
+### Change
+- Files touched:
+  - `app/package.json`
+  - `app/package-lock.json`
+  - `app/src/app/api/sui/execute/route.ts`
+  - `app/src/app/api/sui/object/route.ts`
+  - `app/src/app/layout.tsx`
+  - `app/src/app/page.tsx`
+  - `app/src/app/providers.tsx`
+  - `app/src/app/wallet-provider.tsx`
+  - `app/src/lib/dapp-kit.ts`
+  - `app/src/lib/wallet-context.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added the current Mysten dApp Kit React wallet provider and a small app wallet bridge for signing SDK-prepared transactions.
+  - Added server-side Sui API routes so Tatum object reads and signed transaction submissions use server `TATUM_API_KEY` instead of exposing it to the browser.
+  - Replaced mock register, verify, and attest handlers with the real SDK flows from `@linow/sdk`.
+  - Preserved the existing UI structure while feeding proof cards real evidence IDs, tx digests, Walrus blob IDs, commitments, and attestation IDs.
+  - Kept attestation gated behind successful verification and kept reviewer notes encrypted before on-chain submission.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-18` asks for live infrastructure wiring, not a redesign, so the existing demo shell stayed intact while the plumbing became real.
+  - Server-side Tatum routes protect the API key while still allowing browser wallets to sign transactions.
+  - The wallet bridge keeps the app aligned with "Agent proposes, human signs, chain proves": the SDK prepares transactions, the connected wallet signs, and Tatum submits.
+
+### Tech Debt
+- Known shortcuts:
+  - Registered files are kept in browser session state so the verify-original flow can reuse them; this resets on refresh.
+  - The app currently targets Sui testnet only.
+- Follow-up needed:
+  - Run a live browser smoke test with a funded testnet wallet and real Tatum key.
+  - Add fuller user-facing guidance if wallet network mismatch or missing testnet funds becomes a common demo issue.
