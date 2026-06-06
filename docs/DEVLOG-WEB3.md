@@ -73,3 +73,29 @@
 - Follow-up needed:
   - Implement `create_attestation` for `J6-05`.
   - Decide whether later integration needs stronger validation for assertion IDs, blob pointer encoding, or metadata schema versioning.
+
+## 2026-06-06 - Implement Attestation Creation
+
+### Change
+- Files touched:
+  - `contracts/Linow/sources/evidence.move`
+  - `docs/DEVLOG-WEB3.md`
+- Summary:
+  - Added `create_attestation` to create and return a reviewer-signed `Attestation` linked to a target evidence ID.
+  - Added minimal validation for attestation type and source confidence enum ranges.
+  - Added an `AttestationCreated` event and read helpers for attestation fields.
+  - Removed the unused-field suppression from the `Attestation` struct now that its fields are used by helper functions.
+
+### Reasoning
+- Why this approach was chosen:
+  - `J6-05` needs attestation as its own trust object, not a mutation of `EvidenceRecord.status`.
+  - The function uses the transaction sender as the reviewer wallet and records timestamped encrypted notes, matching the June 6 schema without storing plaintext review notes.
+  - Returning the object keeps the function composable for PTBs, while the event gives Tatum/SDK integration a clear proof artifact to parse later.
+
+### Tech Debt
+- Known shortcuts:
+  - The function accepts a target `ID` directly and does not yet prove that the ID belongs to an `EvidenceRecord`.
+  - It does not prevent the original registrant from self-attesting because role/access policy is outside the current June 6 contract scope.
+- Follow-up needed:
+  - Decide during SDK/Tatum integration whether `create_attestation` should borrow an `EvidenceRecord` to enforce target type.
+  - Add reviewer role checks later if an `AccessGrant` or audit engagement model lands.

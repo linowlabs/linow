@@ -6,6 +6,8 @@ module linow::evidence {
     use sui::tx_context::{Self, TxContext};
 
     const EInvalidCommitmentLength: u64 = 0;
+    const EInvalidAttestationType: u64 = 1;
+    const EInvalidSourceConfidence: u64 = 2;
 
     const STATUS_REGISTERED: u8 = 0;
     const STATUS_UNDER_REVIEW: u8 = 1;
@@ -42,7 +44,6 @@ module linow::evidence {
         registered_at: u64,
     }
 
-    #[allow(unused_field)]
     public struct Attestation has key, store {
         id: UID,
         target_id: ID,
@@ -50,6 +51,15 @@ module linow::evidence {
         attestation_type: u8,
         source_confidence: u8,
         encrypted_notes: vector<u8>,
+        attested_at: u64,
+    }
+
+    public struct AttestationCreated has copy, drop {
+        attestation_id: ID,
+        target_id: ID,
+        attester: address,
+        attestation_type: u8,
+        source_confidence: u8,
         attested_at: u64,
     }
 
@@ -125,6 +135,69 @@ module linow::evidence {
 
     public fun audit_pack_id(record: &EvidenceRecord): &Option<ID> {
         &record.audit_pack_id
+    }
+
+    public fun create_attestation(
+        target_id: ID,
+        attestation_type: u8,
+        source_confidence: u8,
+        encrypted_notes: vector<u8>,
+        clock: &Clock,
+        ctx: &mut TxContext,
+    ): Attestation {
+        assert!(attestation_type <= ATTESTATION_REJECTED, EInvalidAttestationType);
+        assert!(source_confidence <= SOURCE_CONFIDENCE_L5, EInvalidSourceConfidence);
+
+        let attester = tx_context::sender(ctx);
+        let attested_at = clock::timestamp_ms(clock);
+        let attestation = Attestation {
+            id: object::new(ctx),
+            target_id,
+            attester,
+            attestation_type,
+            source_confidence,
+            encrypted_notes,
+            attested_at,
+        };
+        let attestation_id = object::id(&attestation);
+
+        event::emit(AttestationCreated {
+            attestation_id,
+            target_id,
+            attester,
+            attestation_type,
+            source_confidence,
+            attested_at,
+        });
+        attestation
+    }
+
+    public fun attestation_id(attestation: &Attestation): ID {
+        object::id(attestation)
+    }
+
+    public fun target_id(attestation: &Attestation): ID {
+        attestation.target_id
+    }
+
+    public fun attester(attestation: &Attestation): address {
+        attestation.attester
+    }
+
+    public fun attestation_type(attestation: &Attestation): u8 {
+        attestation.attestation_type
+    }
+
+    public fun source_confidence(attestation: &Attestation): u8 {
+        attestation.source_confidence
+    }
+
+    public fun encrypted_notes(attestation: &Attestation): &vector<u8> {
+        &attestation.encrypted_notes
+    }
+
+    public fun attested_at(attestation: &Attestation): u64 {
+        attestation.attested_at
     }
 
     public fun under_review_status(): u8 {
