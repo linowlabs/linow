@@ -20,3 +20,6 @@
   - The doc reflects the current shell styling, but some views are still presentational until the real SDK flows are wired in.
 - Follow-up needed:
   - Update the design doc again only if the shell meaningfully changes, so it remains a stable reference rather than a changelog.
+## 2026-06-06
+- Rewrote the root `README.md` as a polished project landing page based on `MASTER.md`, including the centered Linow badge placeholder and updated product narrative.
+- Reworked the README stack section into a centered chip bar for Next.js, Walrus, and Tatum to match the project framing in `MASTER.md`.
