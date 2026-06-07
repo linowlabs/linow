@@ -12,9 +12,9 @@
 
 </div>
 
-Linow is a verifiable audit evidence layer on Sui that helps companies prove audit documents existed, stayed unchanged, and were reviewed by specific wallet-backed reviewers.
+Linow is a verifiable audit evidence layer on Sui that helps companies prove audit documents existed, matched the recorded on-chain commitment, and were reviewed by specific wallet-backed reviewers.
 
-Audit evidence today is fragmented across emails, drives, PDFs, and exports, making it difficult for companies and auditors to prove document integrity end to end. Linow fixes this by hashing each document, encrypting it client-side, storing the encrypted file on Walrus, and registering a tamper-evident `EvidenceRecord` on Sui through Tatum's Sui RPC. Auditors can later retrieve the evidence, verify the hash against the on-chain commitment, and create reviewer attestations tied to their wallet.
+Audit evidence today is fragmented across emails, drives, PDFs, and exports, making it difficult for companies and auditors to prove document integrity end-to-end. Linow fixes this by hashing each document, encrypting it client-side, storing the encrypted file on Walrus, and registering a tamper-evident EvidenceRecord on Sui through Tatum’s Sui RPC. Auditors can later retrieve the evidence, verify the hash against the on-chain commitment, and create reviewer attestations tied to their wallet.
 
 The result is a machine-checkable evidence trail: the document stays private, Walrus stores the encrypted evidence, Sui proves the lifecycle, and Tatum powers the chain interactions.
 
