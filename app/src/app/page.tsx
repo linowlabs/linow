@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import {
   createAttestationFlow,
@@ -248,6 +248,8 @@ const serverTatumRead = {
 export default function Home() {
   const wallet = useWalletBridge();
   const [activeView, setActiveView] = useState<ViewId>("register");
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const [registry, setRegistry] = useState<EvidenceRecord[]>([]);
 
@@ -295,6 +297,33 @@ export default function Home() {
   const signerAddress = wallet.address ?? "";
 
   const signTransaction = wallet.signTransaction;
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 960px)");
+
+    const syncSidebar = (matchesCompact: boolean) => {
+      setIsCompactViewport(matchesCompact);
+      setIsSidebarOpen(!matchesCompact);
+    };
+
+    syncSidebar(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => syncSidebar(event.matches);
+
+    mediaQuery.addEventListener("change", handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange);
+    };
+  }, []);
+
+  const handleSelectView = (viewId: ViewId) => {
+    setActiveView(viewId);
+
+    if (isCompactViewport) {
+      setIsSidebarOpen(false);
+    }
+  };
 
   const handleToggleAssertion = (assertion: string) => {
     setRegAssertions((prev) =>
@@ -773,11 +802,25 @@ export default function Home() {
     <main className="app-container">
       <header className="topbar">
         <div className="topbar-left">
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={isSidebarOpen ? "Collapse navigation" : "Expand navigation"}
+            aria-expanded={isSidebarOpen}
+            suppressHydrationWarning
+            onClick={() => setIsSidebarOpen((prev) => !prev)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
           <div className="topbar-logo-wrap">
             <Image className="topbar-logo" src="/mascot.png" alt="Linow mascot" width={22} height={22} priority />
           </div>
-          <span className="topbar-brand">Linow</span>
-          <span className="topbar-badge">TESTNET v0.1</span>
+          <div className="topbar-brand-block">
+            <span className="topbar-brand">Linow</span>
+            <span className="topbar-badge">TESTNET v0.1</span>
+          </div>
         </div>
         <div className="topbar-right">
           <div className="topbar-status">
@@ -792,11 +835,23 @@ export default function Home() {
             </svg>
             <span>AES-256-GCM</span>
           </div>
-          {wallet.connectButton}
+          <div className="topbar-wallet">{wallet.connectButton}</div>
         </div>
       </header>
 
-      <div className="app-body">
+      <div
+        className={`app-body${isCompactViewport ? " is-compact" : ""}${isSidebarOpen ? " sidebar-open" : " sidebar-collapsed"}`}
+      >
+        {isCompactViewport && isSidebarOpen && (
+          <button
+            type="button"
+            className="sidebar-backdrop"
+            aria-label="Close navigation"
+            suppressHydrationWarning
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        )}
+
         <aside className="sidebar">
           <div className="sidebar-section">
             <div className="sidebar-section-label">Evidence Flows</div>
@@ -805,10 +860,10 @@ export default function Home() {
                 <div
                   key={view.id}
                   className={`nav-item${activeView === view.id ? " active" : ""}`}
-                  onClick={() => setActiveView(view.id)}
+                  onClick={() => handleSelectView(view.id)}
                 >
                   {view.icon}
-                  <span>{view.label}</span>
+                  <span className="nav-text">{view.label}</span>
                   {view.id === "records" && <span className="nav-count">{registry.length}</span>}
                 </div>
               ))}

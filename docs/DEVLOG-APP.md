@@ -409,3 +409,114 @@
   - This adds a little extra install time before app builds in exchange for reliable monorepo deployment.
 - Follow-up needed:
   - Revisit with npm workspaces or a root package manager setup if the monorepo grows.
+
+## 2026-06-07 - Improve Responsive Workspace Shell
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a sidebar toggle that works across desktop and mobile viewports.
+  - Turned the sidebar into an overlay drawer on compact screens, while preserving a collapsed rail mode on wider screens.
+  - Reworked the top bar and workspace header spacing so the shell wraps cleanly on phones and uses less vertical space on short landscape screens.
+
+### Reasoning
+- Why this approach was chosen:
+  - The user asked specifically for responsive fixes without disturbing the product logic, so the patch stays at the shell/layout layer.
+  - A shared toggle keeps navigation consistent across viewport sizes instead of introducing separate mobile-only controls.
+  - Slimming the header on short screens protects the live demo path by keeping more room available for the actual register, verify, and attest forms.
+
+### Tech Debt
+- Known shortcuts:
+  - Sidebar state currently resets to open on desktop and closed on compact screens whenever the viewport crosses the breakpoint.
+- Follow-up needed:
+  - If we want stronger persistence later, store the user’s sidebar preference in local storage without affecting the evidence workflow state.
+
+## 2026-06-07 - Make Wallet Overlay Responsive
+
+### Change
+- Files touched:
+  - `app/src/app/wallet-provider.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Wrapped the Mysten connect button with a small responsive enhancer.
+  - Injected mobile-safe shadow-root styles into the connected-account menu and connect modal so the wallet overlay respects phone widths and short landscape heights.
+  - Kept the existing wallet connect and signing logic unchanged.
+
+### Reasoning
+- Why this approach was chosen:
+  - The wallet UI is rendered through web components, so normal app CSS cannot reach the overlay internals directly.
+  - A targeted shadow-root style injection lets us fix the overlay sizing without replacing the Mysten connection flow or forking the wallet UI.
+  - This keeps the responsiveness task scoped to presentation, as requested, while protecting the live demo path.
+
+### Tech Debt
+- Known shortcuts:
+  - The responsive overlay patch depends on the current Mysten component structure and shadow roots remaining compatible.
+- Follow-up needed:
+  - If dApp Kit later exposes richer styling hooks or parts for the account menu and modal, replace the injection approach with the official API.
+
+## 2026-06-07 - Clamp Mobile Wallet Account Menu
+
+### Change
+- Files touched:
+  - `app/src/app/wallet-provider.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a mobile viewport clamp for the Mysten connected-account dropdown after the wallet package computes its floating position.
+  - Forced the open account menu to use fixed positioning on narrow portrait screens so it stays inside the visible viewport.
+
+### Reasoning
+- Why this approach was chosen:
+  - Resizing the dropdown alone did not fix portrait mode because the wallet package still positioned it from the topbar trigger.
+  - Clamping after placement keeps the existing wallet UI and account switching behavior intact while preventing horizontal overflow.
+
+### Tech Debt
+- Known shortcuts:
+  - The clamp watches the current shadow-root menu structure from dApp Kit.
+- Follow-up needed:
+  - Prefer a first-party placement option if Mysten exposes one in a future dApp Kit release.
+
+## 2026-06-07 - Wrap Mobile Progress Details
+
+### Change
+- Files touched:
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Changed operation progress rows to use a grid layout so long labels and proof details can wrap.
+  - Added a mobile portrait-friendly layout that moves progress details below the step label instead of squeezing them into the same row.
+
+### Reasoning
+- Why this approach was chosen:
+  - Register progress can include long Walrus blob IDs and Sui digests, which should remain visible without breaking the card width.
+  - Keeping the icon column fixed while allowing text columns to wrap preserves the existing progress structure and avoids touching flow logic.
+
+### Tech Debt
+- Known shortcuts:
+  - Long values are still displayed inline rather than opening a copy/details drawer.
+- Follow-up needed:
+  - Consider adding copy buttons for full digests if the proof surface needs more mobile polish later.
+
+## 2026-06-07 - Remove Shell-Level Mobile Horizontal Overflow
+
+### Change
+- Files touched:
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Changed the main app shell from `width: 100vw` to `width: 100%`.
+  - Clipped horizontal overflow on the mobile shell containers so the off-canvas sidebar no longer widens the whole page.
+
+### Reasoning
+- Why this approach was chosen:
+  - The horizontal scroll was coming from the shell itself, not only from inner content like the records table.
+  - On mobile, `100vw` plus a translated sidebar drawer is enough to make the page wider than the visible viewport.
+
+### Tech Debt
+- Known shortcuts:
+  - The records table still has its own independent horizontal scroll surface by design.
+- Follow-up needed:
+  - Revisit the records presentation later if we want to replace the table with a mobile-specific stacked layout.
