@@ -6,5 +6,8 @@ node_modules/
 contracts/**/build/
 
 app/.next/
-
+docs/MASTER.MD
+docs/MASTER_SUI.md
+docs/Linow Task List - task_sui_overflow.csv
+docs/PULL_REQUEST_TEMPLATE.md
 .env
