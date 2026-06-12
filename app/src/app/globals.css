@@ -18,7 +18,7 @@
   --white: #FFFFFF;
 
   /* Typography Fonts */
-  --font-sans: var(--font-dm-sans), 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: var(--font-geist-sans), 'Geist Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: var(--font-geist-mono), 'Geist Mono', 'SF Mono', 'Consolas', monospace;
 
   /* Animation ease */
