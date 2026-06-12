@@ -19,3 +19,25 @@
   - The file is just a demo asset and is not wired into the app automatically.
 - Follow-up needed:
   - Use this CSV, or a copied variant of it, as the register/verify input during the J6-19 smoke test.
+
+## 2026-06-12 - Add Engagement Pack Operating Rules
+
+### Change
+- Files touched:
+  - `demo/isa_q2_engagement/audit_docs/06_operational_playbook.md`
+  - `docs/ENGAGEMENT_PACK_SPEC.md`
+  - `docs/DEVLOG-DEMO.md`
+- Summary:
+  - Added a concrete operating playbook for the `isa_q2_engagement` demo pack.
+  - Added a reusable engagement-pack specification so future packs can follow the same structure and expectations.
+
+### Reasoning
+- Why this approach was chosen:
+  - The demo pack already had strong assets, but the distinction between input evidence, oracle outputs, and negative cases was still easy to misread.
+  - A local playbook helps anyone running the current pack, while a general spec helps future AI or developers generate new packs consistently.
+
+### Tech Debt
+- Known shortcuts:
+  - The new documents describe workflow and expectations, but they are not yet linked from a top-level demo index.
+- Follow-up needed:
+  - Add a top-level demo README if multiple engagement packs are added later.
