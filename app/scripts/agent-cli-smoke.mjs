@@ -1,0 +1,345 @@
+const baseUrl = process.env.AGENT_BASE_URL || "http://127.0.0.1:3000";
+const mode = process.argv[2] || "orchestrate";
+const fileArg = process.argv[3];
+const fileArgs = process.argv.slice(3);
+
+const bankStatementDoc = {
+  documentName: "13_bank_statement_june_2026.pdf",
+  documentText:
+    "Bank statement for June 2026. Account holder PT Arunika Cloud Commerce. Statement period 2026-06-01 to 2026-06-30. Ending balance IDR 1,245,000,000. Transfers from PT Orion Mart Tbk for INV-2026-0517 and from PT MegaLogis Indonesia were received during June 2026.",
+  context: {
+    engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+    uploaderLabel: "Company Upload (L2)",
+    auditArea: "Revenue recognition and cash receipts",
+    filePath: "demo/isa_q2_engagement/evidence_initial/04_bank_cash_receipts/13_bank_statement_june_2026.pdf",
+  },
+};
+
+const contractDoc = {
+  documentName: "09_customer_contract_orion_C-ORION-2026-019.pdf",
+  documentText:
+    "Customer contract C-ORION-2026-019 between PT Arunika Cloud Commerce and PT Orion Mart Tbk. Contract value IDR 237,262,500. Revenue recognition depends on milestone completion and customer acceptance. Contracts above IDR 200,000,000 require Commercial Committee approval before recognition.",
+  context: {
+    engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+    uploaderLabel: "Company Upload (L2)",
+    auditArea: "Revenue recognition and cash receipts",
+    filePath: "demo/isa_q2_engagement/evidence_initial/02_contracts_invoices/09_customer_contract_orion_C-ORION-2026-019.pdf",
+  },
+};
+
+const cutoffLogDoc = {
+  documentName: "05_service_delivery_cutoff_log.csv",
+  documentText:
+    "Service delivery cutoff log for Q2 2026. Orion implementation milestone 2 recorded as revenue on 2026-06-30. User acceptance testing signed on 2026-06-25. Production go-live completed on 2026-07-02. Reviewer note: cut-off exception requires follow-up.",
+  context: {
+    engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+    uploaderLabel: "Company Upload (L2)",
+    auditArea: "Revenue recognition and cash receipts",
+    filePath: "demo/isa_q2_engagement/evidence_initial/03_delivery_cutoff/05_service_delivery_cutoff_log.csv",
+  },
+};
+
+const adjustmentDoc = {
+  documentName: "15_manual_adjustment_note_JRN-2026-06-117.txt",
+  documentText:
+    "Manual adjustment note JRN-2026-06-117. Revenue accelerated by IDR 84,500,000 on 2026-06-30 to align with quarter-end management target. Prepared by finance manager. CFO approval attachment pending and not included in this evidence pack.",
+  context: {
+    engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+    uploaderLabel: "Company Upload (L2)",
+    auditArea: "Revenue recognition and cash receipts",
+    filePath: "demo/isa_q2_engagement/evidence_initial/05_gl_exports_and_policies/15_manual_adjustment_note_JRN-2026-06-117.txt",
+  },
+};
+
+const negativeDoc = {
+  documentName: "N02_wrong_document_marketing_brochure.txt",
+  documentText:
+    "Summer marketing brochure for retail expansion. Includes campaign tagline options, customer testimonials, visual direction, and product branding notes. No accounting records, approvals, balances, or transaction evidence are included.",
+  context: {
+    engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+    uploaderLabel: "Company Upload (L2)",
+    auditArea: "Revenue recognition and cash receipts",
+    filePath: "demo/isa_q2_engagement/negative_cases/N02_wrong_document_marketing_brochure.txt",
+  },
+};
+
+async function main() {
+  switch (mode) {
+    case "single-doc":
+      await runSingleDocument();
+      return;
+    case "negative-doc":
+      await runNegativeDocument();
+      return;
+    case "draft-finding":
+      await runDraftFinding();
+      return;
+    case "validate-hash":
+      await runValidateHash();
+      return;
+    case "ingest-file":
+      await runIngestFile();
+      return;
+    case "classify-file":
+      await runClassifyFile();
+      return;
+    case "orchestrate-files":
+      await runOrchestrateFiles();
+      return;
+    case "orchestrate":
+      await runOrchestrate();
+      return;
+    default:
+      throw new Error(`Unsupported mode: ${mode}`);
+  }
+}
+
+async function runSingleDocument() {
+  const classification = await postJson("/api/agent/classify", bankStatementDoc);
+  const metadata = await postJson("/api/agent/extract-metadata", bankStatementDoc);
+  const mapping = await postJson("/api/agent/map-assertions", {
+    ...bankStatementDoc,
+    classificationSummary:
+      "Classified as bank_statement with support for existence, completeness, valuation and accuracy.",
+    metadataSummary:
+      "Statement period June 2026, account holder PT Arunika Cloud Commerce, ending balance IDR 1,245,000,000.",
+  });
+
+  print("single-doc.classify", classification);
+  print("single-doc.extract-metadata", metadata);
+  print("single-doc.map-assertions", mapping);
+}
+
+async function runNegativeDocument() {
+  const classification = await postJson("/api/agent/classify", negativeDoc);
+  print("negative-doc.classify", classification);
+}
+
+async function runDraftFinding() {
+  const payload = {
+    pack_id: "pack_linow_isa_q2_demo",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage: "before_remediation",
+    gap: {
+      title: "Missing CFO approval for manual revenue adjustment",
+      severity: "high",
+      related_assertions: [3, 5, 7],
+      related_assertion_labels: ["Rights & Obligations", "Classification", "Accuracy"],
+      rationale:
+        "Manual revenue acceleration is documented, but approval evidence from the CFO is absent from the current pack.",
+      suggested_evidence: ["Upload CFO approval memo", "Upload approval workflow screenshot"],
+    },
+    documents: [adjustmentDoc, contractDoc].map((document) => ({
+      document_id: slugId(document.documentName),
+      filename: document.documentName,
+      notes: [`Source file ${document.context.filePath}`],
+      classification: {
+        schema_name: "evidence_classification",
+        schema_version: "1.0.0",
+        document_id: slugId(document.documentName),
+        filename: document.documentName,
+        document_type: document.documentName.includes("adjustment") ? "manual_adjustment_note" : "customer_contract",
+        confidence: 0.8,
+        rationale: "Seed classification for draft finding smoke test.",
+        limitations: ["Synthetic CLI fixture"],
+        assertions: document.documentName.includes("adjustment") ? [2, 5, 7] : [0, 3, 4, 5],
+        assertion_labels: document.documentName.includes("adjustment")
+          ? ["Valuation & Allocation", "Classification", "Accuracy"]
+          : ["Existence", "Rights & Obligations", "Cut-off", "Classification"],
+        source_confidence: "L2",
+        source_confidence_reason: "Company-uploaded evidence fixture.",
+      },
+      metadata: {
+        schema_name: "metadata_extraction",
+        schema_version: "1.0.0",
+        document_id: slugId(document.documentName),
+        filename: document.documentName,
+        document_date: null,
+        period_start: null,
+        period_end: "2026-06-30",
+        document_reference: null,
+        parties: [],
+        key_dates: [],
+        key_amounts: [],
+        citations: [
+          {
+            document_id: slugId(document.documentName),
+            filename: document.documentName,
+            page: null,
+            reference: document.documentText.slice(0, 160),
+            confidence: 0.8,
+          },
+        ],
+        limitations: ["Synthetic CLI fixture"],
+      },
+      assertion_mapping: {
+        schema_name: "assertion_mapping",
+        schema_version: "1.0.0",
+        document_id: slugId(document.documentName),
+        filename: document.documentName,
+        framework_reference: "ISA 500 evidence readiness",
+        mapped_assertions: [],
+        overall_rationale: "Synthetic CLI fixture",
+        limitations: ["Synthetic CLI fixture"],
+      },
+      source_confidence: {
+        schema_name: "source_confidence",
+        schema_version: "1.0.0",
+        document_id: slugId(document.documentName),
+        filename: document.documentName,
+        source_confidence: "L2",
+        source_confidence_reason: "Company-uploaded evidence fixture.",
+        evidence_basis: ["Company upload"],
+        upgrade_path: ["Upload independent approval proof"],
+        caveats: ["Not connector verified"],
+      },
+    })),
+    pack_notes: ["Synthetic CLI smoke test for SO-18 draft finding"],
+  };
+
+  const result = await postJson("/api/agent/draft-finding", payload);
+  print("draft-finding", result);
+}
+
+async function runValidateHash() {
+  const payload = {
+    artifacts: [
+      {
+        label: "sample-classification",
+        payload: {
+          schema_name: "evidence_classification",
+          schema_version: "1.0.0",
+          document_id: "doc_13_bank_statement_june_2026_pdf",
+          filename: "13_bank_statement_june_2026.pdf",
+          document_type: "bank_statement",
+          confidence: 0.8,
+          rationale: "Smoke-test classification artifact.",
+          limitations: ["Synthetic CLI fixture"],
+          assertions: [0, 1, 2, 7],
+          assertion_labels: ["Existence", "Completeness", "Valuation & Allocation", "Accuracy"],
+          source_confidence: "L2",
+          source_confidence_reason: "Company-uploaded evidence fixture.",
+        },
+      },
+    ],
+  };
+
+  const result = await postJson("/api/agent/validate-hash", payload);
+  print("validate-hash", result);
+}
+
+async function runIngestFile() {
+  ensureFileArg("ingest-file");
+  const result = await postJson("/api/agent/ingest", {
+    filePath: fileArg,
+  });
+  print("ingest-file", result);
+}
+
+async function runClassifyFile() {
+  ensureFileArg("classify-file");
+  const result = await postJson("/api/agent/classify", {
+    filePath: fileArg,
+    context: {
+      engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+      uploaderLabel: "Company Upload (L2)",
+      auditArea: "Revenue recognition and cash receipts",
+    },
+  });
+  print("classify-file", result);
+}
+
+async function runOrchestrate() {
+  const payload = {
+    pack_id: "pack_linow_isa_q2_demo",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage: "before_remediation",
+    pack_notes: [
+      "Synthetic CLI smoke test aligned to isa_q2_engagement",
+      "Expect approval and cut-off issues before remediation",
+    ],
+    documents: [bankStatementDoc, contractDoc, cutoffLogDoc, adjustmentDoc].map((document) => ({
+      ...document,
+      notes: [`Seeded from ${document.context.filePath}`],
+    })),
+  };
+
+  const result = await postJson("/api/agent/orchestrate", payload);
+  print("orchestrate", result);
+}
+
+async function runOrchestrateFiles() {
+  ensureFileArgs("orchestrate-files");
+
+  const documents = fileArgs.map((pathValue) => ({
+    filePath: pathValue,
+    notes: [`CLI orchestration source ${pathValue}`],
+    context: {
+      engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+      uploaderLabel: "Company Upload (L2)",
+      auditArea: "Revenue recognition and cash receipts",
+      filePath: pathValue,
+    },
+  }));
+
+  const payload = {
+    pack_id: "pack_linow_isa_q2_files",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage: "before_remediation",
+    pack_notes: [
+      "CLI real-file orchestration run",
+      "Each document is ingested from filePath before agent analysis",
+    ],
+    documents,
+  };
+
+  const result = await postJson("/api/agent/orchestrate", payload);
+  print("orchestrate-files", result);
+}
+
+async function postJson(path, payload) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(`${path} failed with HTTP ${response.status}: ${JSON.stringify(body)}`);
+  }
+
+  return body;
+}
+
+function print(label, value) {
+  console.log(`\n=== ${label} ===`);
+  console.log(JSON.stringify(value, null, 2));
+}
+
+function slugId(filename) {
+  return `doc_${filename.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40)}`;
+}
+
+function ensureFileArg(currentMode) {
+  if (!fileArg) {
+    throw new Error(`${currentMode} requires a file path argument.`);
+  }
+}
+
+function ensureFileArgs(currentMode) {
+  if (fileArgs.length === 0) {
+    throw new Error(`${currentMode} requires one or more file path arguments.`);
+  }
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

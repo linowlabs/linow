@@ -15,6 +15,8 @@ import {
   AgentInputError,
   isRecord,
   parseAgentDocumentInput,
+  resolveAgentDocumentInput,
+  type ResolvedAgentDocumentInput,
 } from "@/lib/agent/common";
 
 export interface AssertionMappingToolInput extends AgentDocumentInput {
@@ -22,6 +24,8 @@ export interface AssertionMappingToolInput extends AgentDocumentInput {
   classificationSummary?: string;
   metadataSummary?: string;
 }
+
+export interface ResolvedAssertionMappingToolInput extends AssertionMappingToolInput, ResolvedAgentDocumentInput {}
 
 export interface AssertionMappingBundle {
   assertion_mapping: AssertionMappingOutput;
@@ -44,6 +48,30 @@ export function parseAssertionMappingToolInput(value: unknown): AssertionMapping
   }
 
   const parsedBase = parseAgentDocumentInput(value);
+
+  return {
+    ...parsedBase,
+    frameworkReference:
+      typeof value.frameworkReference === "string" && value.frameworkReference.trim().length > 0
+        ? value.frameworkReference.trim()
+        : "ISA 500 evidence readiness",
+    classificationSummary:
+      typeof value.classificationSummary === "string" && value.classificationSummary.trim().length > 0
+        ? value.classificationSummary.trim()
+        : undefined,
+    metadataSummary:
+      typeof value.metadataSummary === "string" && value.metadataSummary.trim().length > 0
+        ? value.metadataSummary.trim()
+        : undefined,
+  };
+}
+
+export async function resolveAssertionMappingToolInput(value: unknown): Promise<ResolvedAssertionMappingToolInput> {
+  if (!isRecord(value)) {
+    throw new AgentInputError("Request body must be a JSON object.");
+  }
+
+  const parsedBase = await resolveAgentDocumentInput(value);
 
   return {
     ...parsedBase,

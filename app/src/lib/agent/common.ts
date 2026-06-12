@@ -1,4 +1,5 @@
 import { AGENT_CONFIG } from "@/lib/agent/config";
+import { ingestEvidenceFile, type IngestedEvidenceFile } from "@/lib/agent/ingest";
 
 export interface DocumentContextInput {
   engagementName?: string;
@@ -13,6 +14,19 @@ export interface AgentDocumentInput {
   documentName: string;
   documentText: string;
   context?: DocumentContextInput;
+}
+
+export interface ResolvedAgentDocumentInput extends AgentDocumentInput {
+  ingested_file?: IngestedEvidenceFile;
+}
+
+export interface IngestionSummary {
+  filename: string;
+  relative_path: string;
+  extension: string;
+  format: IngestedEvidenceFile["format"];
+  byte_length: number;
+  warnings: string[];
 }
 
 export class AgentInputError extends Error {
@@ -44,6 +58,74 @@ export function parseAgentDocumentInput(value: unknown, maxChars = 12000): Agent
     documentName,
     documentText: compactWhitespace(documentText),
     context,
+  };
+}
+
+export async function resolveAgentDocumentInput(
+  value: unknown,
+  maxChars = 12000,
+): Promise<ResolvedAgentDocumentInput> {
+  if (!isRecord(value)) {
+    throw new AgentInputError("Request body must be a JSON object.");
+  }
+
+  const context = parseDocumentContext(value.context);
+  const filePath = readOptionalString(value.filePath, "filePath") ?? context?.filePath;
+  const providedDocumentName = readOptionalString(value.documentName, "documentName");
+  const documentId = readOptionalString(value.documentId, "documentId");
+  const providedDocumentText = readOptionalString(value.documentText, "documentText");
+  const effectiveMaxChars = Number.isFinite(maxChars) ? maxChars : AGENT_CONFIG.limits.maxDocumentChars;
+
+  let ingestedFile: IngestedEvidenceFile | undefined;
+  let documentText = providedDocumentText;
+  let documentName = providedDocumentName;
+
+  if (!documentText && filePath) {
+    ingestedFile = await ingestEvidenceFile(filePath);
+    documentText = ingestedFile.text;
+    documentName = documentName ?? ingestedFile.filename;
+  }
+
+  if (!documentName) {
+    throw new AgentInputError("documentName must be provided unless it can be derived from filePath.");
+  }
+
+  if (!documentText) {
+    throw new AgentInputError("Either documentText or filePath must be provided.");
+  }
+
+  if (documentText.length > effectiveMaxChars) {
+    throw new AgentInputError(`documentText must be ${effectiveMaxChars.toLocaleString()} characters or fewer in cheap mode.`);
+  }
+
+  return {
+    documentId: documentId ?? deriveDocumentId(documentName),
+    documentName,
+    documentText: compactWhitespace(documentText),
+    context: context
+      ? {
+          ...context,
+          filePath: context.filePath ?? ingestedFile?.relativePath,
+        }
+      : ingestedFile
+        ? { filePath: ingestedFile.relativePath }
+        : undefined,
+    ingested_file: ingestedFile,
+  };
+}
+
+export function buildIngestionSummary(value: IngestedEvidenceFile | undefined): IngestionSummary | null {
+  if (!value) {
+    return null;
+  }
+
+  return {
+    filename: value.filename,
+    relative_path: value.relativePath,
+    extension: value.extension,
+    format: value.format,
+    byte_length: value.byteLength,
+    warnings: value.warnings,
   };
 }
 

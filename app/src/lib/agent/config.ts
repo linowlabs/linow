@@ -10,12 +10,14 @@ export const AGENT_CONFIG = {
     maxPackDocuments: 64,
     maxStringArrayItems: 64,
     maxStringItemLength: 240,
+    maxFindingsPerPack: 5,
   },
   schemaNames: {
     classification: "linow_agent_classification",
     metadataExtraction: "linow_agent_metadata_extraction",
     assertionMappingBundle: "linow_agent_assertion_mapping_bundle",
     gapAnalysis: "linow_agent_gap_analysis",
+    ccerFinding: "linow_agent_ccer_finding",
   },
   harnessPacks: {
     isa_q2: {

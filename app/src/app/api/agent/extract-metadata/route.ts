@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseAgentDocumentInput } from "@/lib/agent/common";
+import { buildIngestionSummary, resolveAgentDocumentInput } from "@/lib/agent/common";
 import {
   buildMetadataExtractionMessages,
   groqMetadataExtractionSchema,
@@ -13,7 +13,7 @@ import { parseJsonObjectRequest, toAgentErrorResponse } from "@/lib/agent/http";
 export async function POST(request: Request) {
   try {
     const body = await parseJsonObjectRequest(request);
-    const input = parseAgentDocumentInput(body);
+    const input = await resolveAgentDocumentInput(body);
     const result = await runGroqJsonCompletion({
       schemaName: AGENT_CONFIG.schemaNames.metadataExtraction,
       schema: groqMetadataExtractionSchema,
@@ -25,6 +25,7 @@ export async function POST(request: Request) {
       provider: "groq",
       model: result.model,
       metadata: normalizeMetadataExtractionResult(input, result.result),
+      ingestion: buildIngestionSummary(input.ingested_file),
       usage: result.usage ?? null,
     });
   } catch (error) {
