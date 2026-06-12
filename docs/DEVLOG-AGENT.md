@@ -152,3 +152,126 @@
 - Follow-up needed:
   - Extend harness checks to compare expected primary assertions once the taxonomy stabilizes across more files.
   - Consider exposing canonical document types in docs or UI copy so developers can reason about the vocabulary without opening source files.
+
+## 2026-06-12 — Build SO-18 to SO-20 Finding, Hashing, And Orchestration Flow
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/draft-finding.ts`
+  - `app/src/lib/agent/artifacts.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/draft-finding/route.ts`
+  - `app/src/app/api/agent/validate-hash/route.ts`
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a C-C-C-E-R finding tool and route that turns a gap plus supporting document summaries into a structured draft finding with citations.
+  - Added deterministic agent artifact validation and SHA-256 hashing helpers so schema-valid outputs can be hashed before later Walrus storage or Sui logging.
+  - Added a one-click orchestration flow that runs classification, metadata extraction, assertion mapping, gap analysis, draft finding generation, and local audit pack summary creation in one pass.
+  - Kept the final orchestration output behind a human review gate by returning a `review_agent_outputs` proposed action instead of any signed or submitted transaction behavior.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-18, SO-19, and SO-20 naturally stack on top of the existing toolchain, so the safest path was to compose the tools we already trust rather than invent a separate orchestration runtime.
+  - Hashing is implemented locally and deterministically so the same approved artifact can later be reused for Walrus manifests and on-chain AgentAction logs.
+  - The orchestration route stays inside Linow's boundary: the agent analyzes and proposes, while any persistence or chain action still waits for explicit human approval.
+
+### Tech Debt
+- Known shortcuts:
+  - The orchestration flow is currently sequential, which is cheaper to reason about but not optimized for latency.
+  - Audit pack summary text is generated locally from downstream outputs rather than through a dedicated summarization model pass.
+  - Finding generation is limited by the configured maximum findings per pack and assumes the gap-analysis order is already meaningful enough for drafting.
+- Follow-up needed:
+  - Add CLI or script-level smoke runners so the full orchestration route can be replayed against a stable demo pack with less manual JSON assembly.
+  - Connect approved artifact hashes to Walrus memory manifests and Sui AgentAction logging once SO-24 and SO-25 are wired.
+
+## 2026-06-12 — Add CLI Smoke Runner For Agent Routes
+
+### Change
+- Files touched:
+  - `app/package.json`
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added `npm run agent:smoke -- <mode>` for CLI-first testing of the agent routes without a UI.
+  - Added smoke modes for single-document analysis, negative classification, draft finding, artifact hashing, and full orchestration.
+  - Documented direct usage and curl examples in a dedicated CLI testing guide.
+
+### Reasoning
+- Why this approach was chosen:
+  - The user needs a low-friction way to exercise the new routes from the terminal before UI integration and before building a full ingestion pipeline for the engagement pack files.
+  - A payload-driven smoke runner is enough to validate agent behavior and demo logic right now without introducing OCR or spreadsheet parsing complexity.
+
+### Tech Debt
+- Known shortcuts:
+  - The smoke runner uses synthetic sample payloads aligned to `isa_q2_engagement` rather than extracting text from the real pack files.
+  - The runner assumes the local Next.js dev server is already running.
+- Follow-up needed:
+  - Add file-based ingestion helpers once we decide how to handle PDF/XLSX extraction in cheap mode.
+  - Consider a pack manifest of pre-extracted snippets if we want repeatable CLI tests without full OCR/parsing.
+
+## 2026-06-12 — Add Multi-Format Evidence Ingestion For Agent Routes
+
+### Change
+- Files touched:
+  - `app/package.json`
+  - `app/package-lock.json`
+  - `app/next.config.ts`
+  - `app/src/lib/agent/common.ts`
+  - `app/src/lib/agent/ingest.ts`
+  - `app/src/lib/agent/map-assertions.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/classify/route.ts`
+  - `app/src/app/api/agent/extract-metadata/route.ts`
+  - `app/src/app/api/agent/map-assertions/route.ts`
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `app/src/app/api/agent/ingest/route.ts`
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a shared evidence-ingestion module that reads plain text formats, PDF, XLSX/XLS/XLSM/XLSB, and DOCX files from local paths.
+  - Added async document-resolution helpers so agent routes can accept `filePath` instead of requiring raw `documentText`.
+  - Added an `/api/agent/ingest` route for parser-level verification and updated the CLI smoke runner to support real-file ingestion and classification by path.
+  - Marked heavy parser packages as server externals in Next.js so the server routes can use them reliably.
+
+### Reasoning
+- Why this approach was chosen:
+  - The agent needs to work on realistic audit evidence formats like PDFs and spreadsheets, not just pre-extracted text fixtures.
+  - A shared ingestion layer keeps parsing concerns separate from classification, extraction, mapping, and orchestration logic.
+  - Exposing ingestion as its own route makes debugging calmer: we can tell the difference between a parser problem and an LLM analysis problem immediately.
+  - Lazy-loading the PDF parser avoids breaking non-PDF routes during server module evaluation.
+
+### Tech Debt
+- Known shortcuts:
+  - OCR for image-only files is still not enabled.
+  - Scanned PDFs may produce low or empty text output if they have no embedded text layer.
+  - Local file-path access is intentionally constrained to the repository workspace and temp directories instead of arbitrary filesystem access.
+- Follow-up needed:
+  - Add OCR or pre-processing for image-heavy evidence if the demo pack later includes scans or screenshots as first-class evidence.
+  - Consider a stable pre-extracted text manifest for the engagement pack so orchestration tests stay reproducible across environments.
+
+## 2026-06-12 — Add Real-File Orchestration Smoke Mode
+
+### Change
+- Files touched:
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added `orchestrate-files` mode to the CLI smoke runner so orchestration can ingest a list of real file paths instead of relying only on synthetic sample payloads.
+  - Documented example commands for direct orchestration against engagement-pack file paths.
+
+### Reasoning
+- Why this approach was chosen:
+  - The user wants to test the orchestration flow against real evidence files from the demo pack, not just text fixtures.
+  - Accepting file paths in the smoke runner keeps the workflow simple while reusing the new ingestion layer already wired into the agent routes.
+
+### Tech Debt
+- Known shortcuts:
+  - The runner still depends on the local dev server already being up.
+  - The script assumes a shared engagement context for all listed files instead of reading context from a manifest.
+- Follow-up needed:
+  - Optionally add a manifest-driven pack mode that reads engagement metadata and a default file list from the demo pack itself.
