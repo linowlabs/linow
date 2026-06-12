@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { AgentInputError, parseClassifyDocumentInput } from "@/lib/agent/classify";
+import { parseClassifyDocumentInput } from "@/lib/agent/classify";
 import { classifyDocumentWithGroq } from "@/lib/agent/groq";
+import { parseJsonObjectRequest, toAgentErrorResponse } from "@/lib/agent/http";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as unknown;
+    const body = await parseJsonObjectRequest(request);
     const input = parseClassifyDocumentInput(body);
     const result = await classifyDocumentWithGroq(input);
 
@@ -15,13 +16,6 @@ export async function POST(request: Request) {
       usage: result.usage ?? null,
     });
   } catch (error) {
-    if (error instanceof AgentInputError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Agent classification failed." },
-      { status: 500 },
-    );
+    return toAgentErrorResponse(error, "Agent classification failed.");
   }
 }
