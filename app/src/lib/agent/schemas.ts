@@ -213,7 +213,7 @@ const citationSchema = {
     page: { type: ["integer", "null"], minimum: 1 },
     confidence: confidenceNumberSchema,
   },
-  required: ["document_id", "filename", "reference", "confidence"],
+  required: ["document_id", "filename", "reference", "page", "confidence"],
 } as const;
 
 export const evidenceClassificationSchema = {
@@ -296,7 +296,7 @@ export const metadataExtractionSchema = {
           currency: { type: ["string", "null"] },
           confidence: confidenceNumberSchema,
         },
-        required: ["label", "amount", "confidence"],
+        required: ["label", "amount", "currency", "confidence"],
       },
     },
     citations: {
@@ -310,6 +310,10 @@ export const metadataExtractionSchema = {
     "schema_version",
     "document_id",
     "filename",
+    "document_date",
+    "period_start",
+    "period_end",
+    "document_reference",
     "parties",
     "key_dates",
     "key_amounts",
@@ -540,6 +544,27 @@ export const AGENT_OUTPUT_SCHEMAS = {
 
 export function getAssertionLabel(assertionId: AssertionId): string {
   return ASSERTION_CATALOG.find((item) => item.id === assertionId)?.label ?? `Unknown (${assertionId})`;
+}
+
+export function getAssertionIdByLabel(label: string): AssertionId | undefined {
+  const normalized = label.trim().toLowerCase();
+
+  const aliasMap: Record<string, AssertionId> = {
+    existence: 0,
+    completeness: 1,
+    "valuation & allocation": 2,
+    valuation: 2,
+    "rights & obligations": 3,
+    rights: 3,
+    obligations: 3,
+    "cut-off": 4,
+    cutoff: 4,
+    classification: 5,
+    occurrence: 6,
+    accuracy: 7,
+  };
+
+  return aliasMap[normalized];
 }
 
 export function isEvidenceClassificationOutput(value: unknown): value is EvidenceClassificationOutput {

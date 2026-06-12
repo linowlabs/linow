@@ -1,3 +1,4 @@
+import { AGENT_CONFIG } from "@/lib/agent/config";
 import { getServerEnv } from "@/lib/server-env";
 import {
   buildClassificationMessages,
@@ -7,9 +8,6 @@ import {
   type ClassifyDocumentInput,
 } from "@/lib/agent/classify";
 import type { EvidenceClassificationOutput } from "@/lib/agent/schemas";
-
-const GROQ_API_BASE_URL = "https://api.groq.com/openai/v1";
-const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
 
 interface GroqChatCompletionResponse {
   choices?: Array<{
@@ -24,10 +22,38 @@ interface GroqChatCompletionResponse {
   };
 }
 
+interface GroqJsonCompletionConfig<T> {
+  model?: string;
+  schemaName: string;
+  schema: unknown;
+  messages: Array<{ role: "system" | "user"; content: string }>;
+  validate: (value: unknown) => value is T;
+}
+
 export async function classifyDocumentWithGroq(input: ClassifyDocumentInput): Promise<{
   provider: "groq";
   model: string;
   result: EvidenceClassificationOutput;
+  usage?: GroqChatCompletionResponse["usage"];
+}> {
+  const completion = await runGroqJsonCompletion({
+    schemaName: AGENT_CONFIG.schemaNames.classification,
+    schema: groqClassificationSchema,
+    messages: buildClassificationMessages(input),
+    validate: isAgentClassificationResult,
+  });
+
+  return {
+    provider: "groq",
+    model: completion.model,
+    result: normalizeClassificationResult(input, completion.result),
+    usage: completion.usage,
+  };
+}
+
+export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<T>): Promise<{
+  model: string;
+  result: T;
   usage?: GroqChatCompletionResponse["usage"];
 }> {
   const apiKey = getServerEnv("GROQ_API_KEY");
@@ -36,8 +62,9 @@ export async function classifyDocumentWithGroq(input: ClassifyDocumentInput): Pr
     throw new Error("GROQ_API_KEY is not configured on the server.");
   }
 
-  const model = getServerEnv("GROQ_MODEL") || DEFAULT_GROQ_MODEL;
-  const response = await fetch(`${GROQ_API_BASE_URL}/chat/completions`, {
+  const model = config.model || getServerEnv("GROQ_MODEL") || AGENT_CONFIG.groq.defaultModel;
+  const response = await fetch(`${AGENT_CONFIG.groq.baseUrl}/chat/completions`, {
+    signal: AbortSignal.timeout(AGENT_CONFIG.groq.requestTimeoutMs),
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -45,14 +72,14 @@ export async function classifyDocumentWithGroq(input: ClassifyDocumentInput): Pr
     },
     body: JSON.stringify({
       model,
-      temperature: 0.1,
-      messages: buildClassificationMessages(input),
+      temperature: AGENT_CONFIG.groq.defaultTemperature,
+      messages: config.messages,
       response_format: {
         type: "json_schema",
         json_schema: {
-          name: "linow_agent_classification",
+          name: config.schemaName,
           strict: true,
-          schema: groqClassificationSchema,
+          schema: config.schema,
         },
       },
     }),
@@ -60,26 +87,25 @@ export async function classifyDocumentWithGroq(input: ClassifyDocumentInput): Pr
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(`Groq classification failed with HTTP ${response.status}: ${truncateError(errorBody)}`);
+    throw new Error(`Groq completion failed with HTTP ${response.status}: ${truncateError(errorBody)}`);
   }
 
   const payload = (await response.json()) as GroqChatCompletionResponse;
   const content = payload.choices?.[0]?.message?.content;
 
   if (!content) {
-    throw new Error("Groq classification response did not include message content.");
+    throw new Error("Groq completion response did not include message content.");
   }
 
   const parsed = JSON.parse(content) as unknown;
 
-  if (!isAgentClassificationResult(parsed)) {
-    throw new Error("Groq classification response did not match the expected Linow schema.");
+  if (!config.validate(parsed)) {
+    throw new Error(`Groq completion response did not match the expected ${config.schemaName} schema.`);
   }
 
   return {
-    provider: "groq",
     model,
-    result: normalizeClassificationResult(input, parsed),
+    result: parsed,
     usage: payload.usage,
   };
 }

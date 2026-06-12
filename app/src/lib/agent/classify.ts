@@ -1,75 +1,80 @@
 import {
   AGENT_SCHEMA_VERSION,
-  evidenceClassificationSchema,
+  SOURCE_CONFIDENCE_LEVELS,
+  getAssertionIdByLabel,
   getAssertionLabel,
-  isEvidenceClassificationOutput,
   type EvidenceClassificationOutput,
 } from "@/lib/agent/schemas";
+import {
+  buildDocumentTypePromptBlock,
+  calibrateClassificationAssertions,
+  normalizeDocumentType,
+} from "@/lib/agent/document-taxonomy";
+import {
+  buildDocumentContextLines,
+  parseAgentDocumentInput,
+  type AgentDocumentInput,
+} from "@/lib/agent/common";
 
-export interface DocumentContextInput {
-  engagementName?: string;
-  documentTypeHint?: string;
-  uploaderLabel?: string;
+export type ClassifyDocumentInput = AgentDocumentInput;
+
+interface GroqClassificationDraft {
+  schema_name: "evidence_classification";
+  schema_version: string;
+  document_id: string;
+  filename: string;
+  document_type: string;
+  confidence: number;
+  rationale: string;
+  limitations: string[];
+  assertion_labels: string[];
+  source_confidence: (typeof SOURCE_CONFIDENCE_LEVELS)[number];
+  source_confidence_reason: string;
 }
 
-export interface ClassifyDocumentInput {
-  documentId: string;
-  documentName: string;
-  documentText: string;
-  context?: DocumentContextInput;
-}
-
-export class AgentInputError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AgentInputError";
-  }
-}
-
-export const groqClassificationSchema = evidenceClassificationSchema;
+export const groqClassificationSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    schema_name: { type: "string", const: "evidence_classification" },
+    schema_version: { type: "string", const: AGENT_SCHEMA_VERSION },
+    document_id: { type: "string" },
+    filename: { type: "string" },
+    document_type: { type: "string" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    rationale: { type: "string" },
+    limitations: {
+      type: "array",
+      items: { type: "string" },
+    },
+    assertion_labels: {
+      type: "array",
+      items: { type: "string" },
+    },
+    source_confidence: { type: "string", enum: [...SOURCE_CONFIDENCE_LEVELS] },
+    source_confidence_reason: { type: "string" },
+  },
+  required: [
+    "schema_name",
+    "schema_version",
+    "document_id",
+    "filename",
+    "document_type",
+    "confidence",
+    "rationale",
+    "limitations",
+    "assertion_labels",
+    "source_confidence",
+    "source_confidence_reason",
+  ],
+} as const;
 
 export function parseClassifyDocumentInput(value: unknown): ClassifyDocumentInput {
-  if (!isRecord(value)) {
-    throw new AgentInputError("Request body must be a JSON object.");
-  }
-
-  const documentName = readRequiredString(value.documentName, "documentName");
-  const documentId = readOptionalString(value.documentId, "documentId") ?? deriveDocumentId(documentName);
-  const documentText = readRequiredString(value.documentText, "documentText");
-
-  if (documentText.length > 12000) {
-    throw new AgentInputError("documentText must be 12,000 characters or fewer in cheap mode.");
-  }
-
-  const contextValue = value.context;
-  let context: DocumentContextInput | undefined;
-
-  if (contextValue !== undefined) {
-    if (!isRecord(contextValue)) {
-      throw new AgentInputError("context must be an object when provided.");
-    }
-
-    context = {
-      engagementName: readOptionalString(contextValue.engagementName, "context.engagementName"),
-      documentTypeHint: readOptionalString(contextValue.documentTypeHint, "context.documentTypeHint"),
-      uploaderLabel: readOptionalString(contextValue.uploaderLabel, "context.uploaderLabel"),
-    };
-  }
-
-  return {
-    documentId,
-    documentName,
-    documentText: compactWhitespace(documentText),
-    context,
-  };
+  return parseAgentDocumentInput(value);
 }
 
 export function buildClassificationMessages(input: ClassifyDocumentInput) {
-  const contextLines = [
-    input.context?.engagementName ? `Engagement: ${input.context.engagementName}` : null,
-    input.context?.documentTypeHint ? `Document type hint: ${input.context.documentTypeHint}` : null,
-    input.context?.uploaderLabel ? `Uploader label: ${input.context.uploaderLabel}` : null,
-  ].filter(Boolean);
+  const contextLines = buildDocumentContextLines(input);
 
   return [
     {
@@ -81,7 +86,8 @@ export function buildClassificationMessages(input: ClassifyDocumentInput) {
         "You must not claim that evidence is source-verified unless the input explicitly proves it.",
         "Use source confidence language L0-L5 exactly.",
         "Keep the output limited to classification fields only.",
-        "Use the canonical assertion labels that match the chosen IDs.",
+        "Return assertion_labels only, using canonical labels exactly as listed by the user prompt.",
+        "Prefer canonical lowercase_snake_case document_type values for known audit evidence categories.",
       ].join(" "),
     },
     {
@@ -95,7 +101,16 @@ export function buildClassificationMessages(input: ClassifyDocumentInput) {
         "- Provide one confidence score between 0 and 1.",
         "- Explain the rationale briefly.",
         "- Return limitations as an array of caveats.",
-        "- Return assertion IDs and matching labels.",
+        "- Return assertion_labels using only these exact values when applicable:",
+        "- Existence",
+        "- Completeness",
+        "- Valuation & Allocation",
+        "- Rights & Obligations",
+        "- Cut-off",
+        "- Classification",
+        "- Occurrence",
+        "- Accuracy",
+        buildDocumentTypePromptBlock(),
         "- Assign source confidence with caveats.",
         "Document text:",
         input.documentText,
@@ -104,63 +119,67 @@ export function buildClassificationMessages(input: ClassifyDocumentInput) {
   ];
 }
 
-export function isAgentClassificationResult(value: unknown): value is EvidenceClassificationOutput {
-  return isEvidenceClassificationOutput(value);
+export function isAgentClassificationResult(value: unknown): value is GroqClassificationDraft {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  return (
+    candidate.schema_name === "evidence_classification" &&
+    candidate.schema_version === AGENT_SCHEMA_VERSION &&
+    typeof candidate.document_id === "string" &&
+    typeof candidate.filename === "string" &&
+    typeof candidate.document_type === "string" &&
+    typeof candidate.confidence === "number" &&
+    candidate.confidence >= 0 &&
+    candidate.confidence <= 1 &&
+    typeof candidate.rationale === "string" &&
+    Array.isArray(candidate.limitations) &&
+    candidate.limitations.every((item) => typeof item === "string") &&
+    Array.isArray(candidate.assertion_labels) &&
+    candidate.assertion_labels.every((item) => typeof item === "string") &&
+    typeof candidate.source_confidence === "string" &&
+    SOURCE_CONFIDENCE_LEVELS.includes(
+      candidate.source_confidence as (typeof SOURCE_CONFIDENCE_LEVELS)[number],
+    ) &&
+    typeof candidate.source_confidence_reason === "string"
+  );
 }
 
 export function normalizeClassificationResult(
   input: ClassifyDocumentInput,
-  value: EvidenceClassificationOutput,
+  value: GroqClassificationDraft,
 ): EvidenceClassificationOutput {
-  const assertionLabels =
-    value.assertions.length === value.assertion_labels.length
-      ? value.assertion_labels
-      : value.assertions.map((assertionId) => getAssertionLabel(assertionId));
+  const modelAssertionIds = value.assertion_labels.reduce<Array<EvidenceClassificationOutput["assertions"][number]>>(
+    (accumulator, label) => {
+      const assertionId = getAssertionIdByLabel(label);
+
+      if (assertionId === undefined || accumulator.includes(assertionId)) {
+        return accumulator;
+      }
+
+      accumulator.push(assertionId);
+      return accumulator;
+    },
+    [],
+  );
+  const documentType = normalizeDocumentType(value.document_type, input.documentName);
+  const uniqueAssertionIds = calibrateClassificationAssertions(documentType, modelAssertionIds, input.documentText);
 
   return {
-    ...value,
     schema_name: "evidence_classification",
     schema_version: AGENT_SCHEMA_VERSION,
     document_id: input.documentId,
     filename: input.documentName,
-    assertion_labels: assertionLabels,
+    document_type: documentType,
+    confidence: value.confidence,
+    rationale: value.rationale,
+    limitations: value.limitations,
+    assertions: uniqueAssertionIds,
+    assertion_labels: uniqueAssertionIds.map((assertionId) => getAssertionLabel(assertionId)),
+    source_confidence: value.source_confidence,
+    source_confidence_reason: value.source_confidence_reason,
   };
-}
-
-function readRequiredString(value: unknown, fieldName: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new AgentInputError(`${fieldName} must be a non-empty string.`);
-  }
-
-  return value.trim();
-}
-
-function readOptionalString(value: unknown, fieldName: string): string | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-
-  if (typeof value !== "string") {
-    throw new AgentInputError(`${fieldName} must be a string when provided.`);
-  }
-
-  return value.trim();
-}
-
-function compactWhitespace(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function deriveDocumentId(documentName: string): string {
-  const slug = documentName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 40);
-
-  return slug ? `doc_${slug}` : "doc_uploaded_file";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
