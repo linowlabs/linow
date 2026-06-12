@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     externalDir: true,
   },
   transpilePackages: ["@linow/sdk"],
+  serverExternalPackages: ["pdf-parse", "pdfjs-dist", "xlsx", "mammoth"],
 };
 
 export default nextConfig;
