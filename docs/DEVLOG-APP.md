@@ -520,3 +520,206 @@
   - The records table still has its own independent horizontal scroll surface by design.
 - Follow-up needed:
   - Revisit the records presentation later if we want to replace the table with a mobile-specific stacked layout.
+
+## 2026-06-07 — Add Light-Mode Landing Page with Web3 Scroll
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Created a new light-mode glassmorphic landing page at the root route `/` using the existing mascot image `/mascot.png`.
+  - Moved the original dark-mode evidence workspace dashboard to a dedicated route `/workspace`.
+  - Integrated a premium Web3 scroll container driven by a high-performance, scroll-progress-driven animation handler.
+  - Implemented card stacking transitions (scale, translateY, opacity, blur) for the 4 key evidence lifecycle steps, with the mascot scaling, tilting, and translating dynamically to guide the user.
+  - Aligned all landing page copywriting and trust definitions directly with `README.md` and `docs/DESIGN.md` (e.g. "Hash. Prove.", "Agent proposes, human signs, chain proves").
+  - Restricted CTAs to the top navigation bar and the bottom page section, keeping the Hero text-only.
+
+### Reasoning
+- Why this approach was chosen:
+  - Scoping the landing page styling to `.landing-wrapper` and `landing.css` keeps it entirely separate from the dark-mode dashboard workspace, avoiding visual leakage.
+  - Moving the dashboard code to `/workspace/page.tsx` is clean, maintains full compatibility with browser wallet context provider, and avoids monolithic component bloat.
+  - Using direct CSS inline manipulations inside the `onScroll` handler via `requestAnimationFrame` achieves buttery smooth scroll-driven card stacking and mascot movement without standard React layout thrashing.
+
+### Tech Debt
+- Known shortcuts:
+  - Mobile viewports fallback to a standard card stream layout rather than pinning scroll, which is safer for small portrait screens.
+- Follow-up needed:
+  - None. Both pages compile, render, and link perfectly.
+
+## 2026-06-11 — Add Section Title to Stack UI Intro State
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added an introductory section title panel (`.stack-pane-intro`) with "How Linow Works" heading, description, and an animated bouncing scroll indicator to the right-side pane of the Stack UI.
+  - Programmed the scroll-progress-driven animation handler (`animateCards`) to dynamically fade out, translate up, and apply a Gaussian blur to the intro panel as the user scrolls past the initial viewport stage (`progress` 0.05 to 0.22), seamlessly handing over to the first architecture layer card.
+
+### Reasoning
+- Why this approach was chosen:
+  - The right-side pane of the scroll animation was empty when first scrolling into view (activeLayer = 0). Adding an introductory title informs the user of what they are looking at and prompts them to scroll down.
+  - Applying custom CSS transforms and opacity in the high-performance `requestAnimationFrame` loop ensures that the title replaces the subsequent cards with high frame rate and zero layout thrashing.
+
+### Tech Debt
+- Known shortcuts:
+  - The transition boundaries are hardcoded in the progress tracking loop.
+- Follow-up needed:
+  - None. Both compile and transition states are verified to function correctly in the browser.
+
+## 2026-06-12 — Redesign Landing Page
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Completely redesigned the landing page with premium dark glassmorphism.
+  - Replaced the SVG server rack scenes in the hero with a full-bleed scenic backdrop placeholder (`/hero_bg.png`).
+  - Added a detailed mock workspace browser preview inside the hero header.
+  - Redesigned the 3D isometric stack to utilize clean, thin-bordered glassmorphism (no neon glows).
+  - Created a multi-column Source Confidence Roadmap board mapping L0 to L5 levels (Integrity & Time, Attestation Trail, Automated Continuous Proof).
+  - Built a comparative grid comparing Legacy Shared Drives, Stateless AI Agents, and the Linow Workspace.
+  - Cleaned up explicit scroll instructions for a cleaner, implicit flow.
+
+### Reasoning
+- Why this approach was chosen:
+  - Dark-mode glassmorphism matches the main workspace design system, making the app feel unified and professional.
+  - Creative layouts inspired by `getmodern.ai` and `cofounder.co` improve readability and help show the product value at a glance.
+  - Thin border detailing provides a high-end, high-precision technical feel without relying on distracting colors.
+
+### Tech Debt
+- Known shortcuts:
+  - The background image references a placeholder `/hero_bg.png` that the user will drop into the `public/` directory.
+- Follow-up needed:
+  - None. Both compile and transition states are stable.
+
+## 2026-06-12 — Light Mode Theme and Font Selection
+
+### Change
+- Files touched:
+  - `app/src/app/layout.tsx`
+  - `app/src/app/globals.css`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Transitioned the landing page styling to a warm, clean light-mode canvas (`#faf9f6`), aligning with getmodern.ai and cofounder.co.
+  - Configured the background placeholder to point to the newly added `/hero.png` asset.
+  - Imported and integrated Google's Geist Sans (`Geist`) font as the primary sans-serif font family of the application.
+  - Overhauled styles for the mock browser preview, isometric 3D scroll layers, Source Confidence columns, and comparative grids to utilize light glassmorphism and high-contrast dark slate typography.
+
+### Reasoning
+- Why this approach was chosen:
+  - Light mode matches the premium, clean, illustrative look requested.
+  - Geist Sans provides a sleek, modern, and highly legible typeface choice that elevates the design system.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - Verify that the layout hot-reloads cleanly.
+
+## 2026-06-12 — Refine Hero Gradient, Navbar Glass Buttons, and Layout
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Squeezed and optimized the bottom gradient overlay on the hero section to prevent the background image from being washed out with white (gradient mask starts fading into off-white only at 82%).
+  - Formatted the transparent navbar to include premium glassmorphic rounded rectangle buttons (`border-radius: 8px`, `backdrop-filter: blur(12px)`, subtle shadows, thin white borders, and vertical separator divider lines) matching the user reference design.
+  - Grouped the right-hand actions and added a dedicated glass "Log in" button next to "Launch Workspace".
+  - Configured scrolled navbar transitions to morph glass buttons into solid or text counterparts (solid dark slate button for "Launch Workspace", clean plain text link for "Log in") over a clean solid white scrolled header background.
+  - Placed the mock browser preview in the dedicated "Meet Linow" section with the exact requested copy.
+
+### Reasoning
+- Why this approach was chosen:
+  - Restricting the white gradient overlay to the bottom edge keeps the `/hero.png` background image crisp and vibrant, matching the layout style of the design references.
+  - Glass buttons inside the transparent navbar provide both design contrast and text legibility on the scenic background.
+  - Transitioning the glass buttons into simple text links and solid buttons on scroll maintains high readability without cluttered containers on the solid white navbar.
+
+### Tech Debt
+- Known shortcuts:
+  - Programmatic scroll position scrolling in browser testing scripts does not fire standard window scroll triggers; however, manual mouse wheel and swipe interactions trigger the transitions cleanly.
+- Follow-up needed:
+  - None. Both pages compile, render, and link perfectly.
+
+## 2026-06-12 — Remove Lift-on-Hover, Scrolled Navbar Shadow, and Section Divider Line
+
+### Change
+- Files touched:
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Removed the bottom box shadow from the scrolled navigation bar state, replacing it with a clean, thin, modern `border-bottom: 1px solid rgba(0, 0, 0, 0.06)` line.
+  - Removed the thin grey section divider line (`border-top: 1px solid rgba(0, 0, 0, 0.02)`) between the bottom of the hero backdrop and the top of the "Meet Linow" section, making the layout flow seamlessly.
+  - Disabled all lift-on-hover translation styles (`transform: translateY(...)`) across all buttons, navigation links, roadmap cards, and comparative cards.
+
+### Reasoning
+- Why this approach was chosen:
+  - Shadows on scrolled elements can look dated; replacing them with a crisp thin line matches modern flat-glass web designs.
+  - Removing section divider lines allows full-bleed hero assets to flow more naturally into the layout canvas.
+  - Disabling physical translation lifts on hover results in a cleaner, more stable, and less "AI-generated template" feeling.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None. Clean interactions verified.
+
+## 2026-06-12 — Redesign 3D Architecture Stack & Cards (Hyperliquid Inspired)
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Completely overhauled the 3D isometric stack architecture in the scroll panel. Replaced the single plate slabs with a side-by-side intermediate block structure (Crypto Core & TX Builder) and 4 tall vertical skyscraper towers representing User Applications and Attestation (Workspace UI, MemWal, Signer, Walrus Portal).
+  - Placed rotated monospace text labels along the left side face of the skyscrapers (e.g. "WORKSPACE UI", "MEMWAL INDEXER", etc.) that automatically light up in blue (`#2563eb`) when active.
+  - Programmed active layers to float upward along the Z-axis (Consensus & Storage base floats to `~8px`, Middle blocks float to `~24px`, and skyscrapers float to `~48px`) creating a separated floating plate space animation.
+  - Added monospace technical metadata tags (`Commitment: SHA-256`, `Encryption: AES-256-GCM`, `Contract: EvidenceRecord.move`, etc.) to the bottom of the scroll cards that display only when active.
+
+### Reasoning
+- Why this approach was chosen:
+  - A side-by-side and vertical skyscraper composition makes the architecture stack feel complex, structured, and realistic, drawing direct inspiration from high-fidelity tech stacks like Hyperliquid.
+  - Vertical monospace labels along the faces of the skyscraper towers fit the technical engineering tone of audit commitments.
+  - Monospace tech metadata specs at the bottom of active scroll cards align the copy with the verifiable audit agent theme and make the scrolling step cards feel like a cohesive technical spec sheet.
+
+### Tech Debt
+- Known shortcuts:
+  - Sibling blocks and towers are grouped inside container divs that hold the React refs, keeping the scrolling script intact without changing ref selection hooks.
+- Follow-up needed:
+  - None. Both pages compile, render, and link perfectly.
+## 2026-06-12 — Overhaul Scrolling Stack to 3-Level Vertical Layout & Fix Mobile Responsiveness
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Redesigned the scrolling system architecture section from a two-column grid into a unified single-column, 3-level vertical layout: Level 1 (Section Header), Level 2 (3D Stack Display), and Level 3 (Explanation Cards).
+  - Simplified scroll explanation cards by removing all coordination telemetry, terminal borders, CAD ticks, and dot-leader grid rules to focus purely on "point & description" text.
+  - Centered cards horizontally and aligned all levels matching the "Meet Linow" style.
+  - Fixed mobile responsive layout below 768px in `landing.css` by updating selectors (`.sticky-layout-vertical`, `.stack-display-pane`, and `.stack-explanations-pane`) to resolve mismatched classes.
+  - Collapsed and hid the 3D stack dynamically on mobile while rendering the intro description and explanation cards statically in sequence.
+
+### Reasoning
+- Why this approach was chosen:
+  - Stacking Level 2 and Level 3 vertically in a single column simplifies the layout, improves readability, and makes scroll transitions feel unified.
+  - Updating the responsive media queries prevents layout overlaps and broken column flows on smaller viewport devices.
+  - Making cards and the intro pane static on mobile ensures they display correctly without relying on scroll-triggered transforms that would fail on auto-height layouts.
+
+### Tech Debt
+- Known shortcuts:
+  - Left/right centering of cards uses absolute horizontal positioning over custom js translations since JS dynamically overrides transforms on active cards.
+- Follow-up needed:
+  - None. Clean interactions and vertical alignment verified on mobile and desktop.
+
