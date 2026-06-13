@@ -2,7 +2,7 @@
 name = "Linow"
 version = "0.0.1"
 edition = "2024.beta"
-published-at = "0x6b800d28cc87423198e6b35516885f9c6155a680424ac28aa47f59eabd2994d5"
+published-at = "0x8460a046d70e0e0940d556d9526c48ee683ca8672390ff6480e937dc9a69d6aa"
 
 [addresses]
 linow = "0x0"
