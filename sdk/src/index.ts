@@ -97,6 +97,7 @@ export type {
 export {
   ATTESTATION_TYPE_VALUES,
   ASSERTION_IDS,
+  AUDIT_PACK_STATUSES,
   EVIDENCE_STATUS_VALUES,
   RETENTION_STATUS_VALUES,
   SOURCE_CONFIDENCE_LEVELS,
@@ -108,6 +109,8 @@ export type {
   AttestationType,
   AttestEvidenceInput,
   AttestEvidenceResult,
+  AuditPack,
+  AgentAction,
   BinaryContent,
   BlobId,
   CommitmentHex,
@@ -129,4 +132,5 @@ export type {
   VerificationResult,
   VerifyEvidenceInput,
   WalletAddress,
+  WalrusMemoryManifest,
 } from "./types.js";
