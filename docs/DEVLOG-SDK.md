@@ -379,3 +379,42 @@
 - Follow-up needed:
   - Wire this handler into the app wallet flow during `J6-18`.
   - Run a live testnet smoke test after the browser wallet signing bridge is available.
+
+## 2026-06-13 — Extend Walrus adapter for memory artifacts
+
+### Change
+- Files touched:
+  - `sdk/src/crypto.ts`
+  - `sdk/src/register.ts`
+  - `sdk/src/attest.ts`
+  - `sdk/src/walrus.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Patched crypto.ts to export SerializedEncryptedPayload, serializeEncryptedPayload, deserializeEncryptedPayload, and supporting bytesToBase64/base64ToBytes (consolidated for reuse after 3 occurrences in register/attest + new walrus use).
+  - Patched register.ts and attest.ts to import serialize/deserialize from crypto (hygiene, remove local duplication).
+  - Extended walrus.ts with upload/read helpers for encrypted or JSON memory manifests (WalrusMemoryManifest) and agent output artifacts (generic <T>): uploadEncryptedMemoryManifest, readEncryptedMemoryManifest, uploadJsonMemoryManifest, readJsonMemoryManifest, and matching *AgentArtifact versions.
+  - The helpers take existing WalrusClient, use crypto encryptJson/serialize (or direct JSON) then client's uploadEncryptedBlob/readEncryptedBlob for storage/reload of artifacts through the adapter.
+  - Updated index.ts exports for the new walrus memory helpers.
+  - Leverages existing WalrusClient (no new client methods added to keep adapter surface minimal), crypto, and types.
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly fulfills "Add helpers to upload/read encrypted or JSON memory manifests and agent output artifacts through existing Walrus client."
+  - Small patch to crypto for DRY (rule of three triggered by this use case), then minimal new helpers at end of walrus.ts.
+  - Supports both encrypted (for privacy per Walrus rule: blobs public, sensitive must encrypt) and plain JSON paths.
+  - Reuses encryptJson/decryptJson/serialize patterns exactly as in register/attest for consistency; generic for artifacts to cover agent outputs (classification, ccer, gap, etc.).
+  - "Through existing" means the helpers wrap the client's uploadEncryptedBlob/readEncryptedBlob rather than duplicating HTTP logic.
+  - No changes to WalrusClient interface itself (keeps backward compat); helpers are the extension.
+
+### Tech Debt
+- Known shortcuts:
+  - JSON path uploads raw JSON bytes (still goes through "encrypted" named method, but content is plaintext JSON); callers decide based on sensitivity.
+  - No automatic manifest <-> memoryBlobId linking in pack (that's in audit-pack flows); these are pure upload/read.
+  - Dupe of some serialize logic avoided by moving to crypto, but old register/attest local copies cleaned.
+  - Assumes the serialized format (iv/ciphertext as base64 JSON) for encrypted path, matching register.
+- Follow-up needed:
+  - Use the new helpers from audit-pack or agent flows when wiring memoryBlobId set + manifest upload after pack create.
+  - Add optional compression or size limits for large manifests/artifacts if demo packs grow.
+  - Document the choice (encrypted vs json) in usage examples once app integration happens.
+  - If direct Sui (no tatum) becomes default, these helpers remain transport-agnostic.

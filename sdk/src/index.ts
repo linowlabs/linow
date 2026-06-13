@@ -129,6 +129,16 @@ export type {
   WalrusUploadResult,
 } from "./walrus.js";
 export {
+  readEncryptedAgentArtifact,
+  readEncryptedMemoryManifest,
+  readJsonAgentArtifact,
+  readJsonMemoryManifest,
+  uploadEncryptedAgentArtifact,
+  uploadEncryptedMemoryManifest,
+  uploadJsonAgentArtifact,
+  uploadJsonMemoryManifest,
+} from "./walrus.js";
+export {
   ATTESTATION_TYPE_VALUES,
   ASSERTION_IDS,
   AUDIT_PACK_STATUSES,

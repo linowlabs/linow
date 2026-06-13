@@ -6,7 +6,14 @@ import {
   exportEncryptionKey,
   hashFile,
   type EncryptedPayload,
+  deserializeEncryptedPayload,
+  serializeEncryptedPayload,
+  type SerializedEncryptedPayload,
 } from "./crypto.js";
+
+export type { SerializedEncryptedPayload };
+export { serializeEncryptedPayload };
+
 import type {
   AssertionId,
   CommitmentHex,
@@ -134,11 +141,7 @@ export interface RegisterEvidenceWithArtifactsResult extends RegisterEvidenceRes
   artifacts: RegisterEvidencePreparedArtifacts;
 }
 
-export interface SerializedEncryptedPayload {
-  algorithm: EncryptedPayload["algorithm"];
-  iv: string;
-  ciphertext: string;
-}
+
 
 export function createRegisterEvidenceHandler(
   config: CreateRegisterEvidenceHandlerConfig,
@@ -360,14 +363,6 @@ function toSuiChain(network: TatumSuiNetwork): SignRegisterEvidenceTransactionIn
   return "sui:testnet";
 }
 
-export function serializeEncryptedPayload(payload: EncryptedPayload): SerializedEncryptedPayload {
-  return {
-    algorithm: payload.algorithm,
-    iv: bytesToBase64(payload.iv),
-    ciphertext: bytesToBase64(payload.ciphertext),
-  };
-}
-
 function hexToBytes(value: string): Uint8Array {
   if (value.length % 2 !== 0) {
     throw new Error("Hex string must have an even length.");
@@ -380,26 +375,6 @@ function hexToBytes(value: string): Uint8Array {
   }
 
   return bytes;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
-
-  if (typeof btoa === "function") {
-    return btoa(binary);
-  }
-
-  const nodeBuffer = globalThis as typeof globalThis & {
-    Buffer?: {
-      from(value: string, encoding: "binary"): { toString(encoding: "base64"): string };
-    };
-  };
-
-  if (nodeBuffer.Buffer) {
-    return nodeBuffer.Buffer.from(binary, "binary").toString("base64");
-  }
-
-  throw new Error("No base64 encoder is available in this runtime.");
 }
 
 function extractEvidenceId(execution: unknown): string {
