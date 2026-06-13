@@ -10,8 +10,7 @@
     "declarationMap": true,
     "outDir": "./dist",
     "skipLibCheck": true,
-    "isolatedModules": true,
-    "types": ["node"]
+    "isolatedModules": true
   },
   "include": ["src/**/*.ts"]
 }

@@ -520,13 +520,32 @@ Appended matching entry to DEVLOG-APP.md too.
   - Document the choice (encrypted vs json) in usage examples once app integration happens.
   - If direct Sui (no tatum) becomes default, these helpers remain transport-agnostic.
 
-## 2026-06-13 — Recall prior audit memory for gap analysis (SDK helper)
+## 2026-06-13 — Remove explicit "types": ["node"] from sdk tsconfig (Vercel fix)
 
 ### Change
 - Files touched:
-  - `sdk/src/memwal.ts`
-  - `sdk/src/index.ts`
+  - `sdk/tsconfig.json`
   - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Removed the `"types": ["node"]` line from sdk/tsconfig.json compilerOptions.
+  - This was added in commit ecb7289 (the "fix: install ... and unblock build" that also added @types/node to sdk/package.json).
+  - The explicit "types" list was causing `tsc` to hard-fail with "Cannot find type definition file for 'node'" during Vercel's monorepo prebuild (`npm --prefix ../sdk install && npm --prefix ../sdk run build`), even though @types/node was listed in devDependencies.
+  - Keeping @types/node in devDependencies is still good for local development and editor support.
+
+### Reasoning
+- Why this approach was chosen:
+  - With `"moduleResolution": "Bundler"`, TypeScript will discover @types/node automatically if it is present in node_modules (via the sdk's own install or resolution).
+  - Explicit `"types": [...]` turns it into a strict requirement that is fragile in the specific Vercel prebuild flow (separate prefixed install + cache restoration + monorepo file: dependency for the sdk).
+  - Removing the list unblocks the CI build while preserving the benefit of having the types package for local `npm run build`.
+
+### Tech Debt
+- Known shortcuts:
+  - None — this is a minimal, targeted revert of the problematic part of the earlier "unblock build" change.
+- Follow-up needed:
+  - Monitor the next Vercel deploy on this branch. If it still complains, we may also need to ensure @types/node is in the root app's devDependencies or adjust how the prebuild runs.
+  - The @types/node entry in sdk/package.json can stay (harmless and useful locally).
+
+Appended matching entry will also be added to DEVLOG-APP if relevant, but this is primarily an sdk/tsconfig change.
 - Summary:
   - Added `recallPriorAuditMemory(packId)` helper in memwal.ts that performs memwal.recall under `engagement-${packId}` and returns prior results.
   - Re-export from index.
