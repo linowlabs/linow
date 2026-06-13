@@ -101,3 +101,25 @@ export async function storeAgentOutputsInMemWal(
     await memwal.remember(JSON.stringify(orchestrationResult.audit_pack_summary), namespace);
   }
 }
+
+/**
+ * Recall prior audit memory (evidence/finding etc.) for the pack under the engagement namespace.
+ * Used to continue gap analysis after refresh/new session by injecting prior into the gap tool input.
+ */
+export async function recallPriorAuditMemory(packId: string): Promise<Array<{ text: string; distance: number }>> {
+  try {
+    const memwal = createStagingMemWalClient({
+      privateKey: process.env.MEMWAL_PRIVATE_KEY || "0".repeat(64),
+      accountId: process.env.MEMWAL_ACCOUNT_ID || "0x" + "0".repeat(64),
+    });
+    const res = await memwal.recall({
+      query: "prior evidence findings classifications gap analysis",
+      namespace: `engagement-${packId}`,
+      limit: 20,
+    });
+    return res.results;
+  } catch (err) {
+    // Graceful for demo/spike without real keys
+    return [];
+  }
+}

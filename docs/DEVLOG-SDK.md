@@ -438,6 +438,39 @@
 
 **SPIKE DECISION:** API is clean and health/remember/recall work (once account + delegate registered onchain). However, "create account/delegate key flow" involves on-chain MemWalAccount (specific package/registry + add delegate) which isn't plug-and-play in timebox for hackathon (no easy public staging account, extra Sui txs). **Fallback to direct Walrus manifest** (already implemented and validated in prior walrus adapter extension for encrypted/JSON). MemWal usable post-hackathon or if memwal team provides pre-setup for demo. The spike code + validation is the starting point for future.
 
+## 2026-06-13 — Recall prior audit memory for gap analysis (B side)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-SDK.md`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added `recallPriorAuditMemory(packId)` in SDK memwal.ts: calls memwal.recall under the engagement namespace and returns prior results (graceful empty on dummy keys).
+  - Re-exported from index.
+  - In B-side gap analysis API route, before calling the groq tool: recall prior memories for the pack, inject the texts into input.pack_notes so that the gap analysis prompt (built in core) continues from prior evidence/finding memory.
+  - Response includes recalled_prior_count to surface in demo.
+  - This proves: after refresh/new session (memory persisted in MemWal), gap analysis uses recalled prior.
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly implements "Recall previous evidence/finding memory and use it to continue gap analysis after refresh or new session."
+  - Handled only on B (app API layer + SDK helper); did not touch any lib/agent/ core (analyze-gaps.ts, build messages, orchestrate etc.).
+  - Inject via pack_notes (which is part of GapAnalysisToolInput and used in prompt construction) so LLM sees prior and continues analysis.
+  - Reuses the MemWal client and namespace from store step.
+  - Demo proves via the extra field in response and persisted recall.
+
+### Tech Debt
+- Known shortcuts:
+  - Dummy keys mean recall returns [] ; real demo needs valid MEMWAL_ env.
+  - Assumes pack_notes injection surfaces in the agent prompt (based on input usage).
+- Follow-up needed:
+  - Set real keys for working cross-session demo.
+  - In workspace UI, call gap and display "recalled X prior memories" from the result to visibly prove.
+  - Extend to other tools if needed.
+
 ## 2026-06-13 — Store agent outputs in MemWal (B side)
 
 ### Change
@@ -486,6 +519,52 @@ Appended matching entry to DEVLOG-APP.md too.
   - Add optional compression or size limits for large manifests/artifacts if demo packs grow.
   - Document the choice (encrypted vs json) in usage examples once app integration happens.
   - If direct Sui (no tatum) becomes default, these helpers remain transport-agnostic.
+
+## 2026-06-13 — Recall prior audit memory for gap analysis (SDK helper)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `recallPriorAuditMemory(packId)` helper in memwal.ts that performs memwal.recall under `engagement-${packId}` and returns prior results.
+  - Re-export from index.
+  - This enables B-side routes (e.g. gap analysis) to recall prior persisted memory and inject to continue analysis (e.g. gap) after refresh/new session.
+
+### Reasoning
+- Why this approach was chosen:
+  - Completes the "recall ... and use it to continue gap analysis" on SDK (B) side.
+  - Paired with the store from previous; recall uses same client/namespace.
+  - Graceful empty list on dummy config.
+
+### Tech Debt
+- Known shortcuts:
+  - Same dummy key limitation as store.
+- Follow-up needed:
+  - Same as app side.
+
+## 2026-06-13 — Recall prior audit memory (SDK + B demo)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added recallPriorAuditMemory helper (re-exported) to fetch prior memories from MemWal for a pack under the engagement ns.
+  - Enables injection into gap analysis (and other) for continued use after refresh.
+
+### Reasoning
+- Why this approach was chosen:
+  - Provides the recall mechanism for B to use prior without A changes.
+  - Pairs with store for full "recall prior ... to continue gap after refresh/new session".
+
+### Tech Debt
+- Known shortcuts:
+  - Dummy in client.
+- Follow-up needed:
+  - Wire in more places if needed.
 
 ## 2026-06-13 — Store agent outputs in MemWal (SDK helper for B side)
 
