@@ -21,6 +21,7 @@
     "./types": "./dist/types.js"
   },
   "devDependencies": {
+    "@types/node": "^22",
     "typescript": "^5"
   },
   "dependencies": {
