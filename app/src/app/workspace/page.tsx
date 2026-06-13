@@ -93,7 +93,7 @@ const ISA_ASSERTIONS = [
 
 const PACKAGE_ID =
   process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID ??
-  "0x6b800d28cc87423198e6b35516885f9c6155a680424ac28aa47f59eabd2994d5";
+  "0x8460a046d70e0e0940d556d9526c48ee683ca8672390ff6480e937dc9a69d6aa";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

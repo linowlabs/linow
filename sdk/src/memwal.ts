@@ -1,17 +1,12 @@
 import { MemWal } from "@mysten-incubation/memwal";
 import { generateDelegateKey } from "@mysten-incubation/memwal/account";
 
-// Declare process for environments where @types/node may not be resolved during the
-// SDK's isolated prebuild install on Vercel (even with @types/node in devDependencies).
-declare const process: {
-  env: Record<string, string | undefined>;
-};
-
 /**
- * Staging relayer URL for MemWal (as per quickstart and docs).
- * For production would use self-hosted or managed.
+ * Default hosted relayer URL for MemWal.
+ * Override with MEMWAL_SERVER_URL when using staging or a self-hosted relayer.
  */
-export const MEMWAL_STAGING_RELAYER = "https://relayer.memwal.ai";
+export const MEMWAL_DEFAULT_RELAYER = "https://relayer.memwal.ai";
+export const MEMWAL_STAGING_RELAYER = MEMWAL_DEFAULT_RELAYER;
 
 /**
  * Timeboxed spike: create delegate key (local).
@@ -36,12 +31,15 @@ export async function createDelegateKeyFlow() {
 export function createStagingMemWalClient(params: {
   privateKey: string | Uint8Array;
   accountId: string;
+  serverUrl?: string;
   namespace?: string;
 }) {
+  const env = getRuntimeEnv();
+
   return MemWal.create({
     key: params.privateKey,
     accountId: params.accountId,
-    serverUrl: MEMWAL_STAGING_RELAYER,
+    serverUrl: params.serverUrl ?? env.MEMWAL_SERVER_URL ?? MEMWAL_DEFAULT_RELAYER,
     namespace: params.namespace ?? "linow-demo",
   });
 }
@@ -55,16 +53,17 @@ export async function validateMemWalCore(memwal: MemWal) {
 
   let rememberRecall: any = { skipped: true, reason: "requires valid accountId + delegate key with on-chain MemWalAccount setup" };
   try {
-    // Use remember (fire and forget for spike)
-    const accepted = await memwal.remember("Linow SDK memwal spike test memory: prefers 2026 timeline and direct Walrus fallback for hackathon.");
-
-    // Recall to validate
+    const stored = await memwal.rememberAndWait(
+      "Linow SDK memwal spike test memory: prefers 2026 timeline and direct Walrus fallback for hackathon.",
+      undefined,
+      { timeoutMs: 120_000 },
+    );
     const results = await memwal.recall({
       query: "Linow SDK memwal spike",
       limit: 5,
     });
 
-    rememberRecall = { accepted, results };
+    rememberRecall = { stored, results };
   } catch (err: any) {
     rememberRecall = { error: err.message || String(err) };
   }
@@ -89,22 +88,22 @@ export async function storeAgentOutputsInMemWal(
   // classifications
   for (const doc of orchestrationResult.documents || []) {
     if (doc.classification) {
-      await memwal.remember(JSON.stringify(doc.classification), namespace);
+      await rememberAndWait(memwal, JSON.stringify(doc.classification), namespace);
     }
     // source-confidence notes
     if (doc.source_confidence) {
-      await memwal.remember(JSON.stringify(doc.source_confidence), namespace);
+      await rememberAndWait(memwal, JSON.stringify(doc.source_confidence), namespace);
     }
   }
 
   // findings
   for (const finding of orchestrationResult.findings || []) {
-    await memwal.remember(JSON.stringify(finding), namespace);
+    await rememberAndWait(memwal, JSON.stringify(finding), namespace);
   }
 
   // audit pack summaries
   if (orchestrationResult.audit_pack_summary) {
-    await memwal.remember(JSON.stringify(orchestrationResult.audit_pack_summary), namespace);
+    await rememberAndWait(memwal, JSON.stringify(orchestrationResult.audit_pack_summary), namespace);
   }
 }
 
@@ -114,9 +113,11 @@ export async function storeAgentOutputsInMemWal(
  */
 export async function recallPriorAuditMemory(packId: string): Promise<Array<{ text: string; distance: number }>> {
   try {
+    const env = getRuntimeEnv();
     const memwal = createStagingMemWalClient({
-      privateKey: process.env.MEMWAL_PRIVATE_KEY || "0".repeat(64),
-      accountId: process.env.MEMWAL_ACCOUNT_ID || "0x" + "0".repeat(64),
+      privateKey: env.MEMWAL_PRIVATE_KEY || "0".repeat(64),
+      accountId: env.MEMWAL_ACCOUNT_ID || "0x" + "0".repeat(64),
+      serverUrl: env.MEMWAL_SERVER_URL,
     });
     const res = await memwal.recall({
       query: "prior evidence findings classifications gap analysis",
@@ -128,4 +129,18 @@ export async function recallPriorAuditMemory(packId: string): Promise<Array<{ te
     // Graceful for demo/spike without real keys
     return [];
   }
+}
+
+async function rememberAndWait(memwal: MemWal, text: string, namespace: string): Promise<void> {
+  await memwal.rememberAndWait(text, namespace, { timeoutMs: 120_000 });
+}
+
+function getRuntimeEnv(): Record<string, string | undefined> {
+  const runtime = globalThis as typeof globalThis & {
+    process?: {
+      env?: Record<string, string | undefined>;
+    };
+  };
+
+  return runtime.process?.env ?? {};
 }

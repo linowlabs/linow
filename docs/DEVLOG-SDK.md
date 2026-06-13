@@ -635,3 +635,59 @@ Appended matching entry will also be added to DEVLOG-APP if relevant, but this i
 - Follow-up needed:
   - Call site in app route to actually invoke (next or as part of B wiring).
   - Once working, the memories can be recalled in UI to show agent memory in demo.
+
+## 2026-06-13 — Fix AuditPack Linking and SDK Parsing
+
+### Change
+- Files touched:
+  - `sdk/src/types.ts`
+  - `sdk/src/register.ts`
+  - `sdk/src/verify.ts`
+  - `sdk/src/audit-pack.ts`
+  - `sdk/src/memwal.ts`
+  - `sdk/package.json`
+  - `sdk/package-lock.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `auditPackId` to the public register input, evidence model, and proof artifact model.
+  - Passed `auditPackId` through register preparation into the Sui PTB and changed the Move option serializer from `Option<address>` to `Option<ID>`.
+  - Parsed `EvidenceRecord.audit_pack_id` back out of Sui object reads.
+  - Fixed AuditPack object parsing for Move `Option<address>` auditor and `Option<String>` memory blob fields.
+  - Removed the SDK's `@types/node` dev dependency by reading runtime env through `globalThis`, keeping the existing MemWal helper API stable without requiring Node typings in SDK builds.
+
+### Reasoning
+- Why this approach was chosen:
+  - The Sui contract already expects `Option<ID>`, so the SDK needed to match the deployed Move model instead of treating pack links as addresses.
+  - The parser changes make the proof surface reflect chain state accurately when auditor and memory blob fields are set.
+  - The MemWal build fix stays inside SDK so agent-owned routes do not need to change.
+
+### Tech Debt
+- Known shortcuts:
+  - Register can now attach evidence to an existing AuditPack, but the workspace UI still needs a first-class pack creation/batch registration flow.
+  - MemWal still falls back to dummy credentials when env is absent; direct Walrus memory fallback remains a later integration step.
+- Follow-up needed:
+  - Wire `auditPackId` from the pack workspace once SO-21/SO-22 land.
+  - Add parser smoke tests for `Option<ID>`, `Option<address>`, and `Option<String>` Sui JSON shapes.
+
+## 2026-06-13 — Complete MemWal Runtime Setup
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `MEMWAL_SERVER_URL` support through the SDK MemWal client factory while keeping the existing default hosted relayer.
+  - Updated MemWal validation and agent-output storage to use `rememberAndWait`, so persisted memories are available for recall after the relayer finishes indexing.
+  - Exported `MEMWAL_DEFAULT_RELAYER` from the SDK public surface.
+
+### Reasoning
+- Why this approach was chosen:
+  - Waiting for remember jobs makes SO-13b stronger than a fire-and-forget submission and better supports the SO-13c recall demo.
+  - Keeping relayer URL configurable lets local/Vercel deployments switch between hosted production, staging, or self-hosted MemWal without code changes.
+
+### Tech Debt
+- Known shortcuts:
+  - The agent route still catches MemWal failures to protect the demo path, so failed persistence is non-blocking.
+- Follow-up needed:
+  - Use a real MemWal account and delegate key in deployment env, then run a live store/recall smoke test.
