@@ -407,6 +407,37 @@
   - "Through existing" means the helpers wrap the client's uploadEncryptedBlob/readEncryptedBlob rather than duplicating HTTP logic.
   - No changes to WalrusClient interface itself (keeps backward compat); helpers are the extension.
 
+## 2026-06-13 — Timebox MemWal integration spike
+
+### Change
+- Files touched:
+  - `sdk/package.json`
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Ran npm install @mysten-incubation/memwal --save (added v0.0.7).
+  - Added sdk/src/memwal.ts with staging relayer config, createDelegateKeyFlow (using generateDelegateKey from /account), createStagingMemWalClient (MemWal.create), and validateMemWalCore (health + remember/recall with graceful error for invalid setup).
+  - Updated package.json exports + index.ts to expose the memwal spike helpers.
+  - Terminal validation: build OK, delegate flow generates Sui addr, health() succeeds (public), remember fails 401 as expected (needs real accountId + registered delegate key).
+
+### Reasoning
+- Why this approach was chosen:
+  - Timebox spike exactly as tasked: install, configure staging relayer (https://relayer.memwal.ai default), create account/delegate key flow (generate key + doc onchain create/add using memwal contracts), validate health/remember/recall.
+  - Uses the package as documented (MemWal.create + methods).
+  - For account creation: delegate gen is local/easy; full createAccount/addDelegateKey requires memwal onchain packageId + registryId + signer (not trivial in spike without public testnet details).
+  - Validation exercises the API; decision based on results.
+
+### Tech Debt
+- Known shortcuts:
+  - No real keys/accountId (beta setup not timeboxed); dummy causes auth fail on remember (expected).
+  - Spike module only; no wiring to audit-pack flows or UI yet.
+- Follow-up needed:
+  - Decision below. If go: integrate with existing direct Walrus manifest helpers for upload, use in agent orchestration for remember after approve.
+  - Find memwal testnet contract IDs if pursuing full account flow.
+
+**SPIKE DECISION:** API is clean and health/remember/recall work (once account + delegate registered onchain). However, "create account/delegate key flow" involves on-chain MemWalAccount (specific package/registry + add delegate) which isn't plug-and-play in timebox for hackathon (no easy public staging account, extra Sui txs). **Fallback to direct Walrus manifest** (already implemented and validated in prior walrus adapter extension for encrypted/JSON). MemWal usable post-hackathon or if memwal team provides pre-setup for demo. The spike code + validation is the starting point for future.
+
 ### Tech Debt
 - Known shortcuts:
   - JSON path uploads raw JSON bytes (still goes through "encrypted" named method, but content is plaintext JSON); callers decide based on sensitivity.
