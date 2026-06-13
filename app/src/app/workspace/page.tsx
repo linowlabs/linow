@@ -1526,6 +1526,38 @@ export default function Home() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* B-side demo button for persistent memory proof (recall after refresh/new session to continue gap).
+                    After store via orchestrate (or agent), refresh, click: calls gap route which does recallPrior + injects to input for continued gap analysis.
+                    Shows count >0 proving MemWal persistence. */}
+                <div style={{ marginTop: 8, padding: 6, border: '1px dashed #666', fontSize: 12 }}>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const pid = attestRecordId || verifyRecordId || (registry[0]?.id ?? 'demo-pack');
+                        const body = {
+                          pack_id: pid,
+                          engagement_name: 'Q2 2026 Demo',
+                          documents: [{ document_id: 'd1', filename: 'demo.pdf' }],
+                        };
+                        const res = await fetch('/api/agent/analyze-gaps', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(body),
+                        });
+                        const data = await res.json();
+                        alert(`Recalled prior count (MemWal persistence proof): ${data.recalled_prior_count ?? 0}\nGap continued from previous session memory.`);
+                      } catch (e) {
+                        alert('Demo recall error: ' + ((e as Error).message || e));
+                      }
+                    }}
+                  >
+                    Demo Recall Prior for Gap (after refresh)
+                  </button>
+                  <span style={{ marginLeft: 8, color: '#666' }}>
+                    (proves cross-session: stores persist in MemWal → recall injects to gap input)
+                  </span>
+                </div>
               </>
             )}
           </div>

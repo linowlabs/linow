@@ -36,6 +36,14 @@ export {
   createEmitAgentActionFlowFromEnv,
   createSuiEmitAgentActionHandler,
 } from "./agent-action.js";
+export {
+  createDelegateKeyFlow,
+  createStagingMemWalClient,
+  validateMemWalCore,
+  storeAgentOutputsInMemWal,
+  recallPriorAuditMemory,
+  MEMWAL_STAGING_RELAYER,
+} from "./memwal.js";
 export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";
 export { createWalrusClient, WALRUS_HTTP_ENDPOINTS } from "./walrus.js";
 export {

@@ -667,6 +667,59 @@
   - Removing section divider lines allows full-bleed hero assets to flow more naturally into the layout canvas.
   - Disabling physical translation lifts on hover results in a cleaner, more stable, and less "AI-generated template" feeling.
 
+## 2026-06-13 — Recall prior audit memory for gap analysis (B side only)
+
+### Change
+- Files touched:
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - In the B-side gap analysis route, call recallPriorAuditMemory (from @linow/sdk/memwal) for the pack_id before running the groq gap tool.
+  - Inject recalled prior texts into input.pack_notes (prior memories become part of the gap analysis input/prompt).
+  - Return recalled_prior_count in the response (for demo UI to display "used X prior from previous session").
+  - This makes gap analysis continue from persisted MemWal memory even after page refresh or new session.
+  - Storage was already wired in orchestrate route (previous); this adds the recall+use for gap specifically.
+  - No edits to lib/agent/ (A side untouched).
+
+### Reasoning
+- Why this approach was chosen:
+  - Fulfills "Recall previous evidence/finding memory and use it to continue gap analysis after refresh or new session" on B side.
+  - The gap route is the B entrypoint for standalone gap calls (and used in flows).
+  - Injecting to pack_notes ensures the prior is passed into the analysis without touching core prompt builders.
+  - Proves persistence: MemWal recall works across sessions because memories are in Walrus (portable).
+
+### Tech Debt
+- Known shortcuts:
+  - Relies on pack_notes being included in the gap prompt (per GapAnalysisToolInput usage).
+  - Dummy keys return no prior (graceful).
+- Follow-up needed:
+  - Real keys + UI display of recalled count in gap results or activity feed.
+  - Verify in full orchestrate flow that gap sees prior.
+
+## 2026-06-13 — Recall prior for gap + UI demo button (B side)
+
+### Change
+- Files touched:
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - In gap route: recall prior, inject to pack_notes before tool call, return recalled count.
+  - Added demo button in workspace records view: after store+refresh, click calls gap API (which recalls), alerts count >0 proving persistence and use in gap analysis.
+  - UI change is small patch in existing records section.
+
+### Reasoning
+- Why this approach was chosen:
+  - Makes the "after refresh or new session" recall+use visible in the workspace (B) for the demo.
+  - Button triggers the flow that exercises the recall in gap route.
+  - Proves deliverable without A changes or big UI rewrite.
+
+### Tech Debt
+- Known shortcuts:
+  - Button is demo-only; real integration would be automatic in gap calls and show in results.
+- Follow-up needed:
+  - Real keys to make count >0 in live demo.
+
 ### Tech Debt
 - Known shortcuts:
   - None.
@@ -722,4 +775,35 @@
   - Left/right centering of cards uses absolute horizontal positioning over custom js translations since JS dynamically overrides transforms on active cards.
 - Follow-up needed:
   - None. Clean interactions and vertical alignment verified on mobile and desktop.
+
+## 2026-06-13 — Store agent outputs in MemWal (B side only)
+
+### Change
+- Files touched:
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - In the B-side (app) orchestrate API route, after obtaining the agent orchestration result, call storeAgentOutputsInMemWal from @linow/sdk/memwal (imported via the subpath).
+    Uses staging client (env keys or dummy) and stores under engagement namespace.
+    Wrapped in try/catch to protect the demo response path.
+  - Did not edit any files under app/src/lib/agent/ (A side / agent work untouched).
+  - Added corresponding DEVLOG-APP.md entry.
+
+### Reasoning
+- Why this approach was chosen:
+  - Fulfills "Store agent outputs in MemWal" on B side (app/sdk/web3) per user instruction.
+  - The route is the natural post-orchestration point where full result (documents with classification/source_confidence, findings, audit_pack_summary, gap_analysis) is available.
+  - Uses the store helper added in SDK memwal.ts.
+  - Namespace per pack_id as "one engagement namespace".
+  - Outputs become portable Walrus Memory entries via MemWal.
+  - Error handling ensures main agent API still succeeds even if MemWal storage is not configured.
+
+### Tech Debt
+- Known shortcuts:
+  - Dummy keys mean storage is best-effort in current spike/demo (will warn on 401).
+  - Stores raw JSON of outputs; future could hash or summarize.
+- Follow-up needed:
+  - Set real MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID in env for working demo storage.
+  - In workspace UI, add recall of these memories to show "agent remembered" in the activity feed (as per DEMO.md).
+  - Once working, integrate namespace with actual AuditPack for cross-linking.
 

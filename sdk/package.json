@@ -17,12 +17,15 @@
     "./tatum": "./dist/tatum.js",
     "./verify": "./dist/verify.js",
     "./walrus": "./dist/walrus.js",
+    "./memwal": "./dist/memwal.js",
     "./types": "./dist/types.js"
   },
   "devDependencies": {
+    "@types/node": "^22",
     "typescript": "^5"
   },
   "dependencies": {
+    "@mysten-incubation/memwal": "^0.0.7",
     "@mysten/sui": "^2.17.0"
   }
 }
