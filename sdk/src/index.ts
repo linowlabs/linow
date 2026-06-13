@@ -22,6 +22,20 @@ export {
   createVerifyEvidenceHandler,
   parseEvidenceRecordObject,
 } from "./verify.js";
+export {
+  createAuditPackClient,
+  createAuditPackFlow,
+  createAuditPackFlowFromEnv,
+  createSuiCreateAuditPackHandler,
+  createSuiGetAuditPackHandler,
+  parseAuditPackObject,
+} from "./audit-pack.js";
+export {
+  createAgentActionClient,
+  createEmitAgentActionFlow,
+  createEmitAgentActionFlowFromEnv,
+  createSuiEmitAgentActionHandler,
+} from "./agent-action.js";
 export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";
 export { createWalrusClient, WALRUS_HTTP_ENDPOINTS } from "./walrus.js";
 export {
@@ -74,6 +88,26 @@ export type {
   CreateVerifyEvidenceHandlerConfig,
   VerifyEvidenceEnvironment,
 } from "./verify.js";
+export type {
+  CreateAuditPackChainInput,
+  CreateAuditPackChainResult,
+  CreateAuditPackFlowConfig,
+  CreateAuditPackFlowFromEnvConfig,
+  CreateAuditPackResult,
+  CreateSuiCreateAuditPackHandlerConfig,
+  CreateSuiGetAuditPackHandlerConfig,
+  GetAuditPackInput,
+  GetAuditPackResult,
+} from "./audit-pack.js";
+export type {
+  CreateSuiEmitAgentActionHandlerConfig,
+  EmitAgentActionChainInput,
+  EmitAgentActionChainResult,
+  EmitAgentActionFlowConfig,
+  EmitAgentActionFlowFromEnvConfig,
+  EmitAgentActionInput,
+  EmitAgentActionResult,
+} from "./agent-action.js";
 export type {
   ExecuteTransactionBlockInput,
   JsonValue,
