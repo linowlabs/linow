@@ -563,6 +563,28 @@ Appended matching entry will also be added to DEVLOG-APP if relevant, but this i
 - Follow-up needed:
   - Same as app side.
 
+## 2026-06-13 — Fix Vercel SDK build for process.env in memwal (no @types/node in sub-install)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added a minimal `declare const process` block at the top of memwal.ts to provide the `process.env` global for `MEMWAL_PRIVATE_KEY` and `MEMWAL_ACCOUNT_ID` usages.
+  - This avoids the hard TS2580 "Cannot find name 'process'" error during Vercel's prebuild `npm --prefix ../sdk install && tsc`, where @types/node (even when listed in devDependencies) is not resolved in the isolated SDK node_modules.
+
+### Reasoning
+- Why this approach was chosen:
+  - The previous tsconfig cleanup (removing explicit "types": ["node"]) fixed the "cannot find type definition file" but exposed that the SDK code in memwal.ts relies on Node globals that aren't in the DOM+ES lib.
+  - A local `declare` is the smallest patch that makes tsc happy without requiring @types/node to be perfectly present in every build environment (Vercel sub-install + cache).
+  - Keeps the @types/node in package.json for local development and full type checking.
+
+### Tech Debt
+- Known shortcuts:
+  - The declare is narrow (only Record<string, string | undefined> for env); full @types/node is still preferred locally.
+- Follow-up needed:
+  - Monitor next Vercel deploy. If needed, also add "@types/node" to the root app devDependencies or switch the prebuild to always include dev deps explicitly.
+
 ## 2026-06-13 — Recall prior audit memory (SDK + B demo)
 
 ### Change

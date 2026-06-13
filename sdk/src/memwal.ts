@@ -1,6 +1,12 @@
 import { MemWal } from "@mysten-incubation/memwal";
 import { generateDelegateKey } from "@mysten-incubation/memwal/account";
 
+// Declare process for environments where @types/node may not be resolved during the
+// SDK's isolated prebuild install on Vercel (even with @types/node in devDependencies).
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
 /**
  * Staging relayer URL for MemWal (as per quickstart and docs).
  * For production would use self-hosted or managed.
