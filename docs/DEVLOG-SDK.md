@@ -67,6 +67,38 @@
   - `sdk/tsconfig.json`
   - `sdk/dist/*`
   - `docs/DEVLOG-SDK.md`
+
+## 2026-06-13 — Define Walrus Memory Manifest Schema and Sui AuditPack/AgentAction Models
+
+### Change
+- Files touched:
+  - `docs/AGENT_SCHEMAS.md`
+  - `sdk/src/types.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added the `memory_manifest` entry to the shared agent schemas doc, describing the Walrus-stored artifact bundle (evidence refs, agent output hashes, finding hashes, audit pack metadata, timestamps, schema version).
+  - Added minimal TS model definitions in the SDK for `WalrusMemoryManifest`, `AuditPack`, `AgentAction`, and supporting `AUDIT_PACK_STATUSES`.
+  - Re-exported the new const and types from the SDK public surface so future memwal/audit-pack/agent-action modules and app surfaces can import them directly.
+  - Changes are pure type + doc definitions (no behavior, no app/agent code touched).
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly fulfills the two scoped definition tasks on this sdk/feat branch.
+  - Reuses existing patterns from types.ts (const arrays + derived types, ID aliases) and the agent artifact hashing story already documented in DEVLOG-AGENT.
+  - Puts descriptive "what the bundle contains" in the shared schemas doc (per project preference for docs over inline code comments).
+  - Keeps code self-documenting via clear type and field names; detailed rationale stays in this DEVLOG entry.
+  - Avoids touching any agent-side implementation (app/src/lib/agent/*) as required.
+
+### Tech Debt
+- Known shortcuts:
+  - Field shapes are the minimal viable set from the task description and MASTER on-chain spec; full optional fields (e.g. encrypted details) can be added when the concrete manifest builder lands.
+  - Action types are string for now (matching how the SDK already passes strings that become vector<u8> on chain); a const union can be added later if needed.
+  - No runtime helpers (createManifest, pack PTB builders, event parsers) yet — those belong in later dedicated modules.
+- Follow-up needed:
+  - Implement the actual Walrus upload path for a MemoryManifest and the AuditPack/AgentAction SDK flows (memwal.ts, audit-pack.ts, agent-action.ts) once the Move contracts are defined.
+  - Wire the manifest creation from approved agent artifacts (using the existing hashAgentArtifact output) when the orchestration + review gate is integrated.
+  - Update the client interface and register flow once AuditPack linking becomes first-class.
 - Summary:
   - Switched the SDK from declaration-only output to a real JavaScript package build.
   - Exported the public API from `dist/` so the app can consume the SDK as a normal local package instead of importing source files directly.
