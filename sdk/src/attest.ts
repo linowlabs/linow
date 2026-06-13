@@ -1,7 +1,7 @@
 import { Transaction } from "@mysten/sui/transactions";
 import { createLinowClient, type LinowClient } from "./client.js";
 import { encryptJson } from "./crypto.js";
-import { serializeEncryptedPayload, type SerializedEncryptedPayload } from "./register.js";
+import { serializeEncryptedPayload, type SerializedEncryptedPayload } from "./crypto.js";
 import { createTatumSuiClient, type TatumSuiClient, type TatumSuiNetwork } from "./tatum.js";
 import type {
   AttestationId,

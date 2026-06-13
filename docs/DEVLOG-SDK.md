@@ -77,6 +77,45 @@
   - `sdk/src/index.ts`
   - `docs/DEVLOG-SDK.md`
 - Summary:
+
+## 2026-06-13 — Extend SDK for AuditPack and AgentAction APIs
+
+### Change
+- Files touched:
+  - `sdk/src/audit-pack.ts`
+  - `sdk/src/agent-action.ts`
+  - `sdk/src/client.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `sdk/src/audit-pack.ts` with `createAuditPackFlow`, `createSuiCreateAuditPackHandler`, `createSuiGetAuditPackHandler`, `parseAuditPackObject`, and supporting types/flows for creating packs, setting memory blob links, reading pack state from chain, and parsing.
+  - Added `sdk/src/agent-action.ts` with `createEmitAgentActionFlow`, `createSuiEmitAgentActionHandler` to build PTBs and emit agent action logs (pack/evidence id + action type + output hash + timestamp).
+  - Extended `LinowClient` in `client.ts` with optional `createAuditPack`, `getAuditPack`, `emitAgentAction` (and wired defaults to missingImplementation).
+  - Updated `index.ts` to export all new clients, flows, handlers, and types so the SDK now exposes pack and agent-action APIs.
+  - Reused existing patterns from register/attest/verify (PTB building with signTransaction + tatum execute, extract helpers, parse object functions, env/fromEnv flows, required checks).
+  - The existing register support for `auditPackId` continues to work for linking evidence at creation time; dedicated pack mutators (add evidence/memory) are available via the new pack module for post-creation linking.
+  - No private agent data or raw evidence is handled in these flows — only hashes, IDs, and encrypted refs per project rules.
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly delivers the required "SDK exposes pack and agent-action APIs" (create pack, link evidence/memory via pack mutators + register, emit logs, read state, parse events/object changes via the extract/parse helpers).
+  - Follows the exact structure and style of existing modules (no premature abstraction, patch existing client/index).
+  - Supports the on-chain AuditPack (create + add_evidence/set_memory_blob) and AgentAction (emit) without duplicating logic.
+  - Memory link is supported both via manifest blob set on pack and the existing WalrusMemoryManifest type.
+  - Keeps "Agent proposes, human signs" — these are unsigned PTB builders only; user signs.
+
+### Tech Debt
+- Known shortcuts:
+  - Some link evidence uses the pack's add_evidence (for post-create); the main evidence-to-pack link is still via register's auditPackId for simplicity (no duplication).
+  - Uses tatum execute layer for consistency with current SDK (even as direct Sui is preferred elsewhere); can be swapped later.
+  - No full memwal integration yet (branch name); the set memory and manifest type are the hooks for it.
+  - Parser for AuditPack is basic field extraction (no deep event parsing beyond objectChanges in handlers).
+- Follow-up needed:
+  - Wire into app (create pack UI, agent orchestration calling emit after approval, proof dashboard showing packs/actions).
+  - Add memory manifest upload + set in a combined flow once memwal is ready.
+  - Update register flows if needed to return pack links more explicitly.
+  - Add usage examples and tests once the demo pack exercises the full path.
+  - Rebuild and ensure no breakage to existing register/attest/verify (build passed).
   - Added the `memory_manifest` entry to the shared agent schemas doc, describing the Walrus-stored artifact bundle (evidence refs, agent output hashes, finding hashes, audit pack metadata, timestamps, schema version).
   - Added minimal TS model definitions in the SDK for `WalrusMemoryManifest`, `AuditPack`, `AgentAction`, and supporting `AUDIT_PACK_STATUSES`.
   - Re-exported the new const and types from the SDK public surface so future memwal/audit-pack/agent-action modules and app surfaces can import them directly.
@@ -340,3 +379,42 @@
 - Follow-up needed:
   - Wire this handler into the app wallet flow during `J6-18`.
   - Run a live testnet smoke test after the browser wallet signing bridge is available.
+
+## 2026-06-13 — Extend Walrus adapter for memory artifacts
+
+### Change
+- Files touched:
+  - `sdk/src/crypto.ts`
+  - `sdk/src/register.ts`
+  - `sdk/src/attest.ts`
+  - `sdk/src/walrus.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Patched crypto.ts to export SerializedEncryptedPayload, serializeEncryptedPayload, deserializeEncryptedPayload, and supporting bytesToBase64/base64ToBytes (consolidated for reuse after 3 occurrences in register/attest + new walrus use).
+  - Patched register.ts and attest.ts to import serialize/deserialize from crypto (hygiene, remove local duplication).
+  - Extended walrus.ts with upload/read helpers for encrypted or JSON memory manifests (WalrusMemoryManifest) and agent output artifacts (generic <T>): uploadEncryptedMemoryManifest, readEncryptedMemoryManifest, uploadJsonMemoryManifest, readJsonMemoryManifest, and matching *AgentArtifact versions.
+  - The helpers take existing WalrusClient, use crypto encryptJson/serialize (or direct JSON) then client's uploadEncryptedBlob/readEncryptedBlob for storage/reload of artifacts through the adapter.
+  - Updated index.ts exports for the new walrus memory helpers.
+  - Leverages existing WalrusClient (no new client methods added to keep adapter surface minimal), crypto, and types.
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly fulfills "Add helpers to upload/read encrypted or JSON memory manifests and agent output artifacts through existing Walrus client."
+  - Small patch to crypto for DRY (rule of three triggered by this use case), then minimal new helpers at end of walrus.ts.
+  - Supports both encrypted (for privacy per Walrus rule: blobs public, sensitive must encrypt) and plain JSON paths.
+  - Reuses encryptJson/decryptJson/serialize patterns exactly as in register/attest for consistency; generic for artifacts to cover agent outputs (classification, ccer, gap, etc.).
+  - "Through existing" means the helpers wrap the client's uploadEncryptedBlob/readEncryptedBlob rather than duplicating HTTP logic.
+  - No changes to WalrusClient interface itself (keeps backward compat); helpers are the extension.
+
+### Tech Debt
+- Known shortcuts:
+  - JSON path uploads raw JSON bytes (still goes through "encrypted" named method, but content is plaintext JSON); callers decide based on sensitivity.
+  - No automatic manifest <-> memoryBlobId linking in pack (that's in audit-pack flows); these are pure upload/read.
+  - Dupe of some serialize logic avoided by moving to crypto, but old register/attest local copies cleaned.
+  - Assumes the serialized format (iv/ciphertext as base64 JSON) for encrypted path, matching register.
+- Follow-up needed:
+  - Use the new helpers from audit-pack or agent flows when wiring memoryBlobId set + manifest upload after pack create.
+  - Add optional compression or size limits for large manifests/artifacts if demo packs grow.
+  - Document the choice (encrypted vs json) in usage examples once app integration happens.
+  - If direct Sui (no tatum) becomes default, these helpers remain transport-agnostic.
