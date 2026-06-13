@@ -182,6 +182,7 @@ export function parseEvidenceRecordObject(
   const assertions = parseAssertionIds(getByteVector(fields.isa_assertions, "isa_assertions"));
   const status = parseEvidenceStatus(fields.status);
   const registeredAt = parseTimestampMs(fields.registered_at);
+  const auditPackId = parseOptionalObjectId(fields.audit_pack_id);
 
   return {
     id,
@@ -193,12 +194,14 @@ export function parseEvidenceRecordObject(
       description: "Metadata is stored encrypted and is not decrypted during integrity verification.",
     },
     blobId: bytesToText(walrusBlobIdBytes),
+    auditPackId,
     registrantAddress: getString(fields.registrant),
     registeredAt,
     proof: {
       evidenceId: id,
       packageId,
       walrusBlobId: bytesToText(walrusBlobIdBytes),
+      auditPackId,
     },
   };
 }
@@ -268,6 +271,22 @@ function getByteVector(value: unknown, fieldName: string): Uint8Array {
 function getObjectId(value: unknown): string | undefined {
   const record = asRecord(value);
   return getString(record?.id);
+}
+
+function parseOptionalObjectId(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  const record = asRecord(value);
+  const fields = asRecord(record?.fields);
+  const vec = fields?.vec;
+
+  if (!Array.isArray(vec) || vec.length === 0) {
+    return undefined;
+  }
+
+  return typeof vec[0] === "string" ? vec[0] : getObjectId(vec[0]);
 }
 
 function getString(value: unknown): string | undefined {

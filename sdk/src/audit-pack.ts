@@ -262,12 +262,12 @@ export function parseAuditPackObject(
 
   const id = getString(data?.objectId) ?? getObjectId(fields.id) ?? fallbackPackId;
   const owner = getString(fields.owner);
-  const auditor = getString(fields.auditor);
+  const auditor = parseMoveOption(fields.auditor, getString);
   const status = Number(fields.status);
   const createdAt = parseTimestampMs(fields.created_at);
   const evidenceIds = parseIdVector(fields.evidence_ids);
   const findingHashes = parseHashVector(fields.finding_hashes);
-  const memoryBlobId = getString(fields.memory_blob_id);
+  const memoryBlobId = parseMoveOption(fields.memory_blob_id, parseMoveString);
   const assertionsCovered = parseAssertionVector(fields.assertions_covered);
 
   return {
@@ -342,6 +342,40 @@ function getString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function parseMoveOption<T>(value: unknown, parseValue: (value: unknown) => T | undefined): T | undefined {
+  const direct = parseValue(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  const record = asRecord(value);
+  const fields = asRecord(record?.fields);
+  const vec = fields?.vec;
+
+  if (!Array.isArray(vec) || vec.length === 0) {
+    return undefined;
+  }
+
+  return parseValue(vec[0]);
+}
+
+function parseMoveString(value: unknown): string | undefined {
+  const direct = getString(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  const record = asRecord(value);
+  const fields = asRecord(record?.fields);
+  const bytes = fields?.bytes;
+
+  if (!Array.isArray(bytes) || !bytes.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)) {
+    return undefined;
+  }
+
+  return textDecoder.decode(Uint8Array.from(bytes));
+}
+
 function getObjectId(value: unknown): string | undefined {
   const r = asRecord(value);
   return getString(r?.id);
@@ -380,3 +414,4 @@ function parseAssertionVector(value: unknown): AssertionId[] {
 }
 
 const SUI_CLOCK_OBJECT_ID = "0x6";
+const textDecoder = new TextDecoder();

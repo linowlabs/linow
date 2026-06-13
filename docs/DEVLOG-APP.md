@@ -807,3 +807,23 @@
   - In workspace UI, add recall of these memories to show "agent remembered" in the activity feed (as per DEMO.md).
   - Once working, integrate namespace with actual AuditPack for cross-linking.
 
+## 2026-06-13 — Update Workspace Package Default
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Updated the workspace fallback Sui package ID from the old evidence-only package to the latest deployed package containing `evidence`, `audit_pack`, and `agent_action`.
+
+### Reasoning
+- Why this approach was chosen:
+  - If `NEXT_PUBLIC_LINOW_PACKAGE_ID` is not set, the app should still target the package that matches the current SDK and Move surface.
+  - This keeps the live register/verify/attest flow from silently calling stale testnet code.
+
+### Tech Debt
+- Known shortcuts:
+  - The workspace still needs a first-class AuditPack UI rather than only using the latest package for the legacy register/verify/attest flow.
+- Follow-up needed:
+  - Wire pack creation and batch evidence registration in the workspace branch.
+

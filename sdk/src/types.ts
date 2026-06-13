@@ -72,6 +72,7 @@ export interface ProofArtifacts {
   packageId?: string;
   transactionDigest?: TransactionDigest;
   walrusBlobId?: BlobId;
+  auditPackId?: string;
   attestationId?: AttestationId;
 }
 
@@ -88,6 +89,7 @@ export interface EvidenceRecord {
   assertions: AssertionId[];
   metadata: EvidenceMetadata;
   blobId?: BlobId;
+  auditPackId?: string;
   registrantAddress?: WalletAddress;
   registeredAt?: IsoTimestamp;
   lastUpdatedAt?: IsoTimestamp;
@@ -101,6 +103,7 @@ export interface RegisterEvidenceInput {
   content: BinaryContent;
   metadata: EvidenceMetadata;
   assertions: AssertionId[];
+  auditPackId?: string;
   signerAddress?: WalletAddress;
 }
 

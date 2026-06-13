@@ -169,6 +169,7 @@ export function createRegisterEvidenceHandler(
       walrusBlobIdBytes: textEncoder.encode(walrus.blobId),
       encryptedMetadata: encryptedMetadataBytes,
       assertions: input.assertions,
+      auditPackId: input.auditPackId,
       signerAddress: input.signerAddress,
     });
 
@@ -179,6 +180,7 @@ export function createRegisterEvidenceHandler(
       assertions: input.assertions,
       metadata: input.metadata,
       blobId: walrus.blobId,
+      auditPackId: input.auditPackId,
       registrantAddress: chain.registrantAddress ?? input.signerAddress,
       registeredAt: chain.registeredAt,
       proof: {
@@ -186,6 +188,7 @@ export function createRegisterEvidenceHandler(
         packageId: chain.packageId,
         transactionDigest: chain.transactionDigest,
         walrusBlobId: walrus.blobId,
+        auditPackId: input.auditPackId,
       },
     };
 
@@ -286,7 +289,7 @@ export function createSuiRegisterOnChainHandler(
         transaction.pure.vector("u8", Array.from(input.walrusBlobIdBytes)),
         transaction.pure.vector("u8", Array.from(input.encryptedMetadata)),
         transaction.pure.vector("u8", input.assertions),
-        transaction.pure.option("address", input.auditPackId ?? null),
+        transaction.pure.option("id", input.auditPackId ?? null),
         transaction.object(config.clockObjectId ?? SUI_CLOCK_OBJECT_ID),
       ],
     });
