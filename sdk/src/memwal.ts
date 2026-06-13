@@ -65,3 +65,39 @@ export async function validateMemWalCore(memwal: MemWal) {
 
   return { health, rememberRecall };
 }
+
+/**
+ * Store key agent outputs as memory entries in MemWal under one engagement namespace.
+ * Namespace: `engagement-${packId}`
+ * Stores: classifications, findings, source-confidence (notes/reasons), audit pack summaries.
+ * Uses remember for each as portable Walrus Memory entries.
+ * Call after orchestration produces the result.
+ */
+export async function storeAgentOutputsInMemWal(
+  memwal: MemWal,
+  orchestrationResult: any,
+  packId: string
+): Promise<void> {
+  const namespace = `engagement-${packId}`;
+
+  // classifications
+  for (const doc of orchestrationResult.documents || []) {
+    if (doc.classification) {
+      await memwal.remember(JSON.stringify(doc.classification), namespace);
+    }
+    // source-confidence notes
+    if (doc.source_confidence) {
+      await memwal.remember(JSON.stringify(doc.source_confidence), namespace);
+    }
+  }
+
+  // findings
+  for (const finding of orchestrationResult.findings || []) {
+    await memwal.remember(JSON.stringify(finding), namespace);
+  }
+
+  // audit pack summaries
+  if (orchestrationResult.audit_pack_summary) {
+    await memwal.remember(JSON.stringify(orchestrationResult.audit_pack_summary), namespace);
+  }
+}

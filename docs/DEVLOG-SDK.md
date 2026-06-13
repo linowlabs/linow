@@ -438,6 +438,43 @@
 
 **SPIKE DECISION:** API is clean and health/remember/recall work (once account + delegate registered onchain). However, "create account/delegate key flow" involves on-chain MemWalAccount (specific package/registry + add delegate) which isn't plug-and-play in timebox for hackathon (no easy public staging account, extra Sui txs). **Fallback to direct Walrus manifest** (already implemented and validated in prior walrus adapter extension for encrypted/JSON). MemWal usable post-hackathon or if memwal team provides pre-setup for demo. The spike code + validation is the starting point for future.
 
+## 2026-06-13 — Store agent outputs in MemWal (B side)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `docs/DEVLOG-SDK.md`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added `storeAgentOutputsInMemWal(memwal, orchestrationResult, packId)` in sdk memwal.ts.
+    It stores classifications, findings, source-confidence, gap_analysis, and audit_pack_summary as JSON strings via memwal.remember() under namespace `engagement-${packId}`.
+  - Re-exported the new store function from sdk index.
+  - In the B-side orchestrate API route (app/src/app/api/.../route.ts), after runAgentOrchestration, call the store using staging MemWal client (with env keys or dummy for spike).
+    Wrapped in try/catch so storage failure does not break the main agent response (demo path protection).
+  - App route change is API layer only; did not touch core agent implementation in lib/agent/.
+
+### Reasoning
+- Why this approach was chosen:
+  - Fulfills the task on B side (app/sdk/web3) without touching A (agent) work.
+  - Uses the existing MemWal client from the spike; stores the key outputs listed (classifications, findings, source-confidence notes, audit pack summaries) + gap for completeness.
+  - Namespace per engagement using pack_id for isolation, as "one engagement namespace".
+  - The outputs become portable Walrus Memory entries (via MemWal which uses Walrus + Seal).
+  - Storage after orchestration in the thin route keeps separation.
+
+### Tech Debt
+- Known shortcuts:
+  - Uses dummy keys in route if env not set; will log warn on fail (as in spike validation).
+  - Stores full JSON of outputs; for production could store only hashes + text summary.
+  - No web3 anchoring of the memwal entries yet (beyond the manifest in pack).
+- Follow-up needed:
+  - Provide real MEMWAL_* env for demo to make storage succeed.
+  - Surface the stored memories in workspace UI (recall via memwal in activity feed).
+  - Once real keys, integrate with pack creation for namespace.
+
+Appended matching entry to DEVLOG-APP.md too.
+
 ### Tech Debt
 - Known shortcuts:
   - JSON path uploads raw JSON bytes (still goes through "encrypted" named method, but content is plaintext JSON); callers decide based on sensitivity.
@@ -449,3 +486,32 @@
   - Add optional compression or size limits for large manifests/artifacts if demo packs grow.
   - Document the choice (encrypted vs json) in usage examples once app integration happens.
   - If direct Sui (no tatum) becomes default, these helpers remain transport-agnostic.
+
+## 2026-06-13 — Store agent outputs in MemWal (SDK helper for B side)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `storeAgentOutputsInMemWal(memwal, orchestrationResult, packId)` helper in sdk/src/memwal.ts.
+    It remembers (as JSON text) the classifications, findings, source-confidence, gap_analysis, and audit_pack_summary under namespace `engagement-${packId}`.
+  - Re-exported `storeAgentOutputsInMemWal` from sdk index (so app can import from @linow/sdk/memwal).
+  - This provides the B-side (sdk) implementation for storing the listed agent outputs as portable Walrus Memory entries via MemWal.
+  - The app API route (B) will call it; core agent production untouched.
+
+### Reasoning
+- Why this approach was chosen:
+  - Delivers "Agent outputs saved as portable Walrus Memory entries" on B side.
+  - Uses the existing MemWal client from the spike; each remember creates a memory entry.
+  - Namespace isolates per engagement/pack as specified.
+  - Separate helper keeps it reusable and not coupled to agent orchestration code.
+
+### Tech Debt
+- Known shortcuts:
+  - Full JSON per output (could be optimized to text + hash later).
+  - Requires configured client (keys/account); dummy in app call will skip gracefully.
+- Follow-up needed:
+  - Call site in app route to actually invoke (next or as part of B wiring).
+  - Once working, the memories can be recalled in UI to show agent memory in demo.

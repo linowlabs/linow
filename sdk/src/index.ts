@@ -40,6 +40,7 @@ export {
   createDelegateKeyFlow,
   createStagingMemWalClient,
   validateMemWalCore,
+  storeAgentOutputsInMemWal,
   MEMWAL_STAGING_RELAYER,
 } from "./memwal.js";
 export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";

@@ -723,3 +723,34 @@
 - Follow-up needed:
   - None. Clean interactions and vertical alignment verified on mobile and desktop.
 
+## 2026-06-13 — Store agent outputs in MemWal (B side only)
+
+### Change
+- Files touched:
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - In the B-side (app) orchestrate API route, after obtaining the agent orchestration result, call storeAgentOutputsInMemWal from @linow/sdk/memwal (imported via the subpath).
+    Uses staging client (env keys or dummy) and stores under engagement namespace.
+    Wrapped in try/catch to protect the demo response path.
+  - Did not edit any files under app/src/lib/agent/ (A side / agent work untouched).
+  - Added corresponding DEVLOG-APP.md entry.
+
+### Reasoning
+- Why this approach was chosen:
+  - Fulfills "Store agent outputs in MemWal" on B side (app/sdk/web3) per user instruction.
+  - The route is the natural post-orchestration point where full result (documents with classification/source_confidence, findings, audit_pack_summary, gap_analysis) is available.
+  - Uses the store helper added in SDK memwal.ts.
+  - Namespace per pack_id as "one engagement namespace".
+  - Outputs become portable Walrus Memory entries via MemWal.
+  - Error handling ensures main agent API still succeeds even if MemWal storage is not configured.
+
+### Tech Debt
+- Known shortcuts:
+  - Dummy keys mean storage is best-effort in current spike/demo (will warn on 401).
+  - Stores raw JSON of outputs; future could hash or summarize.
+- Follow-up needed:
+  - Set real MEMWAL_PRIVATE_KEY and MEMWAL_ACCOUNT_ID in env for working demo storage.
+  - In workspace UI, add recall of these memories to show "agent remembered" in the activity feed (as per DEMO.md).
+  - Once working, integrate namespace with actual AuditPack for cross-linking.
+
