@@ -275,3 +275,62 @@
   - The script assumes a shared engagement context for all listed files instead of reading context from a manifest.
 - Follow-up needed:
   - Optionally add a manifest-driven pack mode that reads engagement metadata and a default file list from the demo pack itself.
+
+## 2026-06-13 — Refine Agent Orchestration Output Contract
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/orchestration-contract.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Extracted the orchestration response contract into a dedicated `orchestration-contract.ts` module so execution logic and response shape are no longer mixed in one file.
+  - Added explicit `artifact_catalog`, `review_bundle`, and `persistence` sections to the orchestration result while preserving the existing top-level fields (`documents`, `gap_analysis`, `findings`, `audit_pack_summary`, `hashes`, `proposed_action`) for compatibility with the current route and demo path.
+  - Introduced an artifact collector helper that records each hash together with the action type and target scope (`document`, `pack`, `finding`), making later Walrus/Sui wiring more deterministic.
+  - Replaced repeated document-note lookups with a small lookup map helper to keep orchestration assembly cleaner and easier to extend.
+
+### Reasoning
+- Why this approach was chosen:
+  - The next Web3 step needs a cleaner machine-readable contract than a single flat `hashes` array, especially for deciding what gets persisted to Walrus/MemWal and what gets logged to Sui `AgentAction`.
+  - Pulling the contract into its own module keeps the core orchestrator focused on sequencing agent tools rather than also defining every response detail inline.
+  - Preserving the old fields protects the hackathon demo path while giving us a cleaner contract to build on incrementally.
+
+### Tech Debt
+- Known shortcuts:
+  - `proposed_action` is still returned as a compatibility alias to `review_bundle`; we can remove the duplication once downstream consumers switch to the new field.
+  - The new `persistence` section prepares memory-manifest metadata but does not yet build or upload the actual Walrus manifest.
+- Follow-up needed:
+  - Wire `artifact_catalog` and `persistence.memory_namespace` into the next Web3 integration step for MemWal/Walrus persistence.
+  - Add a small orchestration response fixture or smoke assertion once we decide where to keep contract-level agent tests.
+
+## 2026-06-13 — Integrate Agent Orchestration With MemWal And Walrus Persistence
+
+### Change
+- Files touched:
+  - `.env.example`
+  - `app/src/lib/agent/orchestration-contract.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/lib/agent/web3-persistence.ts`
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Extended the orchestration contract to carry optional document-level proof references (`evidence_id`, `walrus_blob_id`, `commitment`) plus optional pack owner and auditor addresses.
+  - Added a dedicated `web3-persistence.ts` helper that builds a `WalrusMemoryManifest`, attempts MemWal storage, uploads an encrypted Walrus manifest plus encrypted agent-memory bundle when a server key is configured, and prepares unsigned Sui `AgentAction` candidates for human review.
+  - Updated the orchestration route to return a `persistence_result` payload instead of doing an inline MemWal-only side effect with dummy credentials.
+  - Added `LINOW_AGENT_MEMORY_ENCRYPTION_KEY` to `.env.example` for private Walrus fallback.
+
+### Reasoning
+- Why this approach was chosen:
+  - The Web3 logic now lives behind one small boundary instead of spreading MemWal and Walrus details inside the route handler.
+  - Optional proof references let the agent preserve evidence linkage when upstream registration data already exists, without breaking the current cheap-mode orchestration path.
+  - Returning structured persistence and Sui-preparation status makes the demo story clearer: the agent can persist private memory and prepare chain-proof candidates while still respecting "agent proposes, human signs, chain proves."
+
+### Tech Debt
+- Known shortcuts:
+  - The Walrus fallback currently uploads a single encrypted manifest and one encrypted memory bundle, not a fully segmented artifact set.
+  - Pack owner and auditor addresses are optional inputs today, so the manifest may still carry a placeholder owner when wallet context is missing.
+  - The route prepares `AgentAction` candidates but does not yet submit them through a dedicated approval/signing flow.
+- Follow-up needed:
+  - Feed real `evidence_id/blob_id/commitment` values from the workspace upload/register flow so the manifest is fully linked.
+  - Add a reviewed-action route or UI approval step that turns prepared `action_candidates` into real Sui `AgentAction` writes.
+  - Decide whether Walrus reload should restore the encrypted memory bundle directly when MemWal is unavailable, completing the SO-24 fallback path end-to-end.
