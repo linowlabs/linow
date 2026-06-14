@@ -1,4 +1,5 @@
 import type { AgentArtifactHashRecord } from "@/lib/agent/artifacts";
+import type { AgentOrchestrationProfile } from "@/lib/agent/config";
 import type { AssertionMappingBundle } from "@/lib/agent/map-assertions";
 import type {
   AgentSchemaName,
@@ -25,6 +26,8 @@ export interface DocumentAnalysisResult {
   document_id: string;
   filename: string;
   evidence_ref?: AgentDocumentProofReference;
+  analysis_source: "live" | "cache";
+  cache_key?: string;
   classification: EvidenceClassificationOutput;
   metadata: MetadataExtractionOutput;
   assertion_mapping: AssertionMappingBundle["assertion_mapping"];
@@ -39,6 +42,7 @@ export interface DocumentAnalysisResult {
     classification: GroqUsageStats | null;
     metadata: GroqUsageStats | null;
     assertion_mapping: GroqUsageStats | null;
+    document_analysis_bundle?: GroqUsageStats | null;
   };
 }
 
@@ -91,6 +95,7 @@ export interface OrchestrationFlowStep {
 export interface AgentOrchestrationResult {
   provider: "groq";
   model: string;
+  profile: AgentOrchestrationProfile;
   pack_id: string;
   engagement_name: string;
   audit_area?: string;
@@ -107,6 +112,8 @@ export interface AgentOrchestrationResult {
   persistence: AgentPersistencePlan;
   proposed_action: AgentReviewBundle;
   flow: OrchestrationFlowStep[];
+  recalled_prior_memory_count: number;
+  cached_document_count: number;
   usage: GroqUsageStats;
 }
 
