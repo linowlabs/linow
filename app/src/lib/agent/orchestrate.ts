@@ -3,7 +3,6 @@ import { classifyDocumentWithGroq, runGroqJsonCompletion } from "@/lib/agent/gro
 import {
   AGENT_SCHEMA_VERSION,
   ASSERTION_CATALOG,
-  type AgentSchemaName,
   type AssertionId,
   type AuditPackSummaryOutput,
   type CcerFindingOutput,
@@ -12,6 +11,15 @@ import {
   type MetadataExtractionOutput,
   type SourceConfidenceDistributionItem,
 } from "@/lib/agent/schemas";
+import {
+  buildAgentPersistencePlan,
+  buildAgentReviewBundle,
+  createArtifactCollector,
+  type AgentDocumentProofReference,
+  type AgentOrchestrationResult,
+  type DocumentAnalysisResult,
+  type GroqUsageStats,
+} from "@/lib/agent/orchestration-contract";
 import {
   AgentInputError,
   isRecord,
@@ -32,7 +40,6 @@ import {
   groqAssertionMappingBundleSchema,
   isAssertionMappingBundle,
   normalizeAssertionMappingBundle,
-  type AssertionMappingBundle,
 } from "@/lib/agent/map-assertions";
 import {
   buildGapAnalysisMessages,
@@ -49,10 +56,11 @@ import {
   normalizeCcerFindingResult,
   type CcerFindingToolInput,
 } from "@/lib/agent/draft-finding";
-import { hashAgentArtifact, type AgentArtifactHashRecord } from "@/lib/agent/artifacts";
+import { hashAgentArtifact } from "@/lib/agent/artifacts";
 
 export interface OrchestrationDocumentInput extends AgentDocumentInput {
   notes?: string[];
+  evidence_ref?: AgentDocumentProofReference;
 }
 
 export interface AgentOrchestrationInput {
@@ -60,63 +68,10 @@ export interface AgentOrchestrationInput {
   engagement_name: string;
   audit_area?: string;
   stage?: string;
+  pack_owner_address?: string;
+  auditor_address?: string;
   documents: OrchestrationDocumentInput[];
   pack_notes?: string[];
-}
-
-interface GroqUsageStats {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-}
-
-interface DocumentAnalysisResult {
-  document_id: string;
-  filename: string;
-  classification: EvidenceClassificationOutput;
-  metadata: MetadataExtractionOutput;
-  assertion_mapping: AssertionMappingBundle["assertion_mapping"];
-  source_confidence: AssertionMappingBundle["source_confidence"];
-  hashes: {
-    classification: AgentArtifactHashRecord;
-    metadata: AgentArtifactHashRecord;
-    assertion_mapping: AgentArtifactHashRecord;
-    source_confidence: AgentArtifactHashRecord;
-  };
-  usage: {
-    classification: GroqUsageStats | null;
-    metadata: GroqUsageStats | null;
-    assertion_mapping: GroqUsageStats | null;
-  };
-}
-
-export interface AgentOrchestrationResult {
-  provider: "groq";
-  model: string;
-  pack_id: string;
-  engagement_name: string;
-  audit_area?: string;
-  stage?: string;
-  documents: DocumentAnalysisResult[];
-  gap_analysis: GapAnalysisOutput;
-  findings: CcerFindingOutput[];
-  audit_pack_summary: AuditPackSummaryOutput;
-  hashes: AgentArtifactHashRecord[];
-  proposed_action: {
-    action_type: "review_agent_outputs";
-    target_pack_id: string;
-    requires_human_approval: true;
-    chain_write_ready: false;
-    output_hashes: string[];
-    rationale: string;
-    next_steps: string[];
-  };
-  flow: Array<{
-    step: string;
-    artifact_count: number;
-    schema_names: AgentSchemaName[];
-  }>;
-  usage: GroqUsageStats;
 }
 
 export async function resolveAgentOrchestrationInput(value: unknown): Promise<AgentOrchestrationInput> {
@@ -139,6 +94,8 @@ export async function resolveAgentOrchestrationInput(value: unknown): Promise<Ag
     engagement_name: readRequiredString(value.engagement_name, "engagement_name"),
     audit_area: readOptionalString(value.audit_area, "audit_area"),
     stage: readOptionalString(value.stage, "stage"),
+    pack_owner_address: readOptionalString(value.pack_owner_address, "pack_owner_address"),
+    auditor_address: readOptionalString(value.auditor_address, "auditor_address"),
     documents: await Promise.all(documentsValue.map((document, index) => parseOrchestrationDocumentInput(document, index))),
     pack_notes: parseOptionalStringArray(value.pack_notes, "pack_notes"),
   };
@@ -146,7 +103,8 @@ export async function resolveAgentOrchestrationInput(value: unknown): Promise<Ag
 
 export async function runAgentOrchestration(input: AgentOrchestrationInput): Promise<AgentOrchestrationResult> {
   const documents: DocumentAnalysisResult[] = [];
-  const hashes: AgentArtifactHashRecord[] = [];
+  const artifacts = createArtifactCollector(input.pack_id);
+  const documentNotesById = createDocumentNotesLookup(input.documents);
   const usage = createUsageAccumulator();
   let model: string = AGENT_CONFIG.groq.defaultModel;
 
@@ -199,10 +157,38 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
       `source_confidence:${assertionBundle.source_confidence.document_id}`,
     );
 
-    hashes.push(classificationHash, metadataHash, assertionMappingHash, sourceConfidenceHash);
+    artifacts.add({
+      hash: classificationHash,
+      actionType: "classify",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
+    artifacts.add({
+      hash: metadataHash,
+      actionType: "extract",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
+    artifacts.add({
+      hash: assertionMappingHash,
+      actionType: "map_assert",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
+    artifacts.add({
+      hash: sourceConfidenceHash,
+      actionType: "map_assert",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
     documents.push({
       document_id: document.documentId,
       filename: document.documentName,
+      evidence_ref: document.evidence_ref,
       classification: classificationResult.result,
       metadata,
       assertion_mapping: assertionBundle.assertion_mapping,
@@ -231,10 +217,14 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
   addUsage(usage, gapCompletion.usage);
   const gapAnalysis = normalizeGapAnalysisResult(gapInput, gapCompletion.result);
   const gapHash = hashAgentArtifact(gapAnalysis, `gap_analysis:${gapAnalysis.pack_id}`);
-  hashes.push(gapHash);
+  artifacts.add({
+    hash: gapHash,
+    actionType: "find_gaps",
+    targetKind: "pack",
+    targetId: input.pack_id,
+  });
 
   const findings: CcerFindingOutput[] = [];
-  const findingHashes: AgentArtifactHashRecord[] = [];
 
   for (const [index, gap] of gapAnalysis.gaps.slice(0, AGENT_CONFIG.limits.maxFindingsPerPack).entries()) {
     const findingInput: CcerFindingToolInput = {
@@ -252,7 +242,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
         metadata: document.metadata,
         assertion_mapping: document.assertion_mapping,
         source_confidence: document.source_confidence,
-        notes: input.documents.find((candidate) => candidate.documentId === document.document_id)?.notes,
+        notes: documentNotesById.get(document.document_id),
       })),
       pack_notes: input.pack_notes,
     };
@@ -266,14 +256,25 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     addUsage(usage, findingCompletion.usage);
     const finding = normalizeCcerFindingResult(findingInput, findingCompletion.result);
     findings.push(finding);
-    findingHashes.push(hashAgentArtifact(finding, `ccer_finding:${finding.finding_id}`));
+    artifacts.add({
+      hash: hashAgentArtifact(finding, `ccer_finding:${finding.finding_id}`),
+      actionType: "draft_ccer",
+      targetKind: "finding",
+      targetId: finding.finding_id,
+      findingId: finding.finding_id,
+    });
   }
-
-  hashes.push(...findingHashes);
 
   const auditPackSummary = buildAuditPackSummary(input, documents, gapAnalysis, findings);
   const summaryHash = hashAgentArtifact(auditPackSummary, `audit_pack_summary:${auditPackSummary.pack_id}`);
-  hashes.push(summaryHash);
+  artifacts.add({
+    hash: summaryHash,
+    actionType: "summarize_pack",
+    targetKind: "pack",
+    targetId: input.pack_id,
+  });
+
+  const reviewBundle = buildAgentReviewBundle(input.pack_id, artifacts.hashes);
 
   return {
     provider: "groq",
@@ -282,25 +283,22 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     engagement_name: input.engagement_name,
     audit_area: input.audit_area,
     stage: input.stage,
+    pack_owner_address: input.pack_owner_address,
+    auditor_address: input.auditor_address,
     documents,
     gap_analysis: gapAnalysis,
     findings,
     audit_pack_summary: auditPackSummary,
-    hashes,
-    proposed_action: {
-      action_type: "review_agent_outputs",
-      target_pack_id: input.pack_id,
-      requires_human_approval: true,
-      chain_write_ready: false,
-      output_hashes: hashes.map((item) => item.sha256),
-      rationale:
-        "The agent analysis is complete for this pack, but every classification, gap, and finding still requires human review before any Walrus or Sui write.",
-      next_steps: [
-        "Review classifications and source confidence per document.",
-        "Review gap analysis and draft findings.",
-        "Approve or edit outputs before hashing for Walrus persistence or Sui AgentAction logging.",
-      ],
-    },
+    hashes: artifacts.hashes,
+    artifact_catalog: artifacts.artifactCatalog,
+    review_bundle: reviewBundle,
+    persistence: buildAgentPersistencePlan({
+      packId: input.pack_id,
+      evidenceCount: documents.length,
+      findingCount: findings.length,
+      artifactCatalog: artifacts.artifactCatalog,
+    }),
+    proposed_action: reviewBundle,
     flow: [
       {
         step: "classify_extract_map",
@@ -319,7 +317,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
       },
       {
         step: "build_summary_and_hashes",
-        artifact_count: 1 + hashes.length,
+        artifact_count: 1 + artifacts.hashes.length,
         schema_names: ["audit_pack_summary"],
       },
     ],
@@ -337,10 +335,31 @@ async function parseOrchestrationDocumentInput(value: unknown, index: number): P
   return {
     ...parsedBase,
     notes: parseOptionalStringArray(value.notes, `documents[${index}].notes`),
+    evidence_ref: parseDocumentProofReference(value.evidence_ref, `documents[${index}].evidence_ref`),
+  };
+}
+
+function parseDocumentProofReference(
+  value: unknown,
+  fieldName: string,
+): AgentDocumentProofReference | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new AgentInputError(`${fieldName} must be an object when provided.`);
+  }
+
+  return {
+    evidence_id: readOptionalString(value.evidence_id, `${fieldName}.evidence_id`),
+    walrus_blob_id: readOptionalString(value.walrus_blob_id, `${fieldName}.walrus_blob_id`),
+    commitment: readOptionalString(value.commitment, `${fieldName}.commitment`),
   };
 }
 
 function buildGapInput(input: AgentOrchestrationInput, documents: DocumentAnalysisResult[]): GapAnalysisToolInput {
+  const documentNotesById = createDocumentNotesLookup(input.documents);
   const gapDocuments: GapAnalysisDocumentInput[] = documents.map((document) => ({
     document_id: document.document_id,
     filename: document.filename,
@@ -348,7 +367,7 @@ function buildGapInput(input: AgentOrchestrationInput, documents: DocumentAnalys
     metadata: document.metadata,
     assertion_mapping: document.assertion_mapping,
     source_confidence: document.source_confidence,
-    notes: input.documents.find((candidate) => candidate.documentId === document.document_id)?.notes,
+    notes: documentNotesById.get(document.document_id),
   }));
 
   return {
@@ -443,6 +462,14 @@ function buildMetadataSummary(metadata: MetadataExtractionOutput): string {
   ].filter((item): item is string => Boolean(item));
 
   return fragments.join(". ");
+}
+
+function createDocumentNotesLookup(
+  documents: OrchestrationDocumentInput[],
+): Map<string, string[] | undefined> {
+  return new Map(
+    documents.map((document) => [document.documentId, document.notes] as const),
+  );
 }
 
 function createUsageAccumulator(): GroqUsageStats {
