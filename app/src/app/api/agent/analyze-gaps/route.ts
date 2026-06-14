@@ -20,7 +20,9 @@ export async function POST(request: Request) {
     // from previous session/refresh, and inject into input so gap analysis continues from it.
     // (Core agent prompt/build in lib/agent uses pack_notes and document notes.)
     const priorMemories = await recallPriorAuditMemory(input.pack_id);
-    const priorNotes = priorMemories.map((m) => `Prior memory (from previous session): ${m.text}`);
+    const priorNotes = priorMemories
+      .slice(0, 4)
+      .map((memory) => summarizePriorMemory(memory.text));
     if (!input.pack_notes) input.pack_notes = [];
     input.pack_notes.push(...priorNotes);
 
@@ -41,4 +43,9 @@ export async function POST(request: Request) {
   } catch (error) {
     return toAgentErrorResponse(error, "Gap analysis failed.");
   }
+}
+
+function summarizePriorMemory(value: string): string {
+  const compacted = value.replace(/\s+/g, " ").trim();
+  return compacted.length > 220 ? `Prior memory: ${compacted.slice(0, 203)}...` : `Prior memory: ${compacted}`;
 }

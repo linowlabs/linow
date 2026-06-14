@@ -334,3 +334,145 @@
   - Feed real `evidence_id/blob_id/commitment` values from the workspace upload/register flow so the manifest is fully linked.
   - Add a reviewed-action route or UI approval step that turns prepared `action_candidates` into real Sui `AgentAction` writes.
   - Decide whether Walrus reload should restore the encrypted memory bundle directly when MemWal is unavailable, completing the SO-24 fallback path end-to-end.
+
+## 2026-06-14 — Harden Draft Finding Prompt Against Assertion Schema Failures
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/draft-finding.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Tightened the draft-finding prompt so `missing_assertions` must be returned as numeric assertion IDs and `missing_assertion_labels` must be copied exactly from the provided gap input.
+  - Added a fallback so the finding prompt still includes document summaries even when the initial assertion-mapping filter yields no "relevant" documents.
+  - Extracted a small document-summary helper to keep the prompt builder easier to read.
+
+### Reasoning
+- Why this approach was chosen:
+  - The CLI smoke run failed before normalization because the provider rejected a schema-invalid generation, so the fix needed to happen at prompt construction time rather than only in post-processing.
+  - Making the assertion arrays explicit and copy-only reduces one of the highest-risk schema fields without changing the overall CCCER contract.
+  - Falling back to all provided document summaries keeps the drafting step resilient when earlier mapping output is sparse or synthetic.
+
+### Tech Debt
+- Known shortcuts:
+  - The route still depends on provider-side structured output rather than a local repair pass when a response is close but invalid.
+  - The prompt now biases the model to copy assertion arrays directly, which is correct for this workflow but less flexible for future finding taxonomies.
+- Follow-up needed:
+  - Re-run the `draft-finding` smoke test against a real provider session and capture whether the schema rejection is fully resolved.
+  - Consider a secondary repair/retry path for other schema-heavy tools if provider-side strict JSON continues to be brittle under rate pressure.
+
+## 2026-06-14 — Split Draft Finding Provider Schema From Canonical Output
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/draft-finding.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/draft-finding/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Replaced the draft-finding route's direct use of the strict canonical `ccer_finding` schema with a provider-facing Groq schema that tolerates `missing_assertions` as either integers or strings.
+  - Added a dedicated Groq response guard plus normalization helpers to coerce assertion IDs, deduplicate them, and fall back to the gap input when the provider returns unusable values.
+  - Updated both the standalone draft-finding route and orchestration flow to validate against the provider-facing schema before normalizing into the canonical `CcerFindingOutput`.
+
+### Reasoning
+- Why this approach was chosen:
+  - The failure was happening inside provider-side structured generation before our existing normalizer had any chance to repair the result.
+  - Separating provider schema from canonical schema keeps the app contract strict while making the LLM integration boundary resilient to common JSON-output quirks.
+  - This is a cleaner long-term pattern for other schema-heavy tools too: tolerate at the provider edge, normalize before the rest of the system touches the result.
+
+### Tech Debt
+- Known shortcuts:
+  - The provider-facing schema is still Groq-specific in naming and lives in the same module as the canonical finding logic.
+  - Assertion coercion currently handles integers and numeric strings, but not natural-language assertion phrases.
+- Follow-up needed:
+  - Re-run the smoke test to confirm this resolves the provider-side schema rejection in practice.
+  - If other tools show the same pattern, extract a reusable provider-response normalization boundary shared across agent modules.
+
+## 2026-06-14 — Loosen Provider Assertion Array Parsing For Draft Finding
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/draft-finding.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Simplified the Groq-facing `missing_assertions` schema from an `anyOf` with enum constraints to a plain `integer|string` item type so provider-side structured output has less room to fail before normalization.
+  - Extended assertion-ID normalization to accept canonical labels such as `Rights & Obligations` in addition to integers and numeric strings.
+
+### Reasoning
+- Why this approach was chosen:
+  - The remaining provider error was still coming from Groq's schema enforcement layer, so the provider contract needed to be even more permissive while keeping the internal output strict.
+  - Accepting label text at the provider edge makes the normalization step more resilient to the exact failure mode we are seeing in smoke testing.
+
+### Tech Debt
+- Known shortcuts:
+  - The provider schema is now intentionally looser than the canonical contract and depends on normalization for safety.
+- Follow-up needed:
+  - Re-run `npm run agent:smoke -- draft-finding` and confirm whether the next blocker, if any, has moved beyond `missing_assertions`.
+
+## 2026-06-14 — Add Reusable Document Analysis Artifact Cache
+
+### Change
+- Files touched:
+  - `.gitignore`
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/document-analysis-cache.ts`
+  - `app/src/lib/agent/orchestration-contract.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a file-backed document-analysis cache keyed by normalized document input, orchestration mode (`compact` vs `multi_pass`), cache version, and schema version.
+  - Updated orchestration to read cached `classification + metadata + assertion_bundle` artifacts before calling the model, then persist live results back to cache for future runs.
+  - Preserved the existing profile system, compact one-pass document analysis, and retry behavior while shifting the main efficiency strategy toward artifact reuse rather than provider-key rotation.
+  - Exposed `analysis_source`, `cache_key`, and aggregate `cached_document_count` in orchestration results so cache reuse is visible during CLI or API testing.
+  - Ignored `app/.cache/` and documented cache reuse in the CLI testing guide.
+
+### Reasoning
+- Why this approach was chosen:
+  - The earlier efficiency changes reduced live token burn per run, but they still re-analyzed the same document on every repeat execution.
+  - Reusing structured artifacts is closer to the original architecture goal: process evidence once, then build later reasoning steps on top of stable typed results.
+  - Keeping `profile`, one-pass analysis, and retry means we retain the good operational wins while moving the core architecture back toward durable reuse.
+
+### Tech Debt
+- Known shortcuts:
+  - The cache is currently local file-backed storage under `app/.cache/`, not yet backed by Walrus/MemWal or a shared production store.
+  - Cache invalidation is version-based and input-based, but not yet aware of prompt micro-variants beyond the explicit cache version string.
+- Follow-up needed:
+  - Consider promoting approved cached artifacts into durable Walrus/MemWal-backed retrieval so reuse works across machines or deployments.
+  - Add similar cache/reuse boundaries for pack-level `gap_analysis` and `draft_finding` once their invalidation rules are clearly defined.
+
+## 2026-06-14 — Add Budget-Aware Agent Orchestration Profiles
+
+### Change
+- Files touched:
+  - `.env.example`
+  - `app/src/lib/agent/analyze-document.ts`
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/groq.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/lib/agent/orchestration-contract.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added orchestration profiles (`cheap`, `balanced`, `full`) so the main agent flow can scale from Groq free-tier budgets to higher-budget paid runs without changing the external route shape.
+  - Added a compact one-pass document-analysis bundle that combines classification, metadata extraction, assertion mapping, and source-confidence drafting into one Groq completion per document.
+  - Added Groq multi-key failover and bounded retry handling for 429 responses using `GROQ_API_KEYS` in addition to the single-key path.
+  - Pulled prior MemWal recall into orchestration and compacted recalled memory notes before injecting them into prompts to reduce token overhead.
+
+### Reasoning
+- Why this approach was chosen:
+  - The prior orchestration path spent three model calls per document before pack-level gap/finding work, which is expensive under an 8K TPM ceiling.
+  - Profile-driven orchestration keeps the free-tier path lean now while preserving a richer `full` path for later paid-model evaluations.
+  - Rotating across multiple Groq keys is a pragmatic reliability improvement for demo environments where rate limits fail before model quality does.
+  - Summarizing recalled memory instead of replaying raw MemWal JSON keeps Walrus-backed continuity useful without turning recall into another prompt-bloat source.
+
+### Tech Debt
+- Known shortcuts:
+  - The compact document-analysis bundle still relies on one large prompt per document, so very long OCR-heavy files will still need pre-extraction or chunking if used later.
+  - Multi-key Groq failover assumes the provided keys are valid and beneficially distributed; if they belong to the same capped org, the win may be limited.
+  - Orchestration now recalls prior memory, but direct Walrus artifact reload is still not used as a structured fallback restore path.
+- Follow-up needed:
+  - Re-run the orchestration smoke path against live Groq credentials and compare `cheap` vs `balanced` usage totals on the same evidence pack.
+  - Add a cache/reuse layer keyed by evidence commitment or document hash so already-analyzed documents can skip repeated LLM passes entirely.
+  - Consider direct Walrus manifest restore for structured replay when MemWal is unavailable or when deterministic artifact reuse is preferred over semantic recall.

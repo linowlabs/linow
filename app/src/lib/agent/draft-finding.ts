@@ -1,6 +1,7 @@
-import { AGENT_CONFIG } from "@/lib/agent/config";
 import {
   AGENT_SCHEMA_VERSION,
+  ASSERTION_CATALOG,
+  FINDING_SEVERITIES,
   type AssertionMappingOutput,
   type CcerFindingOutput,
   type EvidenceClassificationOutput,
@@ -8,10 +9,8 @@ import {
   type GapItem,
   type MetadataExtractionOutput,
   type SourceConfidenceOutput,
-  ccerFindingSchema,
   getAssertionLabel,
   isAssertionMappingOutput,
-  isCcerFindingOutput,
   isEvidenceClassificationOutput,
   isGapAnalysisOutput,
   isMetadataExtractionOutput,
@@ -47,7 +46,94 @@ export interface CcerFindingToolInput {
   pack_notes?: string[];
 }
 
-export const groqCcerFindingSchema = ccerFindingSchema;
+const ASSERTION_IDS = ASSERTION_CATALOG.map((item) => item.id);
+
+interface GroqDraftFindingCitation {
+  document_id: string;
+  filename: string;
+  reference: string;
+  page?: number | null;
+  confidence: number;
+}
+
+interface GroqDraftFindingResult {
+  schema_name: "ccer_finding";
+  schema_version: string;
+  finding_id: string;
+  pack_id: string;
+  severity: string;
+  title: string;
+  condition: string;
+  criteria: string;
+  cause: string;
+  effect: string;
+  recommendation: string;
+  citations: GroqDraftFindingCitation[];
+  missing_assertions: Array<number | string>;
+  missing_assertion_labels: string[];
+  status: string;
+}
+
+export const groqCcerFindingSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    schema_name: { type: "string", const: "ccer_finding" },
+    schema_version: { type: "string", const: AGENT_SCHEMA_VERSION },
+    finding_id: { type: "string", minLength: 1 },
+    pack_id: { type: "string", minLength: 1 },
+    severity: { type: "string" },
+    title: { type: "string" },
+    condition: { type: "string" },
+    criteria: { type: "string" },
+    cause: { type: "string" },
+    effect: { type: "string" },
+    recommendation: { type: "string" },
+    citations: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          document_id: { type: "string", minLength: 1 },
+          filename: { type: "string", minLength: 1 },
+          reference: { type: "string" },
+          page: { type: ["integer", "null"], minimum: 1 },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+        required: ["document_id", "filename", "reference", "page", "confidence"],
+      },
+    },
+    missing_assertions: {
+      type: "array",
+      items: {
+        type: ["integer", "string"],
+      },
+    },
+    missing_assertion_labels: {
+      type: "array",
+      items: { type: "string" },
+    },
+    status: { type: "string" },
+  },
+  required: [
+    "schema_name",
+    "schema_version",
+    "finding_id",
+    "pack_id",
+    "severity",
+    "title",
+    "condition",
+    "criteria",
+    "cause",
+    "effect",
+    "recommendation",
+    "citations",
+    "missing_assertions",
+    "missing_assertion_labels",
+    "status",
+  ],
+} as const;
 
 export function parseCcerFindingToolInput(value: unknown): CcerFindingToolInput {
   if (!isRecord(value)) {
@@ -86,26 +172,16 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
 
       return input.gap.related_assertions.some((assertionId) => mappedAssertionIds.includes(assertionId));
     })
-    .map((document) => ({
-      document_id: document.document_id,
-      filename: document.filename,
-      document_type: document.classification?.document_type ?? null,
-      source_confidence:
-        document.source_confidence?.source_confidence ?? document.classification?.source_confidence ?? null,
-      supported_assertions:
-        document.assertion_mapping?.mapped_assertions
-          .filter((item) => item.coverage !== "not_supported")
-          .map((item) => `${item.assertion_label} (${item.coverage})`) ?? [],
-      parties: document.metadata?.parties.map((item) => `${item.role}: ${item.name}`) ?? [],
-      citations:
-        document.metadata?.citations.map((citation) => ({
-          document_id: citation.document_id,
-          filename: citation.filename,
-          page: citation.page ?? null,
-          reference: citation.reference,
-        })) ?? [],
-      notes: document.notes ?? [],
-    }));
+    .map((document) => summarizeFindingDocument(document));
+
+  const documentSummaries = relevantDocuments.length > 0
+    ? relevantDocuments
+    : input.documents.map((document) => summarizeFindingDocument(document));
+  const missingAssertions = [...input.gap.related_assertions];
+  const missingAssertionLabels =
+    input.gap.related_assertion_labels.length > 0
+      ? [...input.gap.related_assertion_labels]
+      : input.gap.related_assertions.map((assertionId) => getAssertionLabel(assertionId));
 
   return [
     {
@@ -117,6 +193,9 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
         "This is an audit-readiness aid, not an audit opinion.",
         "Use only the provided document summaries and citations.",
         "Keep status as DRAFT and do not propose chain submission.",
+        "When returning missing_assertions, use only numeric assertion IDs from 0 to 7.",
+        "Do not output assertion labels, strings, or objects inside missing_assertions.",
+        "Copy missing_assertions and missing_assertion_labels exactly from the task instructions.",
       ].join(" "),
     },
     {
@@ -144,12 +223,14 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
           ? `Gap analysis context: readiness ${input.gap_analysis.readiness_score}, findings ${input.gap_analysis.finding_count}.`
           : null,
         "Relevant document summaries:",
-        JSON.stringify(relevantDocuments, null, 2),
+        JSON.stringify(documentSummaries, null, 2),
         "Task:",
         "- Produce a Condition, Criteria, Cause, Effect, and Recommendation finding.",
         "- Use citations only from the provided relevant document summaries.",
         "- Keep severity aligned with the input gap severity.",
-        "- missing_assertions and missing_assertion_labels should reflect the unresolved assertions from the gap.",
+        `- Set missing_assertions exactly to: ${JSON.stringify(missingAssertions)}.`,
+        `- Set missing_assertion_labels exactly to: ${JSON.stringify(missingAssertionLabels)}.`,
+        "- Keep finding_id stable if one is already provided.",
       ]
         .filter((line): line is string => Boolean(line))
         .join("\n"),
@@ -157,15 +238,47 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
   ];
 }
 
-export function isAgentCcerFindingResult(value: unknown): value is CcerFindingOutput {
-  return isCcerFindingOutput(value);
+export function isGroqDraftFindingResult(value: unknown): value is GroqDraftFindingResult {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    value.schema_name === "ccer_finding" &&
+    value.schema_version === AGENT_SCHEMA_VERSION &&
+    typeof value.finding_id === "string" &&
+    typeof value.pack_id === "string" &&
+    typeof value.severity === "string" &&
+    typeof value.title === "string" &&
+    typeof value.condition === "string" &&
+    typeof value.criteria === "string" &&
+    typeof value.cause === "string" &&
+    typeof value.effect === "string" &&
+    typeof value.recommendation === "string" &&
+    Array.isArray(value.citations) &&
+    value.citations.every(isGroqDraftFindingCitation) &&
+    Array.isArray(value.missing_assertions) &&
+    value.missing_assertions.every((item) => typeof item === "string" || Number.isInteger(item)) &&
+    Array.isArray(value.missing_assertion_labels) &&
+    value.missing_assertion_labels.every((item) => typeof item === "string") &&
+    typeof value.status === "string"
+  );
 }
 
-export function normalizeCcerFindingResult(input: CcerFindingToolInput, value: CcerFindingOutput): CcerFindingOutput {
+export function normalizeCcerFindingResult(
+  input: CcerFindingToolInput,
+  value: GroqDraftFindingResult,
+): CcerFindingOutput {
   const fallbackFindingId = input.finding_id ?? buildFindingId(input);
   const allowedDocuments = new Set(input.documents.map((document) => `${document.document_id}::${document.filename}`));
   const normalizedCitations = value.citations.filter((citation) =>
     allowedDocuments.has(`${citation.document_id}::${citation.filename}`),
+  );
+  const normalizedMissingAssertions = normalizeMissingAssertions(value.missing_assertions, input.gap.related_assertions);
+  const normalizedMissingAssertionLabels = normalizeMissingAssertionLabels(
+    value.missing_assertion_labels,
+    normalizedMissingAssertions,
+    input.gap.related_assertion_labels,
   );
 
   return {
@@ -176,14 +289,8 @@ export function normalizeCcerFindingResult(input: CcerFindingToolInput, value: C
     pack_id: input.pack_id,
     severity: normalizeFindingSeverity(value.severity, input.gap.severity),
     citations: normalizedCitations,
-    missing_assertions:
-      value.missing_assertions.length > 0 ? value.missing_assertions : [...input.gap.related_assertions],
-    missing_assertion_labels:
-      value.missing_assertion_labels.length > 0
-        ? value.missing_assertion_labels
-        : input.gap.related_assertion_labels.length > 0
-          ? [...input.gap.related_assertion_labels]
-          : input.gap.related_assertions.map((assertionId) => getAssertionLabel(assertionId)),
+    missing_assertions: normalizedMissingAssertions,
+    missing_assertion_labels: normalizedMissingAssertionLabels,
     status: "DRAFT",
   };
 }
@@ -263,10 +370,10 @@ function buildFindingId(input: CcerFindingToolInput): string {
 }
 
 function normalizeFindingSeverity(
-  value: CcerFindingOutput["severity"],
+  value: string,
   gapSeverity: GapItem["severity"],
 ): CcerFindingOutput["severity"] {
-  if (value === "CRITICAL" || value === "HIGH" || value === "MEDIUM" || value === "LOW") {
+  if (isFindingSeverityText(value)) {
     return value;
   }
 
@@ -277,4 +384,104 @@ function normalizeFindingSeverity(
   } as const;
 
   return fallbackMap[gapSeverity];
+}
+
+function normalizeMissingAssertions(
+  value: Array<number | string>,
+  fallback: GapItem["related_assertions"],
+): GapItem["related_assertions"] {
+  const normalized = value
+    .map((item) => normalizeAssertionId(item))
+    .filter((item): item is GapItem["related_assertions"][number] => item !== null);
+
+  return normalized.length > 0 ? dedupeAssertionIds(normalized) : [...fallback];
+}
+
+function normalizeMissingAssertionLabels(
+  value: string[],
+  assertionIds: GapItem["related_assertions"],
+  fallback: string[],
+): string[] {
+  if (value.length > 0) {
+    return value;
+  }
+
+  if (fallback.length > 0) {
+    return [...fallback];
+  }
+
+  return assertionIds.map((assertionId) => getAssertionLabel(assertionId));
+}
+
+function normalizeAssertionId(value: number | string): GapItem["related_assertions"][number] | null {
+  if (Number.isInteger(value) && ASSERTION_IDS.includes(value as (typeof ASSERTION_IDS)[number])) {
+    return value as GapItem["related_assertions"][number];
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const normalized = Number.parseInt(trimmed, 10);
+    if (Number.isInteger(normalized) && ASSERTION_IDS.includes(normalized as (typeof ASSERTION_IDS)[number])) {
+      return normalized as GapItem["related_assertions"][number];
+    }
+
+    const matchedAssertion = ASSERTION_CATALOG.find(
+      (item) => normalizeAssertionLabel(item.label) === normalizeAssertionLabel(trimmed),
+    );
+    if (matchedAssertion) {
+      return matchedAssertion.id;
+    }
+  }
+
+  return null;
+}
+
+function dedupeAssertionIds(values: GapItem["related_assertions"]): GapItem["related_assertions"] {
+  return Array.from(new Set(values)) as GapItem["related_assertions"];
+}
+
+function isFindingSeverityText(value: string): value is CcerFindingOutput["severity"] {
+  return FINDING_SEVERITIES.includes(value as CcerFindingOutput["severity"]);
+}
+
+function isGroqDraftFindingCitation(value: unknown): value is GroqDraftFindingCitation {
+  return (
+    isRecord(value) &&
+    typeof value.document_id === "string" &&
+    typeof value.filename === "string" &&
+    typeof value.reference === "string" &&
+    (value.page === null || value.page === undefined || Number.isInteger(value.page)) &&
+    typeof value.confidence === "number"
+  );
+}
+
+function normalizeAssertionLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function summarizeFindingDocument(document: CcerFindingDocumentInput) {
+  return {
+    document_id: document.document_id,
+    filename: document.filename,
+    document_type: document.classification?.document_type ?? null,
+    source_confidence:
+      document.source_confidence?.source_confidence ?? document.classification?.source_confidence ?? null,
+    supported_assertions:
+      document.assertion_mapping?.mapped_assertions
+        .filter((item) => item.coverage !== "not_supported")
+        .map((item) => `${item.assertion_label} (${item.coverage})`) ?? [],
+    parties: document.metadata?.parties.map((item) => `${item.role}: ${item.name}`) ?? [],
+    citations:
+      document.metadata?.citations.map((citation) => ({
+        document_id: citation.document_id,
+        filename: citation.filename,
+        page: citation.page ?? null,
+        reference: citation.reference,
+      })) ?? [],
+    notes: document.notes ?? [],
+  };
 }
