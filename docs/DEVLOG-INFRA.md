@@ -37,3 +37,25 @@
   - The example defaults to the hosted production relayer.
 - Follow-up needed:
   - Switch `.env` to `https://relayer.staging.memwal.ai` if the MemWal account was created against staging/testnet.
+
+## 2026-06-14 — Add minimal root package.json
+
+### Change
+- Files touched:
+  - `package.json`
+  - `docs/DEVLOG-INFRA.md`
+- Summary:
+  - Added minimal root `package.json` (name + private + version only) at the repository root.
+  - Prevents `npm` from throwing ENOENT "Could not read package.json" when any process (including linked package resolution, dev tooling side effects, or stray `npm` calls) walks upward from `app/` to the monorepo root.
+
+### Reasoning
+- Why this approach was chosen:
+  - The project uses a manual monorepo (no npm/yarn/pnpm workspaces, explicit `--prefix ../sdk` pre* scripts, and `"@linow/sdk": "file:../sdk"`).
+  - A tiny root manifest is the smallest possible patch that makes npm's upward package resolution robust without introducing Turborepo, root scripts, or other monorepo tooling.
+  - Directly fixes the local `npm run dev` noise observed after the server reported "Ready".
+
+### Tech Debt
+- Known shortcuts:
+  - Still no root-level `dev`/`build` scripts — developers continue running from inside `app/`.
+- Follow-up needed:
+  - If monorepo friction grows, evaluate proper workspaces or Turborepo *after* the hackathon submission.
