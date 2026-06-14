@@ -1,5 +1,15 @@
-import { AGENT_CONFIG } from "@/lib/agent/config";
+import { AGENT_CONFIG, type AgentOrchestrationProfile } from "@/lib/agent/config";
 import { classifyDocumentWithGroq, runGroqJsonCompletion } from "@/lib/agent/groq";
+import {
+  readCachedDocumentAnalysis,
+  writeCachedDocumentAnalysis,
+} from "@/lib/agent/document-analysis-cache";
+import {
+  buildDocumentAnalysisMessages,
+  groqDocumentAnalysisBundleSchema,
+  isGroqDocumentAnalysisBundle,
+  normalizeDocumentAnalysisBundle,
+} from "@/lib/agent/analyze-document";
 import {
   AGENT_SCHEMA_VERSION,
   ASSERTION_CATALOG,
@@ -52,11 +62,12 @@ import {
 import {
   buildCcerFindingMessages,
   groqCcerFindingSchema,
-  isAgentCcerFindingResult,
+  isGroqDraftFindingResult,
   normalizeCcerFindingResult,
   type CcerFindingToolInput,
 } from "@/lib/agent/draft-finding";
 import { hashAgentArtifact } from "@/lib/agent/artifacts";
+import { recallPriorAuditMemory } from "@linow/sdk/memwal";
 
 export interface OrchestrationDocumentInput extends AgentDocumentInput {
   notes?: string[];
@@ -64,6 +75,7 @@ export interface OrchestrationDocumentInput extends AgentDocumentInput {
 }
 
 export interface AgentOrchestrationInput {
+  profile: AgentOrchestrationProfile;
   pack_id: string;
   engagement_name: string;
   audit_area?: string;
@@ -89,14 +101,22 @@ export async function resolveAgentOrchestrationInput(value: unknown): Promise<Ag
     throw new AgentInputError(`documents must contain at most ${AGENT_CONFIG.limits.maxPackDocuments} items.`);
   }
 
+  const profile = resolveOrchestrationProfile(value.profile);
+  const profileConfig = AGENT_CONFIG.orchestrationProfiles[profile];
+
   return {
+    profile,
     pack_id: readRequiredString(value.pack_id, "pack_id"),
     engagement_name: readRequiredString(value.engagement_name, "engagement_name"),
     audit_area: readOptionalString(value.audit_area, "audit_area"),
     stage: readOptionalString(value.stage, "stage"),
     pack_owner_address: readOptionalString(value.pack_owner_address, "pack_owner_address"),
     auditor_address: readOptionalString(value.auditor_address, "auditor_address"),
-    documents: await Promise.all(documentsValue.map((document, index) => parseOrchestrationDocumentInput(document, index))),
+    documents: await Promise.all(
+      documentsValue.map((document, index) =>
+        parseOrchestrationDocumentInput(document, index, profileConfig.maxDocumentChars),
+      ),
+    ),
     pack_notes: parseOptionalStringArray(value.pack_notes, "pack_notes"),
   };
 }
@@ -106,55 +126,35 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
   const artifacts = createArtifactCollector(input.pack_id);
   const documentNotesById = createDocumentNotesLookup(input.documents);
   const usage = createUsageAccumulator();
+  const profileConfig = AGENT_CONFIG.orchestrationProfiles[input.profile];
+  const priorMemoryNotes = profileConfig.recallPriorMemory ? await recallPriorMemoryNotes(input.pack_id, profileConfig.maxPriorMemoryNotes) : [];
+  const effectivePackNotes = mergePackNotes(input.pack_notes, priorMemoryNotes);
+  let cachedDocumentCount = 0;
   let model: string = AGENT_CONFIG.groq.defaultModel;
 
   for (const document of input.documents) {
-    const classificationResult = await classifyDocumentWithGroq(document);
-    model = classificationResult.model;
-    addUsage(usage, classificationResult.usage);
+    const analysisMode = profileConfig.combineDocumentPasses ? "compact" : "multi_pass";
+    const analysis = await resolveDocumentAnalysis(document, analysisMode);
+
+    if (analysis.analysisSource === "live") {
+      model = analysis.model;
+    }
+    addUsage(usage, analysis.usage);
+    if (analysis.analysisSource === "cache") {
+      cachedDocumentCount += 1;
+    }
     const classificationHash = hashAgentArtifact(
-      classificationResult.result,
-      `classification:${classificationResult.result.document_id}`,
+      analysis.classification,
+      `classification:${analysis.classification.document_id}`,
     );
-
-    const metadataCompletion = await runGroqJsonCompletion({
-      schemaName: AGENT_CONFIG.schemaNames.metadataExtraction,
-      schema: groqMetadataExtractionSchema,
-      messages: buildMetadataExtractionMessages(document),
-      validate: isAgentMetadataExtractionResult,
-    });
-    addUsage(usage, metadataCompletion.usage);
-    const metadata = normalizeMetadataExtractionResult(document, metadataCompletion.result);
-    const metadataHash = hashAgentArtifact(metadata, `metadata:${metadata.document_id}`);
-
-    const assertionMappingCompletion = await runGroqJsonCompletion({
-      schemaName: AGENT_CONFIG.schemaNames.assertionMappingBundle,
-      schema: groqAssertionMappingBundleSchema,
-      messages: buildAssertionMappingMessages({
-        ...document,
-        frameworkReference: "ISA 500 evidence readiness",
-        classificationSummary: buildClassificationSummary(classificationResult.result),
-        metadataSummary: buildMetadataSummary(metadata),
-      }),
-      validate: isAssertionMappingBundle,
-    });
-    addUsage(usage, assertionMappingCompletion.usage);
-    const assertionBundle = normalizeAssertionMappingBundle(
-      {
-        ...document,
-        frameworkReference: "ISA 500 evidence readiness",
-        classificationSummary: buildClassificationSummary(classificationResult.result),
-        metadataSummary: buildMetadataSummary(metadata),
-      },
-      assertionMappingCompletion.result,
-    );
+    const metadataHash = hashAgentArtifact(analysis.metadata, `metadata:${analysis.metadata.document_id}`);
     const assertionMappingHash = hashAgentArtifact(
-      assertionBundle.assertion_mapping,
-      `assertion_mapping:${assertionBundle.assertion_mapping.document_id}`,
+      analysis.assertionBundle.assertion_mapping,
+      `assertion_mapping:${analysis.assertionBundle.assertion_mapping.document_id}`,
     );
     const sourceConfidenceHash = hashAgentArtifact(
-      assertionBundle.source_confidence,
-      `source_confidence:${assertionBundle.source_confidence.document_id}`,
+      analysis.assertionBundle.source_confidence,
+      `source_confidence:${analysis.assertionBundle.source_confidence.document_id}`,
     );
 
     artifacts.add({
@@ -189,10 +189,12 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
       document_id: document.documentId,
       filename: document.documentName,
       evidence_ref: document.evidence_ref,
-      classification: classificationResult.result,
-      metadata,
-      assertion_mapping: assertionBundle.assertion_mapping,
-      source_confidence: assertionBundle.source_confidence,
+      analysis_source: analysis.analysisSource,
+      cache_key: analysis.cacheKey,
+      classification: analysis.classification,
+      metadata: analysis.metadata,
+      assertion_mapping: analysis.assertionBundle.assertion_mapping,
+      source_confidence: analysis.assertionBundle.source_confidence,
       hashes: {
         classification: classificationHash,
         metadata: metadataHash,
@@ -200,14 +202,15 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
         source_confidence: sourceConfidenceHash,
       },
       usage: {
-        classification: classificationResult.usage ?? null,
-        metadata: metadataCompletion.usage ?? null,
-        assertion_mapping: assertionMappingCompletion.usage ?? null,
+        classification: analysis.usageBreakdown.classification ?? null,
+        metadata: analysis.usageBreakdown.metadata ?? null,
+        assertion_mapping: analysis.usageBreakdown.assertion_mapping ?? null,
+        document_analysis_bundle: analysis.usageBreakdown.document_analysis_bundle ?? null,
       },
     });
   }
 
-  const gapInput = buildGapInput(input, documents);
+  const gapInput = buildGapInput(input, documents, effectivePackNotes);
   const gapCompletion = await runGroqJsonCompletion({
     schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
     schema: groqGapAnalysisSchema,
@@ -225,8 +228,9 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
   });
 
   const findings: CcerFindingOutput[] = [];
+  const maxFindings = Math.min(profileConfig.maxFindingsPerPack, AGENT_CONFIG.limits.maxFindingsPerPack);
 
-  for (const [index, gap] of gapAnalysis.gaps.slice(0, AGENT_CONFIG.limits.maxFindingsPerPack).entries()) {
+  for (const [index, gap] of gapAnalysis.gaps.slice(0, maxFindings).entries()) {
     const findingInput: CcerFindingToolInput = {
       pack_id: input.pack_id,
       engagement_name: input.engagement_name,
@@ -244,14 +248,14 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
         source_confidence: document.source_confidence,
         notes: documentNotesById.get(document.document_id),
       })),
-      pack_notes: input.pack_notes,
+      pack_notes: effectivePackNotes,
     };
 
     const findingCompletion = await runGroqJsonCompletion({
       schemaName: AGENT_CONFIG.schemaNames.ccerFinding,
       schema: groqCcerFindingSchema,
       messages: buildCcerFindingMessages(findingInput),
-      validate: isAgentCcerFindingResult,
+      validate: isGroqDraftFindingResult,
     });
     addUsage(usage, findingCompletion.usage);
     const finding = normalizeCcerFindingResult(findingInput, findingCompletion.result);
@@ -279,6 +283,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
   return {
     provider: "groq",
     model,
+    profile: input.profile,
     pack_id: input.pack_id,
     engagement_name: input.engagement_name,
     audit_area: input.audit_area,
@@ -301,7 +306,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     proposed_action: reviewBundle,
     flow: [
       {
-        step: "classify_extract_map",
+        step: profileConfig.combineDocumentPasses ? "analyze_document_bundle" : "classify_extract_map",
         artifact_count: documents.length * 4,
         schema_names: ["evidence_classification", "metadata_extraction", "assertion_mapping", "source_confidence"],
       },
@@ -321,16 +326,22 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
         schema_names: ["audit_pack_summary"],
       },
     ],
+    recalled_prior_memory_count: priorMemoryNotes.length,
+    cached_document_count: cachedDocumentCount,
     usage,
   };
 }
 
-async function parseOrchestrationDocumentInput(value: unknown, index: number): Promise<OrchestrationDocumentInput> {
+async function parseOrchestrationDocumentInput(
+  value: unknown,
+  index: number,
+  maxDocumentChars: number,
+): Promise<OrchestrationDocumentInput> {
   if (!isRecord(value)) {
     throw new AgentInputError(`documents[${index}] must be an object.`);
   }
 
-  const parsedBase = await resolveAgentDocumentInput(value);
+  const parsedBase = await resolveAgentDocumentInput(value, maxDocumentChars);
 
   return {
     ...parsedBase,
@@ -358,7 +369,11 @@ function parseDocumentProofReference(
   };
 }
 
-function buildGapInput(input: AgentOrchestrationInput, documents: DocumentAnalysisResult[]): GapAnalysisToolInput {
+function buildGapInput(
+  input: AgentOrchestrationInput,
+  documents: DocumentAnalysisResult[],
+  packNotes: string[] | undefined,
+): GapAnalysisToolInput {
   const documentNotesById = createDocumentNotesLookup(input.documents);
   const gapDocuments: GapAnalysisDocumentInput[] = documents.map((document) => ({
     document_id: document.document_id,
@@ -376,7 +391,7 @@ function buildGapInput(input: AgentOrchestrationInput, documents: DocumentAnalys
     audit_area: input.audit_area,
     stage: input.stage,
     documents: gapDocuments,
-    pack_notes: input.pack_notes,
+    pack_notes: packNotes,
   };
 }
 
@@ -470,6 +485,213 @@ function createDocumentNotesLookup(
   return new Map(
     documents.map((document) => [document.documentId, document.notes] as const),
   );
+}
+
+async function runCompactDocumentAnalysis(document: OrchestrationDocumentInput) {
+  const completion = await runGroqJsonCompletion({
+    schemaName: AGENT_CONFIG.schemaNames.documentAnalysisBundle,
+    schema: groqDocumentAnalysisBundleSchema,
+    messages: buildDocumentAnalysisMessages(document),
+    validate: isGroqDocumentAnalysisBundle,
+  });
+  const normalized = normalizeDocumentAnalysisBundle(
+    {
+      ...document,
+      frameworkReference: "ISA 500 evidence readiness",
+    },
+    completion.result,
+  );
+
+  return {
+    model: completion.model,
+    usage: completion.usage,
+    classification: normalized.classification,
+    metadata: normalized.metadata,
+    assertionBundle: normalized.assertion_bundle,
+    usageBreakdown: {
+      classification: null,
+      metadata: null,
+      assertion_mapping: null,
+      document_analysis_bundle: completion.usage ?? null,
+    },
+  };
+}
+
+async function runMultiPassDocumentAnalysis(document: OrchestrationDocumentInput) {
+  const classificationResult = await classifyDocumentWithGroq(document);
+  const metadataCompletion = await runGroqJsonCompletion({
+    schemaName: AGENT_CONFIG.schemaNames.metadataExtraction,
+    schema: groqMetadataExtractionSchema,
+    messages: buildMetadataExtractionMessages(document),
+    validate: isAgentMetadataExtractionResult,
+  });
+  const metadata = normalizeMetadataExtractionResult(document, metadataCompletion.result);
+  const assertionMappingCompletion = await runGroqJsonCompletion({
+    schemaName: AGENT_CONFIG.schemaNames.assertionMappingBundle,
+    schema: groqAssertionMappingBundleSchema,
+    messages: buildAssertionMappingMessages({
+      ...document,
+      frameworkReference: "ISA 500 evidence readiness",
+      classificationSummary: buildClassificationSummary(classificationResult.result),
+      metadataSummary: buildMetadataSummary(metadata),
+    }),
+    validate: isAssertionMappingBundle,
+  });
+  const assertionBundle = normalizeAssertionMappingBundle(
+    {
+      ...document,
+      frameworkReference: "ISA 500 evidence readiness",
+      classificationSummary: buildClassificationSummary(classificationResult.result),
+      metadataSummary: buildMetadataSummary(metadata),
+    },
+    assertionMappingCompletion.result,
+  );
+
+  return {
+    model: classificationResult.model,
+    usage: sumUsage(classificationResult.usage, metadataCompletion.usage, assertionMappingCompletion.usage),
+    classification: classificationResult.result,
+    metadata,
+    assertionBundle,
+    usageBreakdown: {
+      classification: classificationResult.usage ?? null,
+      metadata: metadataCompletion.usage ?? null,
+      assertion_mapping: assertionMappingCompletion.usage ?? null,
+      document_analysis_bundle: null,
+    },
+  };
+}
+
+async function resolveDocumentAnalysis(
+  document: OrchestrationDocumentInput,
+  mode: "compact" | "multi_pass",
+) {
+  const cached = await readCachedDocumentAnalysis({ document, mode });
+
+  if (cached) {
+    return {
+      model: "cache",
+      usage: undefined,
+      classification: cached.classification,
+      metadata: cached.metadata,
+      assertionBundle: cached.assertionBundle,
+      usageBreakdown: {
+        classification: null,
+        metadata: null,
+        assertion_mapping: null,
+        document_analysis_bundle: null,
+      },
+      analysisSource: "cache" as const,
+      cacheKey: cached.cacheKey,
+    };
+  }
+
+  const analysis = mode === "compact"
+    ? await runCompactDocumentAnalysis(document)
+    : await runMultiPassDocumentAnalysis(document);
+
+  const cacheKey = await writeCachedDocumentAnalysis({
+    document,
+    mode,
+    classification: analysis.classification,
+    metadata: analysis.metadata,
+    assertionBundle: analysis.assertionBundle,
+  });
+
+  return {
+    ...analysis,
+    analysisSource: "live" as const,
+    cacheKey,
+  };
+}
+
+async function recallPriorMemoryNotes(packId: string, limit: number): Promise<string[]> {
+  const priorMemories = await recallPriorAuditMemory(packId);
+  return priorMemories
+    .slice(0, limit)
+    .map((memory) => summarizePriorMemory(memory.text))
+    .filter((note, index, notes) => note.length > 0 && notes.indexOf(note) === index);
+}
+
+function summarizePriorMemory(value: string): string {
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const schemaName = typeof parsed.schema_name === "string" ? parsed.schema_name : undefined;
+
+    if (schemaName === "audit_pack_summary") {
+      return compactNote(
+        `Prior summary: readiness ${stringValue(parsed.readiness_score)}, findings ${countValue(parsed.finding_ids)}, missing ${countValue(parsed.missing_assertions)}.`,
+      );
+    }
+
+    if (schemaName === "gap_analysis") {
+      return compactNote(
+        `Prior gap analysis: readiness ${stringValue(parsed.readiness_score)}, open gaps ${countValue(parsed.gaps)}.`,
+      );
+    }
+
+    if (schemaName === "ccer_finding") {
+      return compactNote(
+        `Prior finding ${stringValue(parsed.finding_id)}: ${stringValue(parsed.title)} severity ${stringValue(parsed.severity)}.`,
+      );
+    }
+
+    if (schemaName === "evidence_classification") {
+      return compactNote(
+        `Prior classification ${stringValue(parsed.filename)}: ${stringValue(parsed.document_type)} at ${stringValue(parsed.source_confidence)}.`,
+      );
+    }
+
+    if (schemaName === "source_confidence") {
+      return compactNote(
+        `Prior source confidence ${stringValue(parsed.filename)}: ${stringValue(parsed.source_confidence)}.`,
+      );
+    }
+  } catch {
+    return compactNote(`Prior memory: ${value}`);
+  }
+
+  return compactNote(`Prior memory: ${value}`);
+}
+
+function compactNote(value: string): string {
+  const compacted = value.replace(/\s+/g, " ").trim();
+  return compacted.length > 220 ? `${compacted.slice(0, 217)}...` : compacted;
+}
+
+function mergePackNotes(packNotes: string[] | undefined, priorMemoryNotes: string[]): string[] | undefined {
+  const merged = [...(packNotes ?? []), ...priorMemoryNotes];
+  return merged.length > 0 ? merged : undefined;
+}
+
+function resolveOrchestrationProfile(value: unknown): AgentOrchestrationProfile {
+  if (value === undefined) {
+    return "cheap";
+  }
+
+  if (value === "cheap" || value === "balanced" || value === "full") {
+    return value;
+  }
+
+  throw new AgentInputError("profile must be one of: cheap, balanced, full.");
+}
+
+function sumUsage(...usageItems: Array<GroqUsageStats | undefined>): GroqUsageStats {
+  const total = createUsageAccumulator();
+
+  for (const usage of usageItems) {
+    addUsage(total, usage);
+  }
+
+  return total;
+}
+
+function countValue(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "unknown";
 }
 
 function createUsageAccumulator(): GroqUsageStats {

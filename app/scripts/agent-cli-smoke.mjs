@@ -117,6 +117,7 @@ async function runNegativeDocument() {
 
 async function runDraftFinding() {
   const payload = {
+    profile: "cheap",
     pack_id: "pack_linow_isa_q2_demo",
     engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
     audit_area: "Revenue recognition and cash receipts",
@@ -285,6 +286,7 @@ async function runOrchestrateFiles() {
   }));
 
   const payload = {
+    profile: "cheap",
     pack_id: "pack_linow_isa_q2_files",
     engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
     audit_area: "Revenue recognition and cash receipts",

@@ -121,6 +121,14 @@ proposed_action.action_type = review_agent_outputs
 
 That is intentional. The agent proposes, but a human still reviews before any Walrus or Sui write.
 
+Repeated orchestration runs with the same normalized document input now reuse cached per-document analysis artifacts from `app/.cache/agent/document-analysis/` before calling the model again.
+
+The orchestration route now supports a `profile` field:
+
+- `cheap` = default for Groq free-tier style budgets. Uses one compact document-analysis pass, smaller per-doc text budget, and drafts fewer findings.
+- `balanced` = keeps the compact pass but allows larger inputs and more findings.
+- `full` = restores the older multi-pass per-document flow for higher-budget runs.
+
 ### Full orchestration from real file paths
 
 ```bash

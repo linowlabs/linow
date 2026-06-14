@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   buildCcerFindingMessages,
   groqCcerFindingSchema,
-  isAgentCcerFindingResult,
+  isGroqDraftFindingResult,
   normalizeCcerFindingResult,
   parseCcerFindingToolInput,
 } from "@/lib/agent/draft-finding";
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       schemaName: AGENT_CONFIG.schemaNames.ccerFinding,
       schema: groqCcerFindingSchema,
       messages: buildCcerFindingMessages(input),
-      validate: isAgentCcerFindingResult,
+      validate: isGroqDraftFindingResult,
     });
 
     return NextResponse.json({
