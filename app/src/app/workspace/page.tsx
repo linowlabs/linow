@@ -1530,8 +1530,9 @@ export default function Home() {
                 {/* B-side demo button for persistent memory proof (recall after refresh/new session to continue gap).
                     After store via orchestrate (or agent), refresh, click: calls gap route which does recallPrior + injects to input for continued gap analysis.
                     Shows count >0 proving MemWal persistence. */}
-                <div style={{ marginTop: 8, padding: 6, border: '1px dashed #666', fontSize: 12 }}>
+                <div style={{ marginTop: 8, padding: 6, border: '1px dashed var(--border-medium)', borderRadius: 8, fontSize: 12, backgroundColor: 'rgba(0,0,0,0.01)' }}>
                   <button
+                    className="tamper-btn"
                     onClick={async () => {
                       try {
                         const pid = attestRecordId || verifyRecordId || (registry[0]?.id ?? 'demo-pack');
@@ -1554,7 +1555,7 @@ export default function Home() {
                   >
                     Demo Recall Prior for Gap (after refresh)
                   </button>
-                  <span style={{ marginLeft: 8, color: '#666' }}>
+                  <span style={{ marginLeft: 8, color: 'var(--text-secondary)' }}>
                     (proves cross-session: stores persist in MemWal → recall injects to gap input)
                   </span>
                 </div>
