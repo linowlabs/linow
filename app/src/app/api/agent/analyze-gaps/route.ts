@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   buildGapAnalysisMessages,
   groqGapAnalysisSchema,
-  isAgentGapAnalysisResult,
+  isGroqGapAnalysisResult,
   normalizeGapAnalysisResult,
   parseGapAnalysisToolInput,
 } from "@/lib/agent/analyze-gaps";
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
       schema: groqGapAnalysisSchema,
       messages: buildGapAnalysisMessages(input),
-      validate: isAgentGapAnalysisResult,
+      validate: isGroqGapAnalysisResult,
     });
 
     return NextResponse.json({
