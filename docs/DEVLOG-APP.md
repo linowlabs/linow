@@ -827,3 +827,29 @@
 - Follow-up needed:
   - Wire pack creation and batch evidence registration in the workspace branch.
 
+## 2026-06-15 — Redesign Workspace to Light Glassmorphism Style
+
+### Change
+- Files touched:
+  - `app/src/app/globals.css`
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Redesigned the entire workspace dashboard UI (`/workspace`) to use the light warm glassmorphism style of the landing page.
+  - Replaced the dark background with the warm off-white canvas `#faf9f6` accompanied by grid lines and subtle radial gradients.
+  - Refactored UI variables to support high-contrast dark slate typography and clean borders.
+  - Updated panels, cards, inputs, selects, tables, buttons, and status badges to match the wireframe & light glassmorphic aesthetic.
+  - Removed hover translation lift (`translateY`) to ensure stable visual components.
+
+### Reasoning
+- Why this approach was chosen:
+  - Light mode matches the clean, high-fidelity premium design tone established on the landing page.
+  - Glassmorphic panels with subtle blur and thin borders feel precise and professional for audit workflows.
+  - Patched files incrementally without modifying any application logic or routing.
+
+### Tech Debt
+- Known shortcuts:
+  - None. Both local build and integration verify cleanly.
+- Follow-up needed:
+  - None. Redesign fully aligned.
+
