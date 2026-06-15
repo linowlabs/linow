@@ -1,6 +1,11 @@
 import { AGENT_CONFIG } from "@/lib/agent/config";
 import { getServerEnv } from "@/lib/server-env";
 import {
+  recordGroqRateLimit,
+  recordGroqTokenUsage,
+  waitForGroqTokenBudget,
+} from "@/lib/agent/groq-rate-budget";
+import {
   buildClassificationMessages,
   groqClassificationSchema,
   isAgentClassificationResult,
@@ -82,6 +87,7 @@ export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<
   const attemptErrors: string[] = [];
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const estimatedTokens = await waitForGroqTokenBudget(requestBody);
     const orderedKeys = rotateGroqKeys(apiKeys);
     let retryDelayMs = 0;
 
@@ -110,6 +116,8 @@ export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<
           throw new Error(`Groq completion response did not match the expected ${config.schemaName} schema.`);
         }
 
+        recordGroqTokenUsage(payload.usage?.total_tokens, estimatedTokens);
+
         return {
           model,
           result: parsed,
@@ -118,11 +126,12 @@ export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<
       }
 
       const errorBody = await response.text();
-      const compactError = `HTTP ${response.status}: ${truncateError(errorBody)}`;
+      const compactError = `[${config.schemaName}] HTTP ${response.status}: ${truncateError(errorBody)}`;
       attemptErrors.push(compactError);
 
       if (response.status === 429) {
         retryDelayMs = Math.max(retryDelayMs, getRetryDelayMs(response.headers.get("retry-after"), errorBody));
+        recordGroqRateLimit(retryDelayMs);
         continue;
       }
 
