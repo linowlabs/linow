@@ -440,6 +440,270 @@
   - Consider promoting approved cached artifacts into durable Walrus/MemWal-backed retrieval so reuse works across machines or deployments.
   - Add similar cache/reuse boundaries for pack-level `gap_analysis` and `draft_finding` once their invalidation rules are clearly defined.
 
+## 2026-06-14 — Loosen One-Pass Document Analysis Provider Schema
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-document.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Replaced the one-pass Groq `documentAnalysisBundle` schema composition with a provider-facing schema that is still structured but less strict than the canonical nested schemas.
+  - Kept the existing validation and normalization path intact so the app still accepts only canonical typed outputs after the provider response is parsed.
+
+### Reasoning
+- Why this approach was chosen:
+  - The orchestration failure under the `cheap` profile was most likely happening at provider-side JSON validation inside the one-pass bundle, before our local normalizers could fix anything.
+  - This follows the same proven pattern as the draft-finding fix: tolerate more at the provider edge, then normalize into strict internal contracts.
+
+### Tech Debt
+- Known shortcuts:
+  - The provider-facing bundle schema is broader than the canonical nested schemas and still lives alongside the normalizer in one module.
+- Follow-up needed:
+  - Re-run orchestration to confirm the provider-side JSON validation error is resolved or identify the next strict field if Groq still rejects the bundle.
+
+## 2026-06-14 — Fix Nested Object Strictness In Document Analysis Provider Schema
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-document.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added explicit nested object schemas with `additionalProperties: false` for `metadata.parties`, `metadata.key_dates`, `metadata.key_amounts`, `metadata.citations`, and `assertion_mapping.mapped_assertions` inside the Groq-facing one-pass document analysis schema.
+
+### Reasoning
+- Why this approach was chosen:
+  - Groq rejected the request before generation because its JSON schema validator requires `additionalProperties: false` on every object item nested inside arrays.
+  - Making the nested structures explicit keeps the one-pass bundle valid for provider-side structured output while preserving the later normalization boundary.
+
+### Tech Debt
+- Known shortcuts:
+  - The provider-facing schema remains verbose because the nested object contracts are spelled out inline rather than shared through a small schema helper layer.
+- Follow-up needed:
+  - Re-run `npm run agent:smoke -- orchestrate` and capture the next failure point if Groq surfaces another provider-side schema rule.
+
+## 2026-06-14 — Fallback Cheap Orchestration From One-Pass To Multi-Pass Analysis
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/groq.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added schema-name tagging to Groq HTTP error messages so provider failures identify which structured-output contract failed.
+  - Added a recovery path in orchestration: when the `linow_agent_document_analysis_bundle` one-pass schema fails provider-side validation, the `cheap` profile now falls back to the safer multi-pass analysis flow instead of failing the whole pack immediately.
+
+### Reasoning
+- Why this approach was chosen:
+  - The compact one-pass bundle is still the most token-efficient happy path, but provider-side schema brittleness should not block the whole demo or dev loop.
+  - Falling back only for the compact bundle keeps the original efficiency goal while making orchestration robust enough to continue with the older, more proven multi-pass route when needed.
+
+### Tech Debt
+- Known shortcuts:
+  - The fallback condition currently depends on matching known provider error strings for the compact bundle schema.
+- Follow-up needed:
+  - Observe whether orchestration now succeeds via fallback and decide later whether to keep iterating on the one-pass schema or treat multi-pass as the stable default for some providers.
+
+## 2026-06-14 — Stop Forcing One-Pass Document Bundle On Groq
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added an explicit Groq capability flag for `documentAnalysisBundle` and disabled it by default.
+  - Updated orchestration so `cheap` and `balanced/full` profiles keep their other efficiency controls, but only use the one-pass document bundle when the active provider explicitly enables it.
+
+### Reasoning
+- Why this approach was chosen:
+  - Groq's structured JSON path proved too brittle for the nested one-pass bundle, and repeatedly debugging provider-specific schema failures was getting in the way of a stable agent loop.
+  - The original architecture goal is efficiency through reusable artifacts, not forcing every provider through the same bundled response shape.
+  - This keeps the good parts of the recent work: cache reuse, compact prior-memory injection, limited findings, and retry/backoff, while falling back to the more reliable multi-pass flow for Groq.
+
+### Tech Debt
+- Known shortcuts:
+  - Provider capability is still represented as a Groq-specific config flag rather than a fuller provider adapter abstraction.
+- Follow-up needed:
+  - When a future provider proves stable for bundled structured output, enable the capability there instead of reopening the orchestration core.
+
+## 2026-06-14 — Add Contextual Chunk Retrieval For Assertion Mapping
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/document-retrieval.ts`
+  - `app/src/lib/agent/map-assertions.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a local chunking and contextual retrieval module that splits long document text into stable chunks, generates lightweight contextual summaries, scores chunks lexically against an assertion-mapping query, and returns the highest-signal excerpts.
+  - Updated the assertion-mapping prompt to use retrieved evidence excerpts instead of sending the full raw document text every time.
+  - Bumped the document-analysis cache version so future cached artifacts align with the new assertion-mapping prompt strategy.
+
+### Reasoning
+- Why this approach was chosen:
+  - Assertion mapping was one of the heaviest repeated prompts in the multi-pass flow, so it was the best first target for retrieval-based token reduction.
+  - This follows the intended architecture more closely than relying on provider-specific one-pass bundles: the model still works from document-derived evidence, but only the most relevant chunks are passed into the prompt.
+  - The retrieval path is local and deterministic, so it reduces token cost without adding another model call or another vendor dependency.
+
+### Tech Debt
+- Known shortcuts:
+  - The first version uses lexical retrieval and heuristic reranking rather than embeddings or a learned reranker.
+  - Retrieval is currently applied only to assertion mapping, not yet to pack-level gap analysis or finding drafting.
+- Follow-up needed:
+  - Extend chunk retrieval to `gap_analysis` and `draft_finding` once we validate the signal quality on assertion mapping.
+  - Consider persisting chunk manifests and retrieval traces into memory/proof artifacts if the demo needs explainable chunk provenance.
+
+## 2026-06-14 — Expand Hybrid Retrieval Across Agent Tools
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/document-retrieval.ts`
+  - `app/src/lib/agent/extract-metadata.ts`
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `app/src/lib/agent/draft-finding.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Replaced the first lexical-only retrieval helper with a broader hybrid retrieval module that combines chunking, contextual summaries, lexical scoring, and local hashed-vector cosine scoring.
+  - Applied retrieved evidence excerpts to `metadata_extraction`, `gap_analysis`, and `draft_finding`, while keeping canonical output schemas unchanged.
+  - Wired orchestration to pass raw document text and context into pack-level tools so gap and finding prompts can retrieve evidence excerpts without replaying full document bodies.
+  - Bumped the document-analysis cache version to align cached outputs with the new retrieval-driven prompt strategy.
+
+### Reasoning
+- Why this approach was chosen:
+  - The rate-limit bottleneck had moved from assertion mapping into metadata extraction, so retrieval only at the assertion layer was no longer enough to materially reduce prompt volume.
+  - A local hybrid scorer gives us denser relevance signals than lexical matching alone without introducing another provider dependency or another paid model call.
+  - Gap analysis and finding drafting now receive compact coverage cards plus retrieved excerpts, which improves evidence precision while keeping the agent conservative about unresolved support.
+
+### Tech Debt
+- Known shortcuts:
+  - The "embedding" path is a local hashed-vector approximation rather than a dedicated model embedding service.
+  - Classification still reads the full document text and remains a likely next token hotspot on larger packs.
+- Follow-up needed:
+  - Measure prompt-token reduction and hit rate on the orchestration smoke path after live runs.
+  - If retrieval quality is strong enough, consider adding chunk-manifest persistence for explainable Walrus/MemWal memory.
+
+## 2026-06-15 — Trim Metadata Prompt Verbosity
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/extract-metadata.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Kept the same retrieved evidence chunks for metadata extraction, but removed extra prompt verbosity such as per-chunk contextual summaries and matched-term annotations.
+  - Shortened the metadata extraction instruction wording while preserving the same conservative extraction behavior.
+
+### Reasoning
+- Why this approach was chosen:
+  - The latest live bottleneck was still `metadata_extraction`, and we only needed a small additional reduction to get closer to the 8K TPM ceiling.
+  - The model needs the evidence text itself for metadata extraction, not the retrieval scoring explanation, so trimming that framing is a low-risk way to save tokens without reducing analytical coverage.
+
+### Tech Debt
+- Known shortcuts:
+  - This is still prompt-level optimization rather than a deeper classification-stage reduction.
+- Follow-up needed:
+  - Re-measure live metadata prompt usage after this trim.
+  - If TPM remains too tight, the next target should be compacting classification while preserving first-pass document understanding.
+
+## 2026-06-15 — Loosen Provider Boundary For Classification
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/classify.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Relaxed the Groq-facing classification schema so the provider is no longer required to emit every structured field before the response can reach Linow.
+  - Kept Linow's internal classification contract strict by normalizing missing fields conservatively after the provider response is parsed.
+  - Added conservative fallbacks for missing `assertion_labels`, `source_confidence`, and `source_confidence_reason`, including uploader-context-based source-confidence inference.
+
+### Reasoning
+- Why this approach was chosen:
+  - The latest classification failure happened at the provider schema boundary, not in Linow's business logic, so the safest fix was to make the provider contract more tolerant while preserving strict internal outputs.
+  - This follows the same pattern that stabilized draft finding: tolerate partial provider structure at the edge, then normalize into a clean canonical result inside the app.
+  - Source confidence fallback remains conservative and does not overclaim verification.
+
+### Tech Debt
+- Known shortcuts:
+  - Fallback source-confidence inference still relies on uploader-label heuristics when the model omits the field entirely.
+- Follow-up needed:
+  - Re-run classification and orchestration smoke tests to confirm the provider no longer fails on omitted structured fields.
+  - If Groq still omits too many fields frequently, consider splitting the classification prompt into an even smaller provider-facing draft contract.
+
+## 2026-06-15 — Make Classification Schema Groq-Strict Compatible
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/classify.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Updated the Groq-facing classification schema to use `required + nullable` fields instead of omitting keys from `required`.
+  - Preserved conservative normalization by treating `null` provider values as missing fields inside Linow.
+
+### Reasoning
+- Why this approach was chosen:
+  - Groq strict JSON schema rejected the previous relaxed schema because every property must also appear in `required`.
+  - Using `null`-permitted fields keeps the schema valid for Groq while still letting Linow recover from partial structured outputs.
+
+### Tech Debt
+- Known shortcuts:
+  - Provider fallback still depends on Groq returning a full object shape, even if some values are `null`.
+- Follow-up needed:
+  - Re-run orchestration to confirm the classification step now clears both schema validation layers: provider-side and Linow-side.
+
+## 2026-06-15 — Add Groq TPM Budget Guard
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/groq-rate-budget.ts`
+  - `app/src/lib/agent/groq.ts`
+  - `.env.example`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a process-local Groq TPM budget guard that tracks recent token usage in a rolling one-minute window and waits before sending the next request when the estimated budget would exceed the configured TPM limit.
+  - Added a provider block timer so 429 retry delays also feed back into the scheduler.
+  - Added configurable env knobs for TPM limit, window size, safety buffer, request token estimation, and completion reserve.
+
+### Reasoning
+- Why this approach was chosen:
+  - The main failure mode had shifted from schema incompatibility to crossing Groq's 8K TPM window during multi-step orchestration.
+  - Pacing requests is safer than shrinking evidence context because it preserves analytical coverage while reducing avoidable 429 failures.
+  - Centralizing the budget guard in the Groq layer lets every tool benefit without scattering rate-limit logic across classification, metadata, gap, and finding code.
+
+### Tech Debt
+- Known shortcuts:
+  - Request token estimation is heuristic and based on request-body size plus a completion reserve rather than a provider-native tokenizer.
+  - The budget window is process-local, so it coordinates requests within one app process but not across multiple separate server processes.
+- Follow-up needed:
+  - Measure whether the default pacing is conservative enough to eliminate most 429s without adding too much idle wait.
+  - If needed later, surface lightweight debug counters so we can observe how often the scheduler waits and how close requests come to the budget ceiling.
+
+## 2026-06-15 — Loosen Provider Boundary For Gap Analysis
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Replaced the direct canonical `gapAnalysisSchema` at the Groq boundary with a provider-facing schema that keeps all top-level keys required but allows nullable and more permissive array item values.
+  - Added normalization logic that reconstructs canonical assertion IDs, labels, gap severities, readiness score, recommendation fallbacks, and evidence/finding counts before returning Linow's strict internal `GapAnalysisOutput`.
+  - Tightened the gap-analysis prompt to explicitly remind the model to return every top-level field and to stay conservative when evidence is partial.
+
+### Reasoning
+- Why this approach was chosen:
+  - The provider was failing at structured JSON generation before Linow could validate or repair the result, similar to the earlier classification and draft-finding issues.
+  - A tolerant provider-facing schema with strict internal normalization preserves the downstream audit contract while reducing brittle Groq-side failures.
+
+### Tech Debt
+- Known shortcuts:
+  - Some normalized defaults, such as derived readiness score and fallback recommendations, are heuristic when the provider omits fields.
+- Follow-up needed:
+  - Re-run the orchestration smoke path to verify `gap_analysis` now clears provider validation.
+  - If provider omissions remain frequent, consider further shrinking the gap prompt cards while preserving the same evidence coverage.
+
 ## 2026-06-14 — Add Budget-Aware Agent Orchestration Profiles
 
 ### Change
