@@ -6,6 +6,12 @@ export const AGENT_CONFIG = {
     requestTimeoutMs: 20_000,
     maxAttemptsPerRequest: 2,
     maxRetryAfterMs: 6_000,
+    tpmLimit: 8_000,
+    tpmWindowMs: 60_000,
+    tpmSafetyBuffer: 200,
+    estimatedCharsPerToken: 3.2,
+    completionReserveTokens: 220,
+    enableDocumentAnalysisBundle: false,
   },
   limits: {
     maxDocumentChars: 12_000,
@@ -25,7 +31,17 @@ export const AGENT_CONFIG = {
   cache: {
     enableDocumentAnalysisReuse: true,
     documentAnalysisDir: ".cache/agent/document-analysis",
-    documentAnalysisVersion: "2026-06-14-v1",
+    documentAnalysisVersion: "2026-06-14-v3",
+  },
+  retrieval: {
+    chunkTargetChars: 900,
+    chunkOverlapChars: 120,
+    embeddingDimensions: 192,
+    maxMetadataChunks: 4,
+    maxAssertionMappingChunks: 4,
+    maxGapAnalysisChunks: 8,
+    maxDraftFindingChunks: 6,
+    minQueryTokenLength: 3,
   },
   orchestrationProfiles: {
     cheap: {

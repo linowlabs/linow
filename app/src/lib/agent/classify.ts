@@ -21,15 +21,13 @@ export type ClassifyDocumentInput = AgentDocumentInput;
 interface GroqClassificationDraft {
   schema_name: "evidence_classification";
   schema_version: string;
-  document_id: string;
-  filename: string;
   document_type: string;
-  confidence: number;
-  rationale: string;
-  limitations: string[];
-  assertion_labels: string[];
-  source_confidence: (typeof SOURCE_CONFIDENCE_LEVELS)[number];
-  source_confidence_reason: string;
+  confidence: number | null;
+  rationale: string | null;
+  limitations: string[] | null;
+  assertion_labels: string[] | null;
+  source_confidence: string | null;
+  source_confidence_reason: string | null;
 }
 
 export const groqClassificationSchema = {
@@ -38,27 +36,23 @@ export const groqClassificationSchema = {
   properties: {
     schema_name: { type: "string", const: "evidence_classification" },
     schema_version: { type: "string", const: AGENT_SCHEMA_VERSION },
-    document_id: { type: "string" },
-    filename: { type: "string" },
     document_type: { type: "string" },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
-    rationale: { type: "string" },
+    confidence: { type: ["number", "null"], minimum: 0, maximum: 1 },
+    rationale: { type: ["string", "null"] },
     limitations: {
-      type: "array",
+      type: ["array", "null"],
       items: { type: "string" },
     },
     assertion_labels: {
-      type: "array",
+      type: ["array", "null"],
       items: { type: "string" },
     },
-    source_confidence: { type: "string", enum: [...SOURCE_CONFIDENCE_LEVELS] },
-    source_confidence_reason: { type: "string" },
+    source_confidence: { type: ["string", "null"] },
+    source_confidence_reason: { type: ["string", "null"] },
   },
   required: [
     "schema_name",
     "schema_version",
-    "document_id",
-    "filename",
     "document_type",
     "confidence",
     "rationale",
@@ -129,22 +123,16 @@ export function isAgentClassificationResult(value: unknown): value is GroqClassi
   return (
     candidate.schema_name === "evidence_classification" &&
     candidate.schema_version === AGENT_SCHEMA_VERSION &&
-    typeof candidate.document_id === "string" &&
-    typeof candidate.filename === "string" &&
     typeof candidate.document_type === "string" &&
-    typeof candidate.confidence === "number" &&
-    candidate.confidence >= 0 &&
-    candidate.confidence <= 1 &&
-    typeof candidate.rationale === "string" &&
-    Array.isArray(candidate.limitations) &&
-    candidate.limitations.every((item) => typeof item === "string") &&
-    Array.isArray(candidate.assertion_labels) &&
-    candidate.assertion_labels.every((item) => typeof item === "string") &&
-    typeof candidate.source_confidence === "string" &&
-    SOURCE_CONFIDENCE_LEVELS.includes(
-      candidate.source_confidence as (typeof SOURCE_CONFIDENCE_LEVELS)[number],
-    ) &&
-    typeof candidate.source_confidence_reason === "string"
+    (candidate.confidence === null ||
+      (typeof candidate.confidence === "number" && candidate.confidence >= 0 && candidate.confidence <= 1)) &&
+    (candidate.rationale === null || typeof candidate.rationale === "string") &&
+    (candidate.limitations === null ||
+      (Array.isArray(candidate.limitations) && candidate.limitations.every((item) => typeof item === "string"))) &&
+    (candidate.assertion_labels === null ||
+      (Array.isArray(candidate.assertion_labels) && candidate.assertion_labels.every((item) => typeof item === "string"))) &&
+    (candidate.source_confidence === null || typeof candidate.source_confidence === "string") &&
+    (candidate.source_confidence_reason === null || typeof candidate.source_confidence_reason === "string")
   );
 }
 
@@ -152,7 +140,7 @@ export function normalizeClassificationResult(
   input: ClassifyDocumentInput,
   value: GroqClassificationDraft,
 ): EvidenceClassificationOutput {
-  const modelAssertionIds = value.assertion_labels.reduce<Array<EvidenceClassificationOutput["assertions"][number]>>(
+  const modelAssertionIds = (value.assertion_labels ?? []).reduce<Array<EvidenceClassificationOutput["assertions"][number]>>(
     (accumulator, label) => {
       const assertionId = getAssertionIdByLabel(label);
 
@@ -167,6 +155,15 @@ export function normalizeClassificationResult(
   );
   const documentType = normalizeDocumentType(value.document_type, input.documentName);
   const uniqueAssertionIds = calibrateClassificationAssertions(documentType, modelAssertionIds, input.documentText);
+  const fallbackApplied =
+    value.confidence === null ||
+    value.rationale === null ||
+    value.limitations === null ||
+    value.assertion_labels === null ||
+    value.source_confidence === null ||
+    value.source_confidence_reason === null;
+  const normalizedSourceConfidence = normalizeSourceConfidence(input, value.source_confidence);
+  const limitations = value.limitations ?? [];
 
   return {
     schema_name: "evidence_classification",
@@ -174,12 +171,63 @@ export function normalizeClassificationResult(
     document_id: input.documentId,
     filename: input.documentName,
     document_type: documentType,
-    confidence: value.confidence,
-    rationale: value.rationale,
-    limitations: value.limitations,
+    confidence: typeof value.confidence === "number" ? value.confidence : 0.6,
+    rationale:
+      value.rationale ??
+      "Classification generated from the visible document text with conservative fallback normalization.",
+    limitations: fallbackApplied
+      ? dedupeStrings([
+          ...limitations,
+          "Provider classification response omitted some structured fields; conservative fallback normalization applied.",
+        ])
+      : limitations,
     assertions: uniqueAssertionIds,
     assertion_labels: uniqueAssertionIds.map((assertionId) => getAssertionLabel(assertionId)),
-    source_confidence: value.source_confidence,
-    source_confidence_reason: value.source_confidence_reason,
+    source_confidence: normalizedSourceConfidence,
+    source_confidence_reason:
+      value.source_confidence_reason ?? buildFallbackSourceConfidenceReason(input, normalizedSourceConfidence),
   };
+}
+
+function normalizeSourceConfidence(
+  input: ClassifyDocumentInput,
+  value: unknown,
+): (typeof SOURCE_CONFIDENCE_LEVELS)[number] {
+  if (typeof value === "string" && SOURCE_CONFIDENCE_LEVELS.includes(value as (typeof SOURCE_CONFIDENCE_LEVELS)[number])) {
+    return value as (typeof SOURCE_CONFIDENCE_LEVELS)[number];
+  }
+
+  const uploaderLabel = input.context?.uploaderLabel?.toUpperCase() ?? "";
+  const explicitLevel = SOURCE_CONFIDENCE_LEVELS.find((level) => uploaderLabel.includes(level));
+
+  if (explicitLevel) {
+    return explicitLevel;
+  }
+
+  if (uploaderLabel.includes("COMPANY UPLOAD")) {
+    return "L2";
+  }
+
+  if (uploaderLabel.includes("CONNECTOR") || uploaderLabel.includes("SYSTEM")) {
+    return "L3";
+  }
+
+  return "L1";
+}
+
+function buildFallbackSourceConfidenceReason(
+  input: ClassifyDocumentInput,
+  level: (typeof SOURCE_CONFIDENCE_LEVELS)[number],
+): string {
+  const uploaderLabel = input.context?.uploaderLabel?.trim();
+
+  if (uploaderLabel) {
+    return `Source confidence ${level} inferred conservatively from uploader context: ${uploaderLabel}.`;
+  }
+
+  return `Source confidence ${level} inferred conservatively because the provider response omitted an explicit source-confidence rationale.`;
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
 }

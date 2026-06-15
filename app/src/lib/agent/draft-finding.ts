@@ -18,15 +18,20 @@ import {
 } from "@/lib/agent/schemas";
 import {
   AgentInputError,
+  type DocumentContextInput,
   isRecord,
   parseOptionalStringArray,
+  parseDocumentContext,
   readOptionalString,
   readRequiredString,
 } from "@/lib/agent/common";
+import { retrieveFindingChunks } from "@/lib/agent/document-retrieval";
 
 export interface CcerFindingDocumentInput {
   document_id: string;
   filename: string;
+  document_text?: string;
+  context?: DocumentContextInput;
   classification?: EvidenceClassificationOutput;
   metadata?: MetadataExtractionOutput;
   assertion_mapping?: AssertionMappingOutput;
@@ -173,15 +178,56 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
       return input.gap.related_assertions.some((assertionId) => mappedAssertionIds.includes(assertionId));
     })
     .map((document) => summarizeFindingDocument(document));
-
+  const sourceDocuments = relevantDocuments.length > 0
+    ? input.documents.filter((document) =>
+        relevantDocuments.some((summary) => summary.document_id === document.document_id),
+      )
+    : input.documents;
   const documentSummaries = relevantDocuments.length > 0
     ? relevantDocuments
-    : input.documents.map((document) => summarizeFindingDocument(document));
+    : sourceDocuments.map((document) => summarizeFindingDocument(document));
   const missingAssertions = [...input.gap.related_assertions];
   const missingAssertionLabels =
     input.gap.related_assertion_labels.length > 0
       ? [...input.gap.related_assertion_labels]
       : input.gap.related_assertions.map((assertionId) => getAssertionLabel(assertionId));
+  const retrievedChunks = retrieveFindingChunks({
+    packId: input.pack_id,
+    engagementName: input.engagement_name,
+    auditArea: input.audit_area,
+    stage: input.stage,
+    gapTitle: input.gap.title,
+    gapRationale: input.gap.rationale,
+    relatedAssertions: input.gap.related_assertions,
+    relatedAssertionLabels: missingAssertionLabels,
+    packNotes: input.pack_notes,
+    documents: sourceDocuments
+      .filter((document): document is CcerFindingDocumentInput & { document_text: string } => Boolean(document.document_text))
+      .map((document) => ({
+        documentId: document.document_id,
+        documentName: document.filename,
+        documentText: document.document_text,
+        context: document.context,
+        classificationSummary: document.classification
+          ? `Classified as ${document.classification.document_type}.`
+          : undefined,
+        metadataSummary: document.metadata
+          ? [
+              document.metadata.document_reference ? `Ref ${document.metadata.document_reference}` : null,
+              document.metadata.document_date ? `Date ${document.metadata.document_date}` : null,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join(". ")
+          : undefined,
+        notes: document.notes,
+        supportedAssertions:
+          document.assertion_mapping?.mapped_assertions
+            .filter((item) => item.coverage !== "not_supported")
+            .map((item) => `${item.assertion_label} (${item.coverage})`) ?? [],
+        sourceConfidence:
+          document.source_confidence?.source_confidence ?? document.classification?.source_confidence ?? null,
+      })),
+  });
 
   return [
     {
@@ -222,15 +268,36 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
         input.gap_analysis
           ? `Gap analysis context: readiness ${input.gap_analysis.readiness_score}, findings ${input.gap_analysis.finding_count}.`
           : null,
-        "Relevant document summaries:",
-        JSON.stringify(documentSummaries, null, 2),
+        "Relevant document cards:",
+        ...documentSummaries.map((document) =>
+          [
+            `${document.document_id} (${document.filename})`,
+            `type=${document.document_type ?? "unknown"}`,
+            `source_confidence=${document.source_confidence ?? "unknown"}`,
+            `supported_assertions=${document.supported_assertions.join(", ") || "none"}`,
+            `citations=${document.citations.map((citation) => citation.reference).join(" | ") || "none"}`,
+            document.notes.length > 0 ? `notes=${document.notes.join(" | ")}` : null,
+          ]
+            .filter((value): value is string => Boolean(value))
+            .join(" | "),
+        ),
+        retrievedChunks.length > 0 ? "Retrieved evidence excerpts:" : null,
+        ...retrievedChunks.map((chunk) =>
+          [
+            `${chunk.document_name} :: ${chunk.chunk_id} [chars ${chunk.char_start}-${chunk.char_end}]`,
+            `Context: ${chunk.contextual_summary}`,
+            `Matched terms: ${chunk.matched_terms.join(", ") || "none"}`,
+            `Excerpt: ${chunk.text}`,
+          ].join("\n"),
+        ),
         "Task:",
         "- Produce a Condition, Criteria, Cause, Effect, and Recommendation finding.",
-        "- Use citations only from the provided relevant document summaries.",
+        "- Use citations only from the provided relevant document cards and retrieved excerpts.",
         "- Keep severity aligned with the input gap severity.",
         `- Set missing_assertions exactly to: ${JSON.stringify(missingAssertions)}.`,
         `- Set missing_assertion_labels exactly to: ${JSON.stringify(missingAssertionLabels)}.`,
         "- Keep finding_id stable if one is already provided.",
+        "- If the excerpts are incomplete, keep the finding conservative and let the gap remain unresolved.",
       ]
         .filter((line): line is string => Boolean(line))
         .join("\n"),
@@ -303,6 +370,8 @@ function parseFindingDocument(value: unknown): CcerFindingDocumentInput {
   return {
     document_id: readRequiredString(value.document_id, "documents[].document_id"),
     filename: readRequiredString(value.filename, "documents[].filename"),
+    document_text: readOptionalString(value.document_text, "documents[].document_text"),
+    context: parseDocumentContext(value.context),
     classification: parseOptionalNested(value.classification, "documents[].classification", isEvidenceClassificationOutput),
     metadata: parseOptionalNested(value.metadata, "documents[].metadata", isMetadataExtractionOutput),
     assertion_mapping: parseOptionalNested(value.assertion_mapping, "documents[].assertion_mapping", isAssertionMappingOutput),
