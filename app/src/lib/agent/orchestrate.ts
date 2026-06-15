@@ -54,7 +54,7 @@ import {
 import {
   buildGapAnalysisMessages,
   groqGapAnalysisSchema,
-  isAgentGapAnalysisResult,
+  isGroqGapAnalysisResult,
   normalizeGapAnalysisResult,
   type GapAnalysisDocumentInput,
   type GapAnalysisToolInput,
@@ -127,13 +127,14 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
   const documentNotesById = createDocumentNotesLookup(input.documents);
   const usage = createUsageAccumulator();
   const profileConfig = AGENT_CONFIG.orchestrationProfiles[input.profile];
+  const useDocumentAnalysisBundle = profileConfig.combineDocumentPasses && AGENT_CONFIG.groq.enableDocumentAnalysisBundle;
   const priorMemoryNotes = profileConfig.recallPriorMemory ? await recallPriorMemoryNotes(input.pack_id, profileConfig.maxPriorMemoryNotes) : [];
   const effectivePackNotes = mergePackNotes(input.pack_notes, priorMemoryNotes);
   let cachedDocumentCount = 0;
   let model: string = AGENT_CONFIG.groq.defaultModel;
 
   for (const document of input.documents) {
-    const analysisMode = profileConfig.combineDocumentPasses ? "compact" : "multi_pass";
+    const analysisMode = useDocumentAnalysisBundle ? "compact" : "multi_pass";
     const analysis = await resolveDocumentAnalysis(document, analysisMode);
 
     if (analysis.analysisSource === "live") {
@@ -215,7 +216,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
     schema: groqGapAnalysisSchema,
     messages: buildGapAnalysisMessages(gapInput),
-    validate: isAgentGapAnalysisResult,
+    validate: isGroqGapAnalysisResult,
   });
   addUsage(usage, gapCompletion.usage);
   const gapAnalysis = normalizeGapAnalysisResult(gapInput, gapCompletion.result);
@@ -242,6 +243,8 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
       documents: documents.map((document) => ({
         document_id: document.document_id,
         filename: document.filename,
+        document_text: input.documents.find((item) => item.documentId === document.document_id)?.documentText,
+        context: input.documents.find((item) => item.documentId === document.document_id)?.context,
         classification: document.classification,
         metadata: document.metadata,
         assertion_mapping: document.assertion_mapping,
@@ -306,7 +309,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     proposed_action: reviewBundle,
     flow: [
       {
-        step: profileConfig.combineDocumentPasses ? "analyze_document_bundle" : "classify_extract_map",
+        step: useDocumentAnalysisBundle ? "analyze_document_bundle" : "classify_extract_map",
         artifact_count: documents.length * 4,
         schema_names: ["evidence_classification", "metadata_extraction", "assertion_mapping", "source_confidence"],
       },
@@ -378,6 +381,8 @@ function buildGapInput(
   const gapDocuments: GapAnalysisDocumentInput[] = documents.map((document) => ({
     document_id: document.document_id,
     filename: document.filename,
+    document_text: input.documents.find((item) => item.documentId === document.document_id)?.documentText,
+    context: input.documents.find((item) => item.documentId === document.document_id)?.context,
     classification: document.classification,
     metadata: document.metadata,
     assertion_mapping: document.assertion_mapping,
@@ -522,7 +527,10 @@ async function runMultiPassDocumentAnalysis(document: OrchestrationDocumentInput
   const metadataCompletion = await runGroqJsonCompletion({
     schemaName: AGENT_CONFIG.schemaNames.metadataExtraction,
     schema: groqMetadataExtractionSchema,
-    messages: buildMetadataExtractionMessages(document),
+    messages: buildMetadataExtractionMessages({
+      ...document,
+      classificationSummary: buildClassificationSummary(classificationResult.result),
+    }),
     validate: isAgentMetadataExtractionResult,
   });
   const metadata = normalizeMetadataExtractionResult(document, metadataCompletion.result);
@@ -586,9 +594,7 @@ async function resolveDocumentAnalysis(
     };
   }
 
-  const analysis = mode === "compact"
-    ? await runCompactDocumentAnalysis(document)
-    : await runMultiPassDocumentAnalysis(document);
+  const analysis = await runPreferredDocumentAnalysis(document, mode);
 
   const cacheKey = await writeCachedDocumentAnalysis({
     document,
@@ -603,6 +609,25 @@ async function resolveDocumentAnalysis(
     analysisSource: "live" as const,
     cacheKey,
   };
+}
+
+async function runPreferredDocumentAnalysis(
+  document: OrchestrationDocumentInput,
+  mode: "compact" | "multi_pass",
+) {
+  if (mode === "multi_pass") {
+    return runMultiPassDocumentAnalysis(document);
+  }
+
+  try {
+    return await runCompactDocumentAnalysis(document);
+  } catch (error) {
+    if (!isRecoverableCompactAnalysisError(error)) {
+      throw error;
+    }
+
+    return runMultiPassDocumentAnalysis(document);
+  }
 }
 
 async function recallPriorMemoryNotes(packId: string, limit: number): Promise<string[]> {
@@ -714,4 +739,19 @@ function addUsage(accumulator: GroqUsageStats, usage?: GroqUsageStats) {
 
 function getAssertionLabel(assertionId: AssertionId): string {
   return ASSERTION_CATALOG.find((item) => item.id === assertionId)?.label ?? `Unknown (${assertionId})`;
+}
+
+function isRecoverableCompactAnalysisError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.message.includes("linow_agent_document_analysis_bundle") &&
+    (
+      error.message.includes("json_validate_failed") ||
+      error.message.includes("invalid JSON schema for response_format") ||
+      error.message.includes("Failed to validate JSON")
+    )
+  );
 }

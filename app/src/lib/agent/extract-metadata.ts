@@ -5,11 +5,24 @@ import {
   isMetadataExtractionOutput,
 } from "@/lib/agent/schemas";
 import { buildDocumentContextLines, type AgentDocumentInput } from "@/lib/agent/common";
+import { retrieveMetadataExtractionChunks } from "@/lib/agent/document-retrieval";
+
+export interface MetadataExtractionPromptInput extends AgentDocumentInput {
+  classificationSummary?: string;
+  notes?: string[];
+}
 
 export const groqMetadataExtractionSchema = metadataExtractionSchema;
 
-export function buildMetadataExtractionMessages(input: AgentDocumentInput) {
+export function buildMetadataExtractionMessages(input: MetadataExtractionPromptInput) {
   const contextLines = buildDocumentContextLines(input);
+  const retrievedChunks = retrieveMetadataExtractionChunks(input);
+  const compactChunkCards = retrievedChunks.map((chunk) =>
+    [
+      `${chunk.chunk_id} [chars ${chunk.char_start}-${chunk.char_end}]`,
+      chunk.text,
+    ].join("\n"),
+  );
 
   return [
     {
@@ -17,10 +30,10 @@ export function buildMetadataExtractionMessages(input: AgentDocumentInput) {
       content: [
         "You are Linow's audit evidence metadata extraction agent.",
         `Return JSON that matches schema_version ${AGENT_SCHEMA_VERSION} exactly.`,
-        "Extract only what is supported by the provided document text.",
-        "Do not invent exact dates, amounts, or parties if they are not visible.",
-        "Citations should point to the described reference in the current document only.",
-        "Keep limitations explicit whenever the text is partial or ambiguous.",
+        "Extract only what the provided evidence supports.",
+        "Do not invent dates, amounts, parties, or references.",
+        "Citations must point to the current document only.",
+        "If evidence is partial, state that in limitations.",
       ].join(" "),
     },
     {
@@ -29,12 +42,15 @@ export function buildMetadataExtractionMessages(input: AgentDocumentInput) {
         `Document id: ${input.documentId}`,
         `Document name: ${input.documentName}`,
         ...(contextLines.length > 0 ? contextLines : []),
+        input.classificationSummary ? `Classification summary: ${input.classificationSummary}` : null,
         "Task:",
         "- Extract dates, periods, document reference, parties, amounts, and citations.",
         "- Return null for date/reference fields when absent.",
         "- Return empty arrays when the text does not support a section.",
-        "Document text:",
-        input.documentText,
+        "- Use only the evidence excerpts below.",
+        "- Stay conservative when the excerpts are incomplete.",
+        "Retrieved evidence excerpts:",
+        ...compactChunkCards,
       ].join("\n"),
     },
   ];

@@ -18,6 +18,7 @@ import {
   resolveAgentDocumentInput,
   type ResolvedAgentDocumentInput,
 } from "@/lib/agent/common";
+import { retrieveAssertionMappingChunks } from "@/lib/agent/document-retrieval";
 
 export interface AssertionMappingToolInput extends AgentDocumentInput {
   frameworkReference?: string;
@@ -92,6 +93,7 @@ export async function resolveAssertionMappingToolInput(value: unknown): Promise<
 
 export function buildAssertionMappingMessages(input: AssertionMappingToolInput) {
   const contextLines = buildDocumentContextLines(input);
+  const retrievedChunks = retrieveAssertionMappingChunks(input);
 
   return [
     {
@@ -116,13 +118,22 @@ export function buildAssertionMappingMessages(input: AssertionMappingToolInput) 
         input.metadataSummary ? `Metadata summary: ${input.metadataSummary}` : null,
         "Canonical assertions:",
         ...ASSERTION_CATALOG.map((item) => `- ${item.id}: ${item.label}`),
+        "Retrieved evidence excerpts:",
+        ...retrievedChunks.map((chunk) =>
+          [
+            `${chunk.chunk_id} [chars ${chunk.char_start}-${chunk.char_end}]`,
+            `Context: ${chunk.contextual_summary}`,
+            `Matched terms: ${chunk.matched_terms.join(", ") || "none"}`,
+            `Excerpt: ${chunk.text}`,
+          ].join("\n"),
+        ),
         "Task:",
         "- Map supported assertions with rationale and confidence.",
         "- Keep unsupported assertions in the output when relevant to explain limitations.",
         "- Decide source confidence and explain why.",
         "- Include upgrade path and caveats.",
-        "Document text:",
-        input.documentText,
+        "- Base your answer primarily on the retrieved evidence excerpts above.",
+        "- If the excerpts are incomplete, stay conservative in your coverage and limitations.",
       ]
         .filter((line): line is string => Boolean(line))
         .join("\n"),
