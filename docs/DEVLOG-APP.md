@@ -931,6 +931,274 @@
 - Follow-up needed:
   - None.
 
+## 2026-06-16 -- Gate Batch Register On Complete Evidence Drafts
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added selected-evidence readiness checks for type, source, description, and assertions before enabling `Register selected`.
+  - Persisted local document draft edits from the individual evidence form back onto the selected local file.
+  - Rewired `Register selected` to use the SDK batch registration flow, producing one Sui transaction/signature for the selected evidence batch.
+
+### Reasoning
+- Why this approach was chosen:
+  - Batch registration should only run once every selected evidence item has enough metadata for the audit record.
+  - The old UI showed edited fields, but batch registration still read the original local document state for some fields.
+  - One batch transaction matches the expected wallet UX better than asking the user to sign one registration per selected file.
+
+### Tech Debt
+- Known shortcuts:
+  - Batch registration is now all-or-nothing at the Sui transaction step; failed batches mark all selected local items as failed.
+- Follow-up needed:
+  - Consider showing per-file preflight status for Walrus upload progress if demo files become larger.
+
+## 2026-06-16 -- Make AuditPack Status Informational
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Removed the manual `Create AuditPack` button from the Evidence header.
+  - Added a read-only AuditPack status indicator that shows either `No AuditPack created` or the active pack id.
+  - Kept AuditPack creation inside the first individual or batch registration flow, then reused the pack for later registrations in the same workspace session.
+
+### Reasoning
+- Why this approach was chosen:
+  - AuditPack behaves like the current audit workspace/session container, so creating an empty pack before evidence exists is not useful in the demo flow.
+  - Registration is the natural point where a pack becomes necessary, and the existing reuse logic already supports later evidence additions.
+
+### Tech Debt
+- Known shortcuts:
+  - There is still no explicit `New AuditPack`/`Start new engagement` action for intentionally changing sessions.
+- Follow-up needed:
+  - Add an explicit new-engagement control when role/account-backed workspaces and persistence are introduced.
+
+## 2026-06-16 -- Clarify Batch Register Readiness
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Changed `Register selected` so incomplete selected metadata no longer silently disables the button.
+  - Added a selected evidence readiness count beside the batch selection count.
+  - Marked selected local rows with missing draft info as `Needs details`.
+
+### Reasoning
+- Why this approach was chosen:
+  - Wallet connection is only one requirement; selected evidence also needs complete type, source, description, and assertions before batch registration.
+  - Letting the button click reach the existing guard makes the blocker visible instead of making the UI look broken.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+## 2026-06-16 -- Add Registration Draft Save Action
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a compact `Save draft` button to the Registration Draft header.
+  - Added a saved-state message confirming that the visible draft fields are stored for batch registration.
+
+### Reasoning
+- Why this approach was chosen:
+  - Batch registration reads per-file local draft state, so users need an explicit way to confirm the current file's type, source, description, and assertions are saved.
+  - The form still auto-syncs edits, but the button makes the workflow clearer during demo prep.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+## 2026-06-16 -- Consolidate AuditPack Evidence Explorer Section
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Wrapped the batch selection toolbar, prerequisite copy, batch status, file list, and batch registration note inside one evidence explorer section.
+  - Replaced separate dashed note/card treatment with inline section notes and a compact batch summary style.
+
+### Reasoning
+- Why this approach was chosen:
+  - The AuditPack evidence explorer should read as one file list surface instead of multiple stacked sections.
+  - Keeping file rows as individual selectable list items preserves the explorer behavior while reducing visual fragmentation.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+## 2026-06-16 -- Unblock Batch Register From Explorer
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Batch register now auto-creates an AuditPack when the explorer has selected files but no pack yet.
+  - Surfaced `registerError` directly inside the evidence explorer so failed clicks no longer look silent.
+  - Passed the active AuditPack id explicitly through the batch register helper so newly created packs are linked immediately during the same action.
+
+### Reasoning
+- Why this approach was chosen:
+  - The register action should work from the explorer flow without forcing a separate manual pack-creation step first.
+  - React state for `auditPack.id` can lag right after creation, so the batch path should use the created id directly instead of relying on a later re-render.
+
+### Tech Debt
+- Known shortcuts:
+  - Batch registration still submits evidence sequentially, so the user will sign multiple transactions in a row during the demo path.
+- Follow-up needed:
+  - Consider whether single-file register should also auto-create a pack when the workspace is explicitly in AuditPack mode.
+
+## 2026-06-16 -- Unblock Single Evidence Register Button
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Updated the local document `Register Evidence` button flow to create an AuditPack automatically when one does not exist.
+  - Passed the active AuditPack id directly into `registerEvidenceDraft` so the newly created pack is linked during the same click.
+  - Added the AuditPack creation step to single-file registration progress.
+
+### Reasoning
+- Why this approach was chosen:
+  - The workspace is now pack-centric, so single-file registration from an uploaded local file should not depend on a separate manual pack creation step.
+  - Using the local `activeAuditPackId` avoids waiting on React state after pack creation before the evidence registration transaction is prepared.
+
+### Tech Debt
+- Known shortcuts:
+  - Single-file registration still uses the current local document draft fields rather than a per-file persisted draft editor.
+- Follow-up needed:
+  - Persist edited per-file draft fields back onto the local document list before registration if reviewers need file-by-file metadata edits in the explorer.
+
+## 2026-06-16 -- Make Single Register Guard Visible
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Changed the local document `Register Evidence` button so it is disabled only while registration is already running.
+  - Moved role and wallet checks into `handleRegister` so blocked registration attempts show an explicit error message.
+
+### Reasoning
+- Why this approach was chosen:
+  - The form can be complete while the button is still disabled by wallet or role state, which makes the UI look broken.
+  - Keeping guards in the handler preserves the company-owned registration rule while making the reason visible to the user.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+## 2026-06-16 -- Restore Single Register Disabled State
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Restored the local document `Register Evidence` button disabled state for disconnected wallet, non-company role, empty assertions, and in-flight registration.
+
+### Reasoning
+- Why this approach was chosen:
+  - The disabled button was expected behavior when no Sui wallet is connected.
+  - The handler-level guards remain as a backup, but the UI should still communicate unavailable actions before signing is possible.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+## 2026-06-16 -- Hide Promoted Local Evidence Rows
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a `visibleLocalDocuments` view that hides local upload rows once they have been registered and linked to an evidence object.
+  - Updated the Evidence tab, sidebar evidence tree, readable evidence count, and agent source list to use the promoted-record view.
+
+### Reasoning
+- Why this approach was chosen:
+  - A registered upload should behave as one evidence entity in the workspace, with the registered record becoming the canonical row.
+  - Keeping the local file in memory still supports verification, but rendering both the local row and registered metadata row made the evidence list look duplicated.
+
+### Tech Debt
+- Known shortcuts:
+  - The registered record is still session-local UI state, so a page refresh will not restore the promoted record until persistence/history loading is wired.
+- Follow-up needed:
+  - Load existing AuditPack evidence from chain/API history when entering the workspace.
+
+## 2026-06-16 -- Keep Evidence Folder After Upload
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Changed local document upload behavior so adding files keeps the main workspace on the Evidence folder instead of opening the first uploaded file.
+  - New uploads are still selected for batch registration automatically.
+
+### Reasoning
+- Why this approach was chosen:
+  - Batch evidence upload should make the newly added local document set visible immediately.
+  - Opening the first uploaded file hid the rest of the selected batch and made multi-file registration feel less clear.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+## 2026-06-16 — Add AuditPack Batch Evidence Registration
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added selectable local evidence rows in the AuditPack evidence explorer.
+  - Added batch controls for selecting all local files, clearing selection, and registering selected files.
+  - Refactored the single-file registration path into a shared helper so both single and batch registration use the same SDK hash/encrypt/Walrus/Sui flow.
+  - Batch registration now runs sequentially and passes the active `auditPackId` into every `createRegisterEvidenceFlow` call.
+  - Added batch progress, partial failure status, per-file failure marking, and proof view listing for AuditPack-linked evidence records.
+
+### Reasoning
+- Why this approach was chosen:
+  - AuditPack represents one pack/engagement containing many evidence records, so batch registration should create many `EvidenceRecord`s linked back to the same pack.
+  - Sequential registration is safer for wallet signing and easier to demo/debug than parallel transaction submission.
+  - Reusing the existing registration helper protects the proven single-file demo path while extending it to batches.
+
+### Tech Debt
+- Known shortcuts:
+  - Batch registration requires an already-created AuditPack rather than auto-creating one inside the batch action.
+  - If one file fails, the batch continues and marks that file red; there is no retry queue beyond reselecting the failed file.
+  - The pack link is currently through `registerEvidence({ auditPackId })`; the UI does not call extra `audit_pack::add_evidence` mutation helpers.
+- Follow-up needed:
+  - Add retry affordances for failed batch items if demo testing shows wallet/network flakiness.
+  - Consider exposing explicit AuditPack mutation helpers later if the proof model needs on-chain pack-side evidence vectors updated separately.
+
 ## 2026-06-16 — Fix Sidebar Folder Spacing Consistency
 
 ### Change
