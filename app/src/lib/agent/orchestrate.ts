@@ -54,7 +54,7 @@ import {
 import {
   buildGapAnalysisMessages,
   groqGapAnalysisSchema,
-  isGroqGapAnalysisResult,
+  isGroqGapAnalysisEnvelope,
   normalizeGapAnalysisResult,
   type GapAnalysisDocumentInput,
   type GapAnalysisToolInput,
@@ -216,7 +216,8 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
     schema: groqGapAnalysisSchema,
     messages: buildGapAnalysisMessages(gapInput),
-    validate: isGroqGapAnalysisResult,
+    validate: isGroqGapAnalysisEnvelope,
+    responseMode: "json_object",
   });
   addUsage(usage, gapCompletion.usage);
   const gapAnalysis = normalizeGapAnalysisResult(gapInput, gapCompletion.result);

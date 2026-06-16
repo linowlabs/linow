@@ -33,6 +33,7 @@ interface GroqJsonCompletionConfig<T> {
   schema: unknown;
   messages: Array<{ role: "system" | "user"; content: string }>;
   validate: (value: unknown) => value is T;
+  responseMode?: "json_schema" | "json_object";
 }
 
 let groqKeyCursor = 0;
@@ -70,18 +71,24 @@ export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<
   }
 
   const model = config.model || getServerEnv("GROQ_MODEL") || AGENT_CONFIG.groq.defaultModel;
+  const responseMode = config.responseMode ?? "json_schema";
   const requestBody = JSON.stringify({
     model,
     temperature: AGENT_CONFIG.groq.defaultTemperature,
     messages: config.messages,
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: config.schemaName,
-        strict: true,
-        schema: config.schema,
-      },
-    },
+    response_format:
+      responseMode === "json_schema"
+        ? {
+            type: "json_schema",
+            json_schema: {
+              name: config.schemaName,
+              strict: true,
+              schema: config.schema,
+            },
+          }
+        : {
+            type: "json_object",
+          },
   });
   const maxAttempts = Math.max(1, AGENT_CONFIG.groq.maxAttemptsPerRequest);
   const attemptErrors: string[] = [];
@@ -110,7 +117,7 @@ export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<
           throw new Error("Groq completion response did not include message content.");
         }
 
-        const parsed = JSON.parse(content) as unknown;
+        const parsed = parseGroqJsonContent(content) as unknown;
 
         if (!config.validate(parsed)) {
           throw new Error(`Groq completion response did not match the expected ${config.schemaName} schema.`);
@@ -212,4 +219,24 @@ function parseRetryAfterBody(value: string): number {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseGroqJsonContent(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const fencedMatch = content.match(/```json\s*([\s\S]*?)\s*```/i);
+    if (fencedMatch) {
+      return JSON.parse(fencedMatch[1]);
+    }
+
+    const objectStart = content.indexOf("{");
+    const objectEnd = content.lastIndexOf("}");
+
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      return JSON.parse(content.slice(objectStart, objectEnd + 1));
+    }
+
+    throw new Error("Groq completion response did not contain valid JSON content.");
+  }
 }
