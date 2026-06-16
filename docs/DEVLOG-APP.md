@@ -853,3 +853,55 @@
 - Follow-up needed:
   - None. Redesign fully aligned.
 
+## 2026-06-16 — Remodel Workspace as Audit IDE Shell
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Rebuilt `/workspace` around the IDE-style shell from `docs/IMPROVED_WORKSPACE_MODEL.md`: left rail, explorer/settings sidebar, central selected-object content, bottom details/status panel, and right contextual agent panel.
+  - Added local-memory document explorer with status colors for local-only, registering, registered, attested, and blocked/mismatch states.
+  - Wired existing SDK flows into the new shell: AuditPack creation, single evidence registration with optional `auditPackId`, verification, and reviewer attestation.
+  - Wired the agent panel to the existing `/api/agent/orchestrate` route for browser-readable text-like files and displays memory/action candidate output honestly.
+
+### Reasoning
+- Why this approach was chosen:
+  - The Sui Overflow workspace needs to present AuditPack, evidence, agent output, memory, and proof artifacts as one coherent workbench rather than separate upload/verify/attest tabs.
+  - The remodel preserves the current light wireframe/glassmorphism design system while making the product feel closer to the long-term local audit IDE direction.
+  - Existing SDK and agent logic were reused without changing SDK or agent internals.
+
+### Tech Debt
+- Known shortcuts:
+  - Batch evidence registration is prepared in the explorer/state model but still submits one selected file at a time.
+  - Browser agent analysis reads text-like files via `File.text()`; PDF, DOCX, and XLSX browser extraction still need upload/ingestion wiring.
+  - AgentAction candidates are displayed for human approval, but on-chain AgentAction submission is not wired into the UI because the current public SDK flow does not return full tx/event proof detail.
+- Follow-up needed:
+  - Add a reliable batch registration loop that registers selected local files with the active `auditPackId`.
+  - Add browser upload ingestion or extraction support for non-text evidence before claiming full document agent analysis.
+  - Harden SDK AgentAction return shape before showing event-level proof in the bottom panel.
+
+## 2026-06-16 — Add Agent Instruction Context
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added an "Additional audit instruction" textarea to the workspace agent panel.
+  - Passed the instruction into `/api/agent/orchestrate` as `pack_notes` so the existing structured workflow can use custom audit context.
+  - Labeled the control as workflow context rather than chat to avoid overstating current agent capabilities.
+
+### Reasoning
+- Why this approach was chosen:
+  - The current agent orchestration accepts pack/document context, so a guided instruction field is useful without requiring a new chat route.
+  - This preserves the "agent proposes, human signs, chain proves" boundary and avoids implying open-ended autonomous behavior.
+
+### Tech Debt
+- Known shortcuts:
+  - This is not a conversational chatbot; it is custom context for a structured analysis run.
+- Follow-up needed:
+  - Add a real pack-aware chat route later if the product needs conversational Q&A over evidence and memory.
+
