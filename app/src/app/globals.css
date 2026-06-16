@@ -127,31 +127,6 @@ input, textarea, select {
   min-width: 0;
 }
 
-.sidebar-toggle {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.02);
-  border: 1px solid var(--border-light);
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-  flex-shrink: 0;
-}
-
-.sidebar-toggle:hover {
-  color: var(--text-high);
-  background: rgba(0, 0, 0, 0.04);
-  border-color: var(--border-medium);
-}
-
-.sidebar-toggle svg {
-  width: 16px;
-  height: 16px;
-}
-
 .topbar-logo {
   width: 22px;
   height: 22px;
@@ -296,6 +271,9 @@ input, textarea, select {
 
 .sidebar-section {
   padding: 0.85rem 0.85rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .sidebar-section-label {
@@ -396,6 +374,10 @@ input, textarea, select {
   padding: 0.75rem;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+}
+
+.sidebar-footer .guardrails-block {
+  margin-top: 0.85rem;
 }
 
 .guardrails-title {
@@ -1541,11 +1523,17 @@ input, textarea, select {
   -webkit-backdrop-filter: blur(20px);
 }
 
+.sidebar-folder-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .tree-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 0.2rem 0 0.5rem 0.65rem;
+  margin: 0 0 0 0.65rem;
   padding-left: 0.55rem;
   border-left: 1px solid rgba(9, 13, 22, 0.06);
 }

@@ -891,18 +891,18 @@ export default function WorkspacePage() {
         prev.map((record) =>
           record.id === recordId
             ? {
-                ...record,
+              ...record,
+              reviewer: signerAddress,
+              notes: attestNotes || "Attested via Linow Workspace.",
+              latestAttestation: {
+                id: attestationId,
+                action: toAttestationLabel(attestationType),
                 reviewer: signerAddress,
-                notes: attestNotes || "Attested via Linow Workspace.",
-                latestAttestation: {
-                  id: attestationId,
-                  action: toAttestationLabel(attestationType),
-                  reviewer: signerAddress,
-                  note: attestNotes || "Attested via Linow Workspace.",
-                  txDigest,
-                  createdAt,
-                },
-              }
+                note: attestNotes || "Attested via Linow Workspace.",
+                txDigest,
+                createdAt,
+              },
+            }
             : record,
         ),
       );
@@ -1000,10 +1000,10 @@ export default function WorkspacePage() {
           },
           evidence_ref: item.evidenceRef
             ? {
-                evidence_id: item.evidenceRef.id,
-                walrus_blob_id: item.evidenceRef.blobId,
-                commitment: item.evidenceRef.commitment,
-              }
+              evidence_id: item.evidenceRef.id,
+              walrus_blob_id: item.evidenceRef.blobId,
+              commitment: item.evidenceRef.commitment,
+            }
             : undefined,
         });
       }
@@ -1011,7 +1011,7 @@ export default function WorkspacePage() {
       if (documents.length === 0) {
         throw new Error(
           warnings[0] ??
-            "No readable text-like local evidence is available. Add a CSV, TXT, JSON, MD, or TSV file for the web agent panel.",
+          "No readable text-like local evidence is available. Add a CSV, TXT, JSON, MD, or TSV file for the web agent panel.",
         );
       }
 
@@ -1787,9 +1787,6 @@ export default function WorkspacePage() {
           onChange={(event) => setAgentInstruction(event.target.value)}
           placeholder="e.g. Focus on revenue cutoff, missing approval evidence, and any reviewer caveats."
         />
-        <p className="ide-muted">
-          This is passed as pack context to the structured agent workflow, not an open-ended chat.
-        </p>
         <button className="btn-primary full-width" type="button" disabled={agentRun.status === "running"} onClick={handleRunAgent}>
           {agentRun.status === "running" ? "Analyzing..." : "Run analysis"}
         </button>
@@ -1830,17 +1827,6 @@ export default function WorkspacePage() {
     <main className="app-container">
       <header className="topbar">
         <div className="topbar-left">
-          <button
-            type="button"
-            className="sidebar-toggle"
-            aria-label={isSidebarOpen ? "Collapse navigation" : "Expand navigation"}
-            aria-expanded={isSidebarOpen}
-            onClick={() => setIsSidebarOpen((prev) => !prev)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h16M4 17h16" />
-            </svg>
-          </button>
           <Image className="topbar-logo" src="/mascot.png" alt="Linow mascot" width={22} height={22} priority />
           <div className="topbar-brand-block">
             <span className="topbar-brand">Linow</span>
@@ -1888,6 +1874,7 @@ export default function WorkspacePage() {
             onClick={() => {
               setActiveRailPanel("explorer");
               setActiveItemId("folder:evidence");
+              setIsSidebarOpen(true);
             }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1902,6 +1889,7 @@ export default function WorkspacePage() {
             onClick={() => {
               setActiveRailPanel("settings");
               setActiveItemId("settings");
+              setIsSidebarOpen(true);
             }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1916,46 +1904,57 @@ export default function WorkspacePage() {
             <>
               <div className="sidebar-section">
                 <div className="sidebar-section-label">Q2 AuditPack</div>
-                <button className={`tree-item folder${activeItemId === "folder:evidence" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:evidence")}>
-                  <span>Evidence</span>
-                  <small>{localDocuments.length + registry.length}</small>
-                </button>
-                <div className="tree-group">
-                  {localDocuments.map((document) => (
-                    <button
-                      key={document.id}
-                      className={`tree-item${activeItemId === `local:${document.id}` ? " active" : ""}`}
-                      type="button"
-                      onClick={() => prepareLocalDocument(document)}
-                    >
-                      {renderStatusDot(document.status)}
-                      <span>{document.fileName}</span>
-                    </button>
-                  ))}
-                  {registry.map((record) => (
-                    <button
-                      key={record.id}
-                      className={`tree-item${activeItemId === `record:${record.id}` ? " active" : ""}`}
-                      type="button"
-                      onClick={() => {
-                        setActiveItemId(`record:${record.id}`);
-                        setVerifyRecordId(record.id);
-                        setAttestRecordId(record.id);
-                      }}
-                    >
-                      {renderStatusDot(record.latestAttestation ? "attested-record" : "registered-record")}
-                      <span>{record.fileName ?? truncateValue(record.id, 12)}</span>
-                    </button>
-                  ))}
+
+                <div className="sidebar-folder-group">
+                  <button className={`tree-item folder${activeItemId === "folder:evidence" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:evidence")}>
+                    <span>Evidence</span>
+                    <small>{localDocuments.length + registry.length}</small>
+                  </button>
+                  {localDocuments.length + registry.length > 0 && (
+                    <div className="tree-group">
+                      {localDocuments.map((document) => (
+                        <button
+                          key={document.id}
+                          className={`tree-item${activeItemId === `local:${document.id}` ? " active" : ""}`}
+                          type="button"
+                          onClick={() => prepareLocalDocument(document)}
+                        >
+                          {renderStatusDot(document.status)}
+                          <span>{document.fileName}</span>
+                        </button>
+                      ))}
+                      {registry.map((record) => (
+                        <button
+                          key={record.id}
+                          className={`tree-item${activeItemId === `record:${record.id}` ? " active" : ""}`}
+                          type="button"
+                          onClick={() => {
+                            setActiveItemId(`record:${record.id}`);
+                            setVerifyRecordId(record.id);
+                            setAttestRecordId(record.id);
+                          }}
+                        >
+                          {renderStatusDot(record.latestAttestation ? "attested-record" : "registered-record")}
+                          <span>{record.fileName ?? truncateValue(record.id, 12)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <button className={`tree-item folder${activeItemId === "folder:findings" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:findings")}>
-                  <span>Findings</span>
-                  <small>{agentRun.findings.length}</small>
-                </button>
-                <button className={`tree-item folder${activeItemId === "folder:proof" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:proof")}>
-                  <span>Proof</span>
-                  <small>{proofSnapshot ? "1" : "0"}</small>
-                </button>
+
+                <div className="sidebar-folder-group">
+                  <button className={`tree-item folder${activeItemId === "folder:findings" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:findings")}>
+                    <span>Findings</span>
+                    <small>{agentRun.findings.length}</small>
+                  </button>
+                </div>
+
+                <div className="sidebar-folder-group">
+                  <button className={`tree-item folder${activeItemId === "folder:proof" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:proof")}>
+                    <span>Proof</span>
+                    <small>{proofSnapshot ? "1" : "0"}</small>
+                  </button>
+                </div>
               </div>
 
               <div className="sidebar-footer">

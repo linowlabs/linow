@@ -905,3 +905,49 @@
 - Follow-up needed:
   - Add a real pack-aware chat route later if the product needs conversational Q&A over evidence and memory.
 
+## 2026-06-16 — Workspace Redesign Visual Tweaks and Header Cleanup
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Removed the unused sidebar collapse button from the topbar.
+  - Linked workspace rail button click actions to auto-expand the sidebar, improving mobile/tablet navigation.
+  - Added a vertical margin between the "Add document" button and the "Status colors" block in the sidebar footer.
+  - Aligned spacing between the main folders (Evidence, Findings, Proof) by adding flex gaps to the sidebar section and reducing nested tree-group vertical margins.
+  - Cleaned up dead CSS rules related to `.sidebar-toggle`.
+
+### Reasoning
+- Why this approach was chosen:
+  - The collapse button is redundant in the remodeled IDE design where rail panel toggle behavior dominates.
+  - Adding flex layout gaps ensures consistent vertical spacing whether folders contain children or not.
+  - Follows the boy scout rule by immediately purging dead toggle CSS rules.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+## 2026-06-16 — Fix Sidebar Folder Spacing Consistency
+
+### Change
+- Files touched:
+  - `app/src/app/globals.css`
+- Summary:
+  - Defined the `.sidebar-folder-group` CSS class with flex column layout and a 2px gap to correctly layout the folder button and its children list.
+  - Reset `.tree-group` vertical margins to 0 (changing margin from `2px 0 2px 0.65rem` to `0 0 0 0.65rem`).
+
+### Reasoning
+- Why this approach was chosen:
+  - Previously, `.tree-group` had vertical margins (`margin: 2px 0 2px 0.65rem`) and `.sidebar-folder-group` lacked visual layout styles (making it behave as a block element). This resulted in an extra bottom margin pushing down the sidebar folder groups when expanded, causing an inconsistent gap (12px vs 10px) between folders.
+  - Removing these vertical margins and letting the layout gap be managed entirely by the flexbox layout of `.sidebar-folder-group` (2px internally between folder button and children list) and `.sidebar-section` (10px gap between folders) ensures mathematically consistent y-axis spacing.
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
