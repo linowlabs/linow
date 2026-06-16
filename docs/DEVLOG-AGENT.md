@@ -704,6 +704,92 @@
   - Re-run the orchestration smoke path to verify `gap_analysis` now clears provider validation.
   - If provider omissions remain frequent, consider further shrinking the gap prompt cards while preserving the same evidence coverage.
 
+## 2026-06-15 — Simplify Gap Analysis Provider Schema
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Reduced the Groq-facing `gap_analysis` schema so the model now only has to return:
+    - `covered_labels`
+    - `missing_labels`
+    - `readiness_score`
+    - `recommendations`
+    - `gaps` with label-based assertion links
+  - Moved deterministic fields such as `pack_id`, `total_assertions`, `evidence_count`, `finding_count`, and assertion-ID reconstruction fully into Linow normalization logic.
+  - Trimmed retrieved excerpt formatting in the gap-analysis prompt to lower structured-output burden without removing evidence content.
+
+### Reasoning
+- Why this approach was chosen:
+  - Groq was still failing `gap_analysis` JSON validation even after a more tolerant schema, which suggested the output shape itself was still too heavy for reliable strict generation.
+  - The model is better suited to reasoning in labels and narrative gaps than to reconstructing every deterministic numeric and ID field. Those deterministic fields are safer to rebuild locally.
+
+### Tech Debt
+- Known shortcuts:
+  - When the model omits related assertion labels, Linow now infers assertion IDs from nearby text heuristically.
+- Follow-up needed:
+  - Re-run orchestration to confirm the simplified schema eliminates `gap_analysis` provider-validation failures.
+  - If needed later, apply the same “provider-draft + local normalization” pattern to any remaining brittle structured-output steps.
+
+## 2026-06-15 — Move Gap Analysis Off Strict Provider Schema
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/groq.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a `responseMode` option to the Groq completion helper so specific tools can request `json_object` instead of strict `json_schema`.
+  - Added tolerant JSON parsing in the Groq helper to recover JSON from plain responses, fenced JSON blocks, or surrounding prose.
+  - Switched `gap_analysis` to use `json_object` mode while keeping Linow-side validation and normalization unchanged.
+
+### Reasoning
+- Why this approach was chosen:
+  - The remaining blocker was Groq provider-side validation itself, not Linow's internal schema or reasoning logic.
+  - `gap_analysis` had become a good candidate for provider-tolerant JSON mode because we already normalize its result heavily on the app side.
+  - This keeps strict canonical validation in Linow while avoiding repeated provider-side `json_validate_failed` failures.
+
+### Tech Debt
+- Known shortcuts:
+  - `json_object` mode is less structurally enforced by the provider than strict schema mode, so Linow validation becomes the primary guardrail.
+- Follow-up needed:
+  - Re-run orchestration to confirm `gap_analysis` now clears provider generation.
+  - If successful, consider whether other brittle pack-level steps should also use `json_object` mode selectively rather than globally.
+
+## 2026-06-16 — Make Gap Analysis Draft Parsing Fully Tolerant
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Replaced the remaining shape-based `gap_analysis` draft validator with a broad envelope check that only requires the model to return a JSON object.
+  - Added coercion helpers that sanitize optional strings, arrays, integers, and gap items before normalization.
+  - Moved `gap_analysis` draft handling to a clearer three-stage flow:
+    1. provider returns a loose JSON object
+    2. Linow coerces it into a draft shape
+    3. Linow normalizes it into canonical `GapAnalysisOutput`
+
+### Reasoning
+- Why this approach was chosen:
+  - The recurring failure mode was no longer provider schema mode alone, but the repeated assumption that the model would preserve an exact draft shape across runs.
+  - In practice, the model often returns near-correct JSON with omitted or malformed optional fields. Rejecting the whole result at the draft-validation layer caused repeated orchestration failures.
+  - By making draft parsing tolerant and keeping strictness only at the final canonical output layer, the system becomes much more resilient without weakening downstream audit contracts.
+
+### Tech Debt
+- Known shortcuts:
+  - Gap draft coercion still relies on label text for some assertion-ID reconstruction when the model omits structured links.
+- Follow-up needed:
+  - Re-run orchestration to confirm the recurrent `gap_analysis` draft-shape failure is eliminated.
+  - If this pattern proves stable, consider applying the same coercion-first contract to other fragile provider-facing steps.
+  - Guard against empty or weak `gap_analysis` drafts being normalized into false full-coverage results when no covered labels or mappable gap assertions are returned.
+  - Align `readiness_score` fallback math with the final inferred covered/missing assertion sets so normalized outputs remain internally consistent.
+  - Canonicalize provider-supplied assertion labels before hashing/output so label arrays always stay in sync with canonical assertion IDs.
+
 ## 2026-06-14 — Add Budget-Aware Agent Orchestration Profiles
 
 ### Change
