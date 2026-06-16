@@ -5,6 +5,7 @@ import Image from "next/image";
 import {
   createAttestationFlow,
   createAuditPackFlow,
+  createBatchRegisterEvidenceFlow,
   createRegisterEvidenceFlow,
   createVerifyEvidenceFlow,
   encryptJson,
@@ -22,9 +23,9 @@ import { useWalletBridge } from "@/lib/wallet-context";
 type WorkspaceRole = "company" | "auditor" | "verifier";
 type RailPanel = "explorer" | "settings";
 type BottomTab = "details" | "chain" | "memory" | "agent" | "privacy" | "raw";
-type OperationType = "pack" | "register" | "verify" | "attest" | "agent";
+type OperationType = "register" | "batch" | "verify" | "attest" | "agent";
 type RecordStatus = "Registered" | "Superseded";
-type LocalDocumentStatus = "local" | "registering" | "registered" | "flagged";
+type LocalDocumentStatus = "local" | "queued" | "registering" | "registered" | "flagged";
 
 interface AttestationSummary {
   id: string;
@@ -73,8 +74,7 @@ interface AuditPackDraft {
   txDigest?: string;
   owner?: string;
   createdAt?: string;
-  status: "not-created" | "creating" | "created" | "error";
-  error?: string;
+  status: "not-created" | "created";
 }
 
 interface ProgressStep {
@@ -148,6 +148,36 @@ interface RegisterDraftOverride {
   description: string;
   assertions: string[];
   localDocumentId?: string;
+}
+
+interface RegisterEvidenceDraft {
+  file: File;
+  documentType: string;
+  source: string;
+  description: string;
+  assertions: string[];
+  localDocumentId?: string;
+}
+
+interface RegisteredEvidenceArtifacts {
+  record: EvidenceRecord;
+  result: RegisterResult;
+  localDocumentId?: string;
+}
+
+interface BatchRegistrationSummary {
+  total: number;
+  completed: number;
+  failed: number;
+  currentFile?: string;
+  lastError?: string;
+}
+
+interface CreatedAuditPackArtifacts {
+  id: string;
+  txDigest?: string;
+  owner: string;
+  createdAt: string;
 }
 
 const ISA_ASSERTIONS = [
@@ -279,6 +309,15 @@ function createLocalDocument(file: File): LocalDocument {
   };
 }
 
+function isLocalDocumentReady(document: LocalDocument): boolean {
+  return Boolean(
+    document.documentType.trim() &&
+    document.source.trim() &&
+    document.description.trim() &&
+    document.assertions.length > 0,
+  );
+}
+
 function inferDocumentType(fileName: string): string {
   const lower = fileName.toLowerCase();
   if (lower.includes("bank")) return "Bank Statement";
@@ -342,6 +381,7 @@ export default function WorkspacePage() {
   const [auditPack, setAuditPack] = useState<AuditPackDraft>({ status: "not-created" });
   const [localDocuments, setLocalDocuments] = useState<LocalDocument[]>([]);
   const [registry, setRegistry] = useState<EvidenceRecord[]>([]);
+  const [selectedLocalDocumentIds, setSelectedLocalDocumentIds] = useState<string[]>([]);
 
   const [regFile, setRegFile] = useState<File | null>(null);
   const [regDocType, setRegDocType] = useState("Bank Statement");
@@ -349,8 +389,11 @@ export default function WorkspacePage() {
   const [regDesc, setRegDesc] = useState("");
   const [regAssertions, setRegAssertions] = useState<string[]>(["Existence"]);
   const [activeLocalDocumentId, setActiveLocalDocumentId] = useState<string | undefined>();
+  const [draftSaveMessage, setDraftSaveMessage] = useState<string | null>(null);
 
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isBatchRegistering, setIsBatchRegistering] = useState(false);
+  const [batchSummary, setBatchSummary] = useState<BatchRegistrationSummary | null>(null);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registerResult, setRegisterResult] = useState<RegisterResult | null>(null);
 
@@ -413,12 +456,37 @@ export default function WorkspacePage() {
     lastVerificationSession?.evidenceId === attestRecordId &&
     lastVerificationSession.status === "tampered";
 
+  const visibleLocalDocuments = useMemo(
+    () => localDocuments.filter((document) => document.status !== "registered" || !document.evidenceId),
+    [localDocuments],
+  );
+
   const readableEvidenceCount = useMemo(
     () =>
-      [...localDocuments.map((item) => item.file), ...registry.map((item) => item.sourceFile).filter((file): file is File => Boolean(file))]
-        .filter((file) => file.type.startsWith("text/") || TEXT_AGENT_EXTENSIONS.has(getFileExtension(file.name))).length,
-    [localDocuments, registry],
+      [
+        ...visibleLocalDocuments.map((item) => item.file),
+        ...registry.map((item) => item.sourceFile).filter((file): file is File => Boolean(file)),
+      ].filter((file) => file.type.startsWith("text/") || TEXT_AGENT_EXTENSIONS.has(getFileExtension(file.name))).length,
+    [registry, visibleLocalDocuments],
   );
+
+  const selectableLocalDocuments = useMemo(
+    () => localDocuments.filter((document) => document.status !== "registered" && !document.evidenceId),
+    [localDocuments],
+  );
+
+  const selectedBatchDocuments = useMemo(
+    () => selectableLocalDocuments.filter((document) => selectedLocalDocumentIds.includes(document.id)),
+    [selectableLocalDocuments, selectedLocalDocumentIds],
+  );
+
+  const incompleteSelectedBatchDocuments = useMemo(
+    () => selectedBatchDocuments.filter((document) => !isLocalDocumentReady(document)),
+    [selectedBatchDocuments],
+  );
+
+  const selectedBatchReady =
+    selectedBatchDocuments.length > 0 && incompleteSelectedBatchDocuments.length === 0;
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 1100px)");
@@ -438,12 +506,34 @@ export default function WorkspacePage() {
     };
   }, []);
 
-  const handleToggleAssertion = (assertion: string) => {
-    setRegAssertions((prev) =>
-      prev.includes(assertion)
-        ? prev.filter((item) => item !== assertion)
-        : [...prev, assertion],
+  const updateLocalDocumentDraft = (documentId: string, patch: Partial<Pick<LocalDocument, "documentType" | "source" | "description" | "assertions">>) => {
+    setLocalDocuments((prev) =>
+      prev.map((document) => document.id === documentId ? { ...document, ...patch } : document),
     );
+  };
+
+  const handleSaveDraft = (documentId: string) => {
+    updateLocalDocumentDraft(documentId, {
+      documentType: regDocType,
+      source: regSource,
+      description: regDesc,
+      assertions: regAssertions,
+    });
+    setDraftSaveMessage("Draft saved for batch registration.");
+  };
+
+  const handleToggleAssertion = (assertion: string) => {
+    setRegAssertions((prev) => {
+      const next = prev.includes(assertion)
+        ? prev.filter((item) => item !== assertion)
+        : [...prev, assertion];
+
+      if (activeLocalDocumentId) {
+        updateLocalDocumentDraft(activeLocalDocumentId, { assertions: next });
+      }
+
+      return next;
+    });
   };
 
   const handleAddDocuments = (files: FileList | null) => {
@@ -451,10 +541,25 @@ export default function WorkspacePage() {
 
     const nextDocuments = Array.from(files).map(createLocalDocument);
     setLocalDocuments((prev) => [...prev, ...nextDocuments]);
-    const first = nextDocuments[0];
-    if (first) {
-      prepareLocalDocument(first);
-    }
+    setSelectedLocalDocumentIds((prev) => [...prev, ...nextDocuments.map((document) => document.id)]);
+    setActiveItemId("folder:evidence");
+    setActiveLocalDocumentId(undefined);
+  };
+
+  const toggleBatchSelection = (documentId: string) => {
+    setSelectedLocalDocumentIds((prev) =>
+      prev.includes(documentId)
+        ? prev.filter((id) => id !== documentId)
+        : [...prev, documentId],
+    );
+  };
+
+  const selectAllBatchDocuments = () => {
+    setSelectedLocalDocumentIds(selectableLocalDocuments.map((document) => document.id));
+  };
+
+  const clearBatchSelection = () => {
+    setSelectedLocalDocumentIds([]);
   };
 
   const prepareLocalDocument = (document: LocalDocument) => {
@@ -467,214 +572,119 @@ export default function WorkspacePage() {
     setRegAssertions(document.assertions);
     setRegisterError(null);
     setRegisterResult(null);
+    setDraftSaveMessage(null);
     if (isCompactViewport) setIsSidebarOpen(false);
   };
 
-  const handleCreateAuditPack = async () => {
-    if (auditPack.status === "creating") return;
-    if (!signerAddress) {
-      setAuditPack({
-        status: "error",
-        error: "Connect a Sui wallet before creating an AuditPack.",
-      });
-      return;
-    }
+  const createAuditPackDraft = async (): Promise<CreatedAuditPackArtifacts> => {
+    const encryptionKey = await generateEncryptionKey();
+    const encryptedDetails = await encryptJson(
+      {
+        engagementName: "Q2 2026 Audit Readiness",
+        createdBy: signerAddress,
+        purpose: "Sui Overflow demo AuditPack",
+        note: "Encrypted client-side before on-chain registration.",
+      },
+      encryptionKey,
+    );
+    const encryptedBytes = new TextEncoder().encode(JSON.stringify(serializeEncryptedPayload(encryptedDetails)));
 
-    setAuditPack({ status: "creating" });
+    const createAuditPack = createAuditPackFlow({
+      packageId: PACKAGE_ID,
+      signerAddress,
+      signTransaction,
+      tatum: serverTatumExecute,
+    });
+    const result = await createAuditPack({
+      encryptedDetails: encryptedBytes,
+      signerAddress,
+    });
 
-    const steps: ProgressStep[] = [
-      { label: "Encrypting pack details", status: "pending" },
-      { label: "Signing AuditPack creation", status: "pending" },
-    ];
-
-    try {
-      steps[0].status = "running";
-      setOperationProgress({ type: "pack", steps: [...steps] });
-
-      const encryptionKey = await generateEncryptionKey();
-      const encryptedDetails = await encryptJson(
-        {
-          engagementName: "Q2 2026 Audit Readiness",
-          createdBy: signerAddress,
-          purpose: "Sui Overflow demo AuditPack",
-          note: "Encrypted client-side before on-chain registration.",
-        },
-        encryptionKey,
-      );
-      const encryptedBytes = new TextEncoder().encode(JSON.stringify(serializeEncryptedPayload(encryptedDetails)));
-
-      steps[0] = {
-        ...steps[0],
-        status: "done",
-        detail: `${encryptedBytes.length} B`,
-      };
-      steps[1].status = "running";
-      setOperationProgress({ type: "pack", steps: [...steps] });
-
-      const createAuditPack = createAuditPackFlow({
-        packageId: PACKAGE_ID,
-        signerAddress,
-        signTransaction,
-        tatum: serverTatumExecute,
-      });
-      const result = await createAuditPack({
-        encryptedDetails: encryptedBytes,
-        signerAddress,
-      });
-
-      const createdAt = result.pack.createdAt.replace("T", " ").substring(0, 16);
-      steps[1] = {
-        ...steps[1],
-        status: "done",
-        detail: truncateValue(result.transactionDigest ?? "tx pending", 22),
-      };
-      setOperationProgress({ type: "pack", steps: [...steps] });
-      setAuditPack({
-        id: result.pack.id,
-        txDigest: result.transactionDigest,
-        owner: result.pack.owner,
-        createdAt,
-        status: "created",
-      });
-      setProofSnapshot({
-        auditPackId: result.pack.id,
-        txDigest: result.transactionDigest,
-        packageId: PACKAGE_ID,
-        updatedAt: createdAt,
-      });
-      setActiveItemId("folder:evidence");
-    } catch (error) {
-      setAuditPack({
-        status: "error",
-        error: getErrorMessage(error, "AuditPack creation failed."),
-      });
-      setOperationProgress(null);
-    }
+    return {
+      id: result.pack.id,
+      txDigest: result.transactionDigest,
+      owner: result.pack.owner,
+      createdAt: result.pack.createdAt,
+    };
   };
 
-  const handleRegister = async (override?: RegisterDraftOverride) => {
-    if (isRegistering) return;
+  const applyCreatedAuditPack = (createdPack: CreatedAuditPackArtifacts) => {
+    const createdAtLabel = createdPack.createdAt.replace("T", " ").substring(0, 16);
+    setAuditPack({
+      id: createdPack.id,
+      txDigest: createdPack.txDigest,
+      owner: createdPack.owner,
+      createdAt: createdAtLabel,
+      status: "created",
+    });
+    setProofSnapshot({
+      auditPackId: createdPack.id,
+      txDigest: createdPack.txDigest,
+      packageId: PACKAGE_ID,
+      updatedAt: createdAtLabel,
+    });
+    setActiveItemId("folder:evidence");
+  };
 
-    const file = override?.file ?? regFile;
-    const documentType = override?.documentType ?? regDocType;
-    const source = override?.source ?? regSource;
-    const description = override?.description ?? regDesc;
-    const assertions = override?.assertions ?? regAssertions;
-    const localDocumentId = override?.localDocumentId ?? activeLocalDocumentId;
-
-    if (!signerAddress) {
-      setRegisterError("Connect a Sui wallet before registering evidence.");
-      return;
-    }
-    if (!file) {
-      setRegisterError("Select a document before preparing the registration flow.");
-      return;
-    }
-    if (assertions.length === 0) {
-      setRegisterError("Select at least one ISA assertion for this evidence item.");
-      return;
-    }
-
-    setIsRegistering(true);
-    setRegisterError(null);
-    setRegisterResult(null);
-    if (localDocumentId) {
-      setLocalDocuments((prev) =>
-        prev.map((item) => item.id === localDocumentId ? { ...item, status: "registering" } : item),
-      );
-    }
-
-    const sourceLabel = toSourceLabel(source);
+  const registerEvidenceDraft = async (
+    draft: RegisterEvidenceDraft,
+    auditPackIdOverride?: string,
+  ): Promise<RegisteredEvidenceArtifacts> => {
+    const sourceLabel = toSourceLabel(draft.source);
+    const activeAuditPackId = auditPackIdOverride ?? auditPack.id;
     const metadata = {
-      fileName: file.name,
-      mediaType: file.type || "application/octet-stream",
-      documentType,
-      description: description || undefined,
+      fileName: draft.file.name,
+      mediaType: draft.file.type || "application/octet-stream",
+      documentType: draft.documentType,
+      description: draft.description || undefined,
       claimedSource: sourceLabel,
     };
 
-    const steps: ProgressStep[] = [
-      { label: "Computing SHA-256 hash", status: "pending" },
-      { label: "Encrypting file and metadata", status: "pending" },
-      { label: "Uploading encrypted blob to Walrus", status: "pending" },
-      { label: "Signing and submitting Sui registration", status: "pending" },
-    ];
+    const encryptionKey = await generateEncryptionKey();
+    const registerEvidence = createRegisterEvidenceFlow({
+      packageId: PACKAGE_ID,
+      signerAddress,
+      signTransaction,
+      encryptionKey,
+      tatum: serverTatumExecute,
+      walrusNetwork: "testnet",
+      walrusPublisherUrl: process.env.NEXT_PUBLIC_WALRUS_PUBLISHER_URL,
+      walrusAggregatorUrl: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL,
+    });
 
-    try {
-      steps[0].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      const encryptionKey = await generateEncryptionKey();
-      const registerEvidence = createRegisterEvidenceFlow({
-        packageId: PACKAGE_ID,
-        signerAddress,
-        signTransaction,
-        encryptionKey,
-        tatum: serverTatumExecute,
-        walrusNetwork: "testnet",
-        walrusPublisherUrl: process.env.NEXT_PUBLIC_WALRUS_PUBLISHER_URL,
-        walrusAggregatorUrl: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL,
-      });
+    const result = await registerEvidence({
+      content: draft.file,
+      metadata,
+      assertions: draft.assertions.map(toAssertionId),
+      signerAddress,
+      auditPackId: activeAuditPackId,
+    });
+    const commitment = result.evidence.commitment;
+    const blobId = result.evidence.blobId ?? result.evidence.proof?.walrusBlobId ?? "n/a";
+    const objectId = result.evidence.id;
+    const txDigest = result.transactionDigest ?? result.evidence.proof?.transactionDigest ?? "n/a";
+    const registeredAt = result.evidence.registeredAt ?? new Date().toISOString();
+    const registeredAtLabel = registeredAt.replace("T", " ").substring(0, 16);
 
-      steps[0] = { ...steps[0], status: "done", detail: "Prepared locally" };
-      steps[1].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      steps[1] = { ...steps[1], status: "done", detail: "AES-GCM ready" };
-
-      steps[2].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      const result = await registerEvidence({
-        content: file,
-        metadata,
-        assertions: assertions.map(toAssertionId),
-        signerAddress,
-        auditPackId: auditPack.id,
-      });
-      const commitment = result.evidence.commitment;
-      const blobId = result.evidence.blobId ?? result.evidence.proof?.walrusBlobId ?? "n/a";
-      const objectId = result.evidence.id;
-      const txDigest = result.transactionDigest ?? result.evidence.proof?.transactionDigest ?? "n/a";
-      const registeredAt = result.evidence.registeredAt ?? new Date().toISOString();
-
-      steps[2] = { ...steps[2], status: "done", detail: truncateValue(blobId, 22) };
-      steps[3].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      steps[3] = { ...steps[3], status: "done", detail: txDigest };
-      setOperationProgress({ type: "register", steps: [...steps] });
-
-      const registeredAtLabel = registeredAt.replace("T", " ").substring(0, 16);
-      const newRecord: EvidenceRecord = {
+    return {
+      localDocumentId: draft.localDocumentId,
+      record: {
         id: objectId,
         date: registeredAtLabel,
-        type: documentType,
+        type: draft.documentType,
         source: sourceLabel,
         commitment,
         status: "Registered",
         blobId,
-        assertions,
+        assertions: draft.assertions,
         reviewer: "n/a",
-        notes: description || "No description provided.",
-        fileName: file.name,
-        fileSize: formatMegabytes(file.size),
-        sourceFile: file,
-        auditPackId: auditPack.id,
-      };
-
-      setRegistry((prev) => [newRecord, ...prev]);
-      setVerifyRecordId(objectId);
-      setAttestRecordId(objectId);
-      setActiveItemId(`record:${objectId}`);
-
-      if (localDocumentId) {
-        setLocalDocuments((prev) =>
-          prev.map((item) =>
-            item.id === localDocumentId
-              ? { ...item, status: "registered", evidenceId: objectId }
-              : item,
-          ),
-        );
-      }
-
-      setRegisterResult({
+        notes: draft.description || "No description provided.",
+        fileName: draft.file.name,
+        fileSize: formatMegabytes(draft.file.size),
+        sourceFile: draft.file,
+        auditPackId: activeAuditPackId,
+      },
+      result: {
         objectId,
         txDigest,
         blobId,
@@ -682,30 +692,394 @@ export default function WorkspacePage() {
         encryptedFileSize: `${result.artifacts.encryptedFile.ciphertext.length} B`,
         encryptedMetadataSize: `${result.artifacts.encryptedMetadata.ciphertext.length} B`,
         sourceConfidence: "L2 - Company Upload",
-      });
+      },
+    };
+  };
+
+  const registerEvidenceBatchDrafts = async (
+    drafts: RegisterEvidenceDraft[],
+    auditPackIdOverride: string,
+  ): Promise<RegisteredEvidenceArtifacts[]> => {
+    const draftsById = new Map(drafts.map((draft) => [draft.localDocumentId ?? draft.file.name, draft]));
+    const encryptionKey = await generateEncryptionKey();
+    const registerEvidenceBatch = createBatchRegisterEvidenceFlow({
+      packageId: PACKAGE_ID,
+      signerAddress,
+      signTransaction,
+      encryptionKey,
+      tatum: serverTatumExecute,
+      walrusNetwork: "testnet",
+      walrusPublisherUrl: process.env.NEXT_PUBLIC_WALRUS_PUBLISHER_URL,
+      walrusAggregatorUrl: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL,
+    });
+
+    const result = await registerEvidenceBatch({
+      auditPackId: auditPackIdOverride,
+      signerAddress,
+      items: drafts.map((draft) => {
+        const sourceLabel = toSourceLabel(draft.source);
+        return {
+          clientId: draft.localDocumentId ?? draft.file.name,
+          content: draft.file,
+          metadata: {
+            fileName: draft.file.name,
+            mediaType: draft.file.type || "application/octet-stream",
+            documentType: draft.documentType,
+            description: draft.description || undefined,
+            claimedSource: sourceLabel,
+          },
+          assertions: draft.assertions.map(toAssertionId),
+          signerAddress,
+        };
+      }),
+    });
+
+    return result.items.map((item) => {
+      const draft = draftsById.get(item.clientId ?? "");
+      if (!draft) {
+        throw new Error("Batch registration result did not match a selected local document.");
+      }
+
+      const sourceLabel = toSourceLabel(draft.source);
+      const commitment = item.evidence.commitment;
+      const blobId = item.evidence.blobId ?? item.evidence.proof?.walrusBlobId ?? "n/a";
+      const objectId = item.evidence.id;
+      const txDigest = item.transactionDigest ?? result.transactionDigest ?? item.evidence.proof?.transactionDigest ?? "n/a";
+      const registeredAt = item.evidence.registeredAt ?? new Date().toISOString();
+      const registeredAtLabel = registeredAt.replace("T", " ").substring(0, 16);
+
+      return {
+        localDocumentId: draft.localDocumentId,
+        record: {
+          id: objectId,
+          date: registeredAtLabel,
+          type: draft.documentType,
+          source: sourceLabel,
+          commitment,
+          status: "Registered",
+          blobId,
+          assertions: draft.assertions,
+          reviewer: "n/a",
+          notes: draft.description || "No description provided.",
+          fileName: draft.file.name,
+          fileSize: formatMegabytes(draft.file.size),
+          sourceFile: draft.file,
+          auditPackId: auditPackIdOverride,
+        },
+        result: {
+          objectId,
+          txDigest,
+          blobId,
+          commitment,
+          encryptedFileSize: `${item.artifacts.encryptedFile.ciphertext.length} B`,
+          encryptedMetadataSize: `${item.artifacts.encryptedMetadata.ciphertext.length} B`,
+          sourceConfidence: "L2 - Company Upload",
+        },
+      };
+    });
+  };
+
+  const handleRegister = async (override?: RegisterDraftOverride) => {
+    if (isRegistering) return;
+
+    const draft: RegisterEvidenceDraft = {
+      file: override?.file ?? regFile as File,
+      documentType: override?.documentType ?? regDocType,
+      source: override?.source ?? regSource,
+      description: override?.description ?? regDesc,
+      assertions: override?.assertions ?? regAssertions,
+      localDocumentId: override?.localDocumentId ?? activeLocalDocumentId,
+    };
+
+    if (role !== "company") {
+      setRegisterError("Switch to the Company role before registering uploaded evidence.");
+      return;
+    }
+    if (!signerAddress) {
+      setRegisterError("Connect a Sui wallet before registering evidence.");
+      return;
+    }
+    if (!draft.file) {
+      setRegisterError("Select a document before preparing the registration flow.");
+      return;
+    }
+    if (draft.assertions.length === 0) {
+      setRegisterError("Select at least one ISA assertion for this evidence item.");
+      return;
+    }
+
+    setIsRegistering(true);
+    setRegisterError(null);
+    setRegisterResult(null);
+    let activeAuditPackId = auditPack.id;
+    if (draft.localDocumentId) {
+      setLocalDocuments((prev) =>
+        prev.map((item) => item.id === draft.localDocumentId ? { ...item, status: "registering" } : item),
+      );
+    }
+
+    const steps: ProgressStep[] = [
+      {
+        label: activeAuditPackId ? "Reuse AuditPack" : "Create AuditPack",
+        status: "pending",
+        detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Needed for evidence link",
+      },
+      { label: "Computing SHA-256 hash", status: "pending" },
+      { label: "Encrypting file and metadata", status: "pending" },
+      { label: "Uploading encrypted blob to Walrus", status: "pending" },
+      { label: "Signing and submitting Sui registration", status: "pending" },
+    ];
+
+    try {
+      if (!activeAuditPackId) {
+        steps[0].status = "running";
+        setOperationProgress({ type: "register", steps: [...steps] });
+        const createdPack = await createAuditPackDraft();
+        activeAuditPackId = createdPack.id;
+        applyCreatedAuditPack(createdPack);
+        steps[0] = {
+          ...steps[0],
+          status: "done",
+          detail: truncateValue(createdPack.id, 18),
+        };
+      } else {
+        steps[0].status = "done";
+      }
+
+      steps[1].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      steps[1] = { ...steps[1], status: "done", detail: "Prepared locally" };
+      steps[2].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      steps[2] = { ...steps[2], status: "done", detail: "AES-GCM ready" };
+
+      steps[3].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      const { record, result } = await registerEvidenceDraft(draft, activeAuditPackId);
+
+      steps[3] = { ...steps[3], status: "done", detail: truncateValue(result.blobId, 22) };
+      steps[4].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      steps[4] = { ...steps[4], status: "done", detail: result.txDigest };
+      setOperationProgress({ type: "register", steps: [...steps] });
+
+      setRegistry((prev) => [record, ...prev]);
+      setVerifyRecordId(record.id);
+      setAttestRecordId(record.id);
+      setActiveItemId(`record:${record.id}`);
+
+      if (draft.localDocumentId) {
+        setLocalDocuments((prev) =>
+          prev.map((item) =>
+            item.id === draft.localDocumentId
+              ? { ...item, status: "registered", evidenceId: record.id, warning: undefined }
+              : item,
+          ),
+        );
+        setSelectedLocalDocumentIds((prev) => prev.filter((id) => id !== draft.localDocumentId));
+      }
+
+      setRegisterResult(result);
       setProofSnapshot({
-        auditPackId: auditPack.id,
-        evidenceId: objectId,
-        txDigest,
+        auditPackId: activeAuditPackId,
+        evidenceId: record.id,
+        txDigest: result.txDigest,
         packageId: PACKAGE_ID,
-        commitment,
-        blobReference: blobId,
-        updatedAt: registeredAtLabel,
+        commitment: result.commitment,
+        blobReference: result.blobId,
+        updatedAt: record.date,
       });
       setBottomTab("chain");
     } catch (error) {
       const message = getErrorMessage(error, "Registration failed while calling live infrastructure.");
       setRegisterError(message);
       setOperationProgress(null);
-      if (localDocumentId) {
+      if (draft.localDocumentId) {
         setLocalDocuments((prev) =>
           prev.map((item) =>
-            item.id === localDocumentId ? { ...item, status: "flagged", warning: message } : item,
+            item.id === draft.localDocumentId ? { ...item, status: "flagged", warning: message } : item,
           ),
         );
       }
     } finally {
       setIsRegistering(false);
+    }
+  };
+
+  const handleBatchRegister = async () => {
+    if (isBatchRegistering || isRegistering) return;
+    if (role !== "company") {
+      setRegisterError("Switch to the Company role before registering selected evidence.");
+      return;
+    }
+    if (!signerAddress) {
+      setRegisterError("Connect a Sui wallet before registering evidence.");
+      return;
+    }
+    if (selectedBatchDocuments.length === 0) {
+      setRegisterError("Select at least one local file that has not been registered.");
+      return;
+    }
+    if (incompleteSelectedBatchDocuments.length > 0) {
+      setRegisterError(
+        `Complete type, source, description, and assertions for: ${incompleteSelectedBatchDocuments
+          .map((document) => document.fileName)
+          .join(", ")}`,
+      );
+      return;
+    }
+
+    const totalDocuments = selectedBatchDocuments.length;
+    let activeAuditPackId = auditPack.id;
+
+    setIsBatchRegistering(true);
+    setRegisterError(null);
+    setBatchSummary({
+      total: totalDocuments,
+      completed: 0,
+      failed: 0,
+    });
+    setLocalDocuments((prev) =>
+      prev.map((document) =>
+        selectedLocalDocumentIds.includes(document.id) && document.status !== "registered"
+          ? { ...document, status: "queued", warning: undefined }
+          : document,
+      ),
+    );
+
+    const steps: ProgressStep[] = [
+      {
+        label: activeAuditPackId ? "Reuse AuditPack" : "Create AuditPack",
+        status: "pending",
+        detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Needed for batch link",
+      },
+      { label: "Validate selected evidence drafts", status: "pending", detail: `${totalDocuments} ready` },
+      { label: "Encrypt and upload selected files", status: "pending" },
+      { label: "Sign one Sui batch registration", status: "pending" },
+      {
+        label: "Link each record to AuditPack",
+        status: "pending",
+        detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Pending",
+      },
+    ];
+
+    try {
+      if (!activeAuditPackId) {
+        steps[0].status = "running";
+        setOperationProgress({ type: "batch", steps: [...steps] });
+        const createdPack = await createAuditPackDraft();
+        activeAuditPackId = createdPack.id;
+        applyCreatedAuditPack(createdPack);
+        steps[0] = {
+          ...steps[0],
+          status: "done",
+          detail: truncateValue(createdPack.id, 18),
+        };
+      } else {
+        steps[0].status = "done";
+      }
+    } catch (error) {
+      setRegisterError(getErrorMessage(error, "AuditPack creation failed before batch registration."));
+      setOperationProgress(null);
+      setIsBatchRegistering(false);
+      return;
+    }
+
+    steps[1].status = "done";
+    steps[4].detail = truncateValue(activeAuditPackId, 18);
+    setOperationProgress({ type: "batch", steps: [...steps] });
+
+    try {
+      const drafts = selectedBatchDocuments.map((document) => ({
+        file: document.file,
+        documentType: document.documentType,
+        source: document.source,
+        description: document.description,
+        assertions: document.assertions,
+        localDocumentId: document.id,
+      }));
+      setBatchSummary({
+        total: totalDocuments,
+        completed: 0,
+        failed: 0,
+        currentFile: `${totalDocuments} selected file(s)`,
+      });
+      setLocalDocuments((prev) =>
+        prev.map((item) =>
+          selectedLocalDocumentIds.includes(item.id) ? { ...item, status: "registering", warning: undefined } : item,
+        ),
+      );
+
+      steps[2].status = "running";
+      setOperationProgress({ type: "batch", steps: [...steps] });
+      const registeredArtifacts = await registerEvidenceBatchDrafts(drafts, activeAuditPackId);
+      steps[2] = {
+        ...steps[2],
+        status: "done",
+        detail: `${registeredArtifacts.length} blob(s) uploaded`,
+      };
+      steps[3].status = "done";
+      steps[3].detail = truncateValue(registeredArtifacts[0]?.result.txDigest ?? "tx pending", 22);
+      steps[4].status = "done";
+      steps[4].detail = `${registeredArtifacts.length} linked`;
+      setOperationProgress({ type: "batch", steps: [...steps] });
+
+      const createdRecords = registeredArtifacts.map((artifact) => artifact.record);
+      const latestResult = registeredArtifacts[0]?.result ?? null;
+      setRegistry((prev) => [...createdRecords, ...prev]);
+      setLocalDocuments((prev) =>
+        prev.map((item) => {
+          const artifact = registeredArtifacts.find((registered) => registered.localDocumentId === item.id);
+          return artifact
+            ? { ...item, status: "registered", evidenceId: artifact.record.id, warning: undefined }
+            : item;
+        }),
+      );
+      setSelectedLocalDocumentIds((prev) =>
+        prev.filter((id) => !selectedBatchDocuments.some((document) => document.id === id)),
+      );
+      setBatchSummary({
+        total: totalDocuments,
+        completed: registeredArtifacts.length,
+        failed: 0,
+      });
+
+      if (latestResult && createdRecords[0]) {
+        setRegisterResult(latestResult);
+        setVerifyRecordId(createdRecords[0].id);
+        setAttestRecordId(createdRecords[0].id);
+        setActiveItemId(`record:${createdRecords[0].id}`);
+        setProofSnapshot({
+          auditPackId: activeAuditPackId,
+          evidenceId: createdRecords[0].id,
+          txDigest: latestResult.txDigest,
+          packageId: PACKAGE_ID,
+          commitment: latestResult.commitment,
+          blobReference: latestResult.blobId,
+          updatedAt: createdRecords[0].date,
+        });
+        setBottomTab("chain");
+      }
+    } catch (error) {
+      const message = getErrorMessage(error, "Batch registration failed while calling live infrastructure.");
+      steps[2].status = steps[2].status === "done" ? "done" : "error";
+      steps[3].status = "error";
+      steps[4].status = "error";
+      setOperationProgress({ type: "batch", steps: [...steps] });
+      setRegisterError(message);
+      setBatchSummary({
+        total: totalDocuments,
+        completed: 0,
+        failed: totalDocuments,
+        lastError: message,
+      });
+      setLocalDocuments((prev) =>
+        prev.map((item) =>
+          selectedLocalDocumentIds.includes(item.id) ? { ...item, status: "flagged", warning: message } : item,
+        ),
+      );
+    } finally {
+      setIsBatchRegistering(false);
     }
   };
 
@@ -961,7 +1335,7 @@ export default function WorkspacePage() {
       const documents: Array<Record<string, unknown>> = [];
       const warnings: string[] = [];
       const sourceDocuments = [
-        ...localDocuments.map((document) => ({
+        ...visibleLocalDocuments.map((document) => ({
           id: document.id,
           file: document.file,
           fileName: document.fileName,
@@ -1148,7 +1522,7 @@ export default function WorkspacePage() {
     const className =
       status === "local"
         ? "status-local"
-        : status === "registering"
+        : status === "queued" || status === "registering"
           ? "status-pending"
           : status === "registered" || status === "registered-record"
             ? "status-registered"
@@ -1197,46 +1571,116 @@ export default function WorkspacePage() {
           <button className="btn-secondary" type="button" onClick={() => addDocumentInputRef.current?.click()}>
             Add document
           </button>
+          <div className={`ide-auditpack-status${auditPack.id ? " ready" : ""}`} title={auditPack.id ?? "No AuditPack created"}>
+            {auditPack.id ? `AuditPack ready: ${truncateValue(auditPack.id, 18)}` : "No AuditPack created"}
+          </div>
           <button
             className="btn-primary"
             type="button"
-            disabled={auditPack.status === "creating" || !signerAddress || Boolean(auditPack.id)}
-            onClick={handleCreateAuditPack}
+            disabled={
+              role !== "company" ||
+              isBatchRegistering ||
+              isRegistering ||
+              !signerAddress ||
+              selectedBatchDocuments.length === 0
+            }
+            onClick={handleBatchRegister}
           >
-            {auditPack.status === "creating" ? "Creating..." : auditPack.id ? "AuditPack created" : "Create AuditPack"}
+            {isBatchRegistering ? "Registering batch..." : `Register selected (${selectedBatchDocuments.length})`}
           </button>
         </div>
       </div>
 
-      {renderSteps("pack")}
+      <div className="ide-evidence-section">
+        <div className="ide-batch-toolbar">
+        <div>
+          <strong>{selectedBatchDocuments.length}</strong>
+          <span> local file(s) selected for this AuditPack</span>
+          {selectedBatchDocuments.length > 0 && (
+            <span> - {selectedBatchReady ? "all ready" : `${selectedBatchDocuments.length - incompleteSelectedBatchDocuments.length}/${selectedBatchDocuments.length} ready`}</span>
+          )}
+        </div>
+        <div className="ide-batch-actions">
+          <button className="btn-secondary" type="button" disabled={selectableLocalDocuments.length === 0 || isBatchRegistering} onClick={selectAllBatchDocuments}>
+            Select all local
+          </button>
+          <button className="btn-secondary" type="button" disabled={selectedLocalDocumentIds.length === 0 || isBatchRegistering} onClick={clearBatchSelection}>
+            Clear selection
+          </button>
+        </div>
+      </div>
 
-      {auditPack.status === "error" && (
+      {registerError && (
         <div className="result-card error">
-          <div className="result-title error">AuditPack blocked</div>
-          <p className="result-message">{auditPack.error}</p>
+          <div className="result-title error">Registration blocked</div>
+          <p className="result-message">{registerError}</p>
         </div>
       )}
 
+      {incompleteSelectedBatchDocuments.length > 0 && (
+        <p className="ide-section-note warning">
+          Complete type, source, description, and assertions for: {incompleteSelectedBatchDocuments.map((document) => document.fileName).join(", ")}.
+        </p>
+      )}
+
+      {!auditPack.id && selectableLocalDocuments.length > 0 && (
+        <p className="ide-section-note warning">
+          Batch registration will create an AuditPack first, then register each selected evidence record against that active `auditPackId`.
+        </p>
+      )}
+
+      {batchSummary && (
+        <div className={`ide-batch-summary ${batchSummary.failed > 0 ? "error" : "success"}`}>
+          <div className="ide-batch-summary-title">Batch registration {isBatchRegistering ? "running" : "finished"}</div>
+          <p>
+            {batchSummary.completed}/{batchSummary.total} registered
+            {batchSummary.failed > 0 ? `, ${batchSummary.failed} failed` : ""}
+            {batchSummary.currentFile ? ` - current: ${batchSummary.currentFile}` : ""}
+          </p>
+          {batchSummary.lastError && <p>{batchSummary.lastError}</p>}
+        </div>
+      )}
+
+      {renderSteps("batch")}
+
       <div className="ide-folder-grid">
-        {[...localDocuments, ...registry].length === 0 ? (
+        {[...visibleLocalDocuments, ...registry].length === 0 ? (
           <div className="ide-empty">
             <div className="empty-state-title">No documents in local memory yet</div>
             <p>Add a document from the explorer sidebar. The web workspace keeps the source file in browser memory for this session.</p>
           </div>
         ) : (
           <>
-            {localDocuments.map((document) => (
-              <button
+            {visibleLocalDocuments.map((document) => (
+              <div
                 key={document.id}
                 className="ide-file-row"
-                type="button"
                 onClick={() => prepareLocalDocument(document)}
               >
-                {renderStatusDot(document.status)}
+                <input
+                  type="checkbox"
+                  className="ide-file-checkbox"
+                  checked={selectedLocalDocumentIds.includes(document.id)}
+                  disabled={document.status === "registered" || isBatchRegistering}
+                  aria-label={`Select ${document.fileName} for batch registration`}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={() => toggleBatchSelection(document.id)}
+                />
                 <span className="ide-file-name">{document.fileName}</span>
                 <span className="ide-file-meta">{document.fileSize}</span>
-                <span className="ide-file-state">{document.status === "registered" ? "Registered" : "Local session"}</span>
-              </button>
+                <span className="ide-file-state">
+                  {renderStatusDot(document.status)}
+                  {document.status === "registered"
+                    ? "Registered"
+                    : document.status === "flagged"
+                      ? "Failed"
+                      : document.status === "queued"
+                        ? "Queued"
+                        : selectedLocalDocumentIds.includes(document.id) && !isLocalDocumentReady(document)
+                          ? "Needs details"
+                          : "Local session"}
+                </span>
+              </div>
             ))}
             {registry.map((record) => (
               <button
@@ -1259,8 +1703,9 @@ export default function WorkspacePage() {
         )}
       </div>
 
-      <div className="ide-honesty-note">
-        Batch registration is prepared at the explorer/state level, but the current UI only submits one selected file at a time. A reliable batch loop should be the next task.
+        <p className="ide-section-note">
+          Batch registration runs sequentially through the same hash, encrypt, Walrus upload, wallet signature, and Sui submission path as single-file registration. Partial failures stay visible as red local files.
+        </p>
       </div>
     </div>
   );
@@ -1279,11 +1724,29 @@ export default function WorkspacePage() {
       </div>
 
       <div className="card">
-        <div className="card-section-title">Registration Draft</div>
+        <div className="draft-section-header">
+          <div className="card-section-title">Registration Draft</div>
+          <button
+            className="draft-save-button"
+            type="button"
+            onClick={() => handleSaveDraft(document.id)}
+          >
+            Save draft
+          </button>
+        </div>
+        {draftSaveMessage && <p className="draft-save-message">{draftSaveMessage}</p>}
         <div className="form-grid">
           <div className="field">
             <label className="field-label">Document Type</label>
-            <select className="field-select" value={regDocType} onChange={(event) => setRegDocType(event.target.value)}>
+            <select
+              className="field-select"
+              value={regDocType}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRegDocType(value);
+                updateLocalDocumentDraft(document.id, { documentType: value });
+              }}
+            >
               <option>Audit Evidence</option>
               <option>Bank Statement</option>
               <option>Vendor Contract</option>
@@ -1294,7 +1757,15 @@ export default function WorkspacePage() {
           </div>
           <div className="field">
             <label className="field-label">Claimed Source</label>
-            <input className="field-input" value={regSource} onChange={(event) => setRegSource(event.target.value)} />
+            <input
+              className="field-input"
+              value={regSource}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRegSource(value);
+                updateLocalDocumentDraft(document.id, { source: value });
+              }}
+            />
           </div>
           <div className="field form-full">
             <label className="field-label">Description / Audit Objective</label>
@@ -1302,7 +1773,11 @@ export default function WorkspacePage() {
               className="field-textarea"
               rows={3}
               value={regDesc}
-              onChange={(event) => setRegDesc(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRegDesc(value);
+                updateLocalDocumentDraft(document.id, { description: value });
+              }}
               placeholder="Describe the audit purpose or scope limitation."
             />
           </div>
@@ -1326,7 +1801,7 @@ export default function WorkspacePage() {
         <div className="btn-actions">
           <button
             className="btn-primary"
-            disabled={role === "verifier" || isRegistering || !signerAddress || regAssertions.length === 0}
+            disabled={role !== "company" || isRegistering || !signerAddress || regAssertions.length === 0}
             onClick={() =>
               handleRegister({
                 file: document.file,
@@ -1561,6 +2036,24 @@ export default function WorkspacePage() {
           <p>Create an AuditPack, register evidence, verify a hash, or run agent memory to populate this dashboard.</p>
         </div>
       )}
+      <div className="card">
+        <div className="card-section-title">AuditPack Evidence Links</div>
+        {registry.length > 0 ? (
+          <div className="ide-proof-list">
+            {registry.map((record) => (
+              <div key={record.id} className="ide-proof-item">
+                <div>
+                  <strong>{record.fileName ?? record.type}</strong>
+                  <span>{record.auditPackId ? `Linked to ${truncateValue(record.auditPackId, 18)}` : "No AuditPack link"}</span>
+                </div>
+                <code>{truncateValue(record.id, 22)}</code>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="ide-muted">No registered evidence records yet.</p>
+        )}
+      </div>
     </div>
   );
 
@@ -1690,6 +2183,7 @@ export default function WorkspacePage() {
       selected: activeItemId,
       proofSnapshot,
       registerResult,
+      batchSummary,
       verificationResult,
       attestResult,
       agentRun: agentRun.raw ?? {
@@ -1719,6 +2213,7 @@ export default function WorkspacePage() {
               <span>Selected: {selectedLocalDocument?.fileName ?? selectedRecord?.fileName ?? activeItemId}</span>
               <span>Role: {role}</span>
               <span>Local docs: {localDocuments.length}</span>
+              <span>Selected for batch: {selectedBatchDocuments.length}</span>
               <span>Registered: {registry.length}</span>
             </div>
           )}
@@ -1726,6 +2221,7 @@ export default function WorkspacePage() {
             <div className="ide-status-line">
               <span>Package {truncateValue(PACKAGE_ID, 28)}</span>
               <span>Pack {auditPack.id ? truncateValue(auditPack.id, 20) : "not created"}</span>
+              <span>Pack evidence links: {registry.filter((record) => record.auditPackId === auditPack.id).length}</span>
               <span>Tx {proofSnapshot?.txDigest ? truncateValue(proofSnapshot.txDigest, 24) : "pending"}</span>
               <span>Attestation {proofSnapshot?.attestationId ? truncateValue(proofSnapshot.attestationId, 18) : "pending"}</span>
             </div>
@@ -1908,11 +2404,11 @@ export default function WorkspacePage() {
                 <div className="sidebar-folder-group">
                   <button className={`tree-item folder${activeItemId === "folder:evidence" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:evidence")}>
                     <span>Evidence</span>
-                    <small>{localDocuments.length + registry.length}</small>
+                    <small>{visibleLocalDocuments.length + registry.length}</small>
                   </button>
-                  {localDocuments.length + registry.length > 0 && (
+                  {visibleLocalDocuments.length + registry.length > 0 && (
                     <div className="tree-group">
-                      {localDocuments.map((document) => (
+                      {visibleLocalDocuments.map((document) => (
                         <button
                           key={document.id}
                           className={`tree-item${activeItemId === `local:${document.id}` ? " active" : ""}`}

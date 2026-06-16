@@ -691,3 +691,27 @@ Appended matching entry will also be added to DEVLOG-APP if relevant, but this i
   - The agent route still catches MemWal failures to protect the demo path, so failed persistence is non-blocking.
 - Follow-up needed:
   - Use a real MemWal account and delegate key in deployment env, then run a live store/recall smoke test.
+
+## 2026-06-16 -- Add One-Transaction Batch Evidence Registration
+
+### Change
+- Files touched:
+  - `sdk/src/register.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added batch register input/result types and public SDK exports.
+  - Added `createBatchRegisterEvidenceFlow` and `createBatchRegisterEvidenceHandler`.
+  - Added `createSuiBatchRegisterOnChainHandler`, which builds one Sui transaction containing multiple `evidence::register_evidence` calls and transfers all created records to the signer.
+  - Added multi-record evidence id extraction from Sui object changes/events.
+
+### Reasoning
+- Why this approach was chosen:
+  - Batch evidence registration should require one human wallet signature for the batch, while still hashing, encrypting, and uploading each evidence file independently.
+  - Keeping the flow in the SDK prevents the app from owning raw Sui transaction construction logic.
+
+### Tech Debt
+- Known shortcuts:
+  - Walrus uploads still run before the Sui signature, so a later transaction failure can leave encrypted uploaded blobs without corresponding EvidenceRecord objects.
+- Follow-up needed:
+  - Add SDK tests or a smoke script for multi-item batch extraction once a test fixture for Sui execution output is available.

@@ -7,10 +7,13 @@ export {
   createSuiAttestationHandler,
 } from "./attest.js";
 export {
+  createBatchRegisterEvidenceFlow,
+  createBatchRegisterEvidenceHandler,
   createRegisterEvidenceClient,
   createRegisterEvidenceFlow,
   createRegisterEvidenceFlowFromEnv,
   createRegisterEvidenceHandler,
+  createSuiBatchRegisterOnChainHandler,
   createSuiRegisterOnChainHandler,
   serializeEncryptedPayload,
 } from "./register.js";
@@ -76,6 +79,12 @@ export type {
 } from "./attest.js";
 export type { LinowClient, LinowClientHandlers } from "./client.js";
 export type {
+  BatchRegisterEvidenceChainInput,
+  BatchRegisterEvidenceChainResult,
+  BatchRegisterEvidenceInput,
+  BatchRegisterEvidenceItemInput,
+  BatchRegisterEvidenceItemResult,
+  BatchRegisterEvidenceWithArtifactsResult,
   CreateRegisterEvidenceFlowConfig,
   CreateRegisterEvidenceFlowFromEnvConfig,
   CreateRegisterEvidenceHandlerConfig,
