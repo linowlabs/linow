@@ -704,6 +704,248 @@
   - Re-run the orchestration smoke path to verify `gap_analysis` now clears provider validation.
   - If provider omissions remain frequent, consider further shrinking the gap prompt cards while preserving the same evidence coverage.
 
+## 2026-06-15 — Simplify Gap Analysis Provider Schema
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Reduced the Groq-facing `gap_analysis` schema so the model now only has to return:
+    - `covered_labels`
+    - `missing_labels`
+    - `readiness_score`
+    - `recommendations`
+    - `gaps` with label-based assertion links
+  - Moved deterministic fields such as `pack_id`, `total_assertions`, `evidence_count`, `finding_count`, and assertion-ID reconstruction fully into Linow normalization logic.
+  - Trimmed retrieved excerpt formatting in the gap-analysis prompt to lower structured-output burden without removing evidence content.
+
+### Reasoning
+- Why this approach was chosen:
+  - Groq was still failing `gap_analysis` JSON validation even after a more tolerant schema, which suggested the output shape itself was still too heavy for reliable strict generation.
+  - The model is better suited to reasoning in labels and narrative gaps than to reconstructing every deterministic numeric and ID field. Those deterministic fields are safer to rebuild locally.
+
+### Tech Debt
+- Known shortcuts:
+  - When the model omits related assertion labels, Linow now infers assertion IDs from nearby text heuristically.
+- Follow-up needed:
+  - Re-run orchestration to confirm the simplified schema eliminates `gap_analysis` provider-validation failures.
+  - If needed later, apply the same “provider-draft + local normalization” pattern to any remaining brittle structured-output steps.
+
+## 2026-06-15 — Move Gap Analysis Off Strict Provider Schema
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/groq.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a `responseMode` option to the Groq completion helper so specific tools can request `json_object` instead of strict `json_schema`.
+  - Added tolerant JSON parsing in the Groq helper to recover JSON from plain responses, fenced JSON blocks, or surrounding prose.
+  - Switched `gap_analysis` to use `json_object` mode while keeping Linow-side validation and normalization unchanged.
+
+### Reasoning
+- Why this approach was chosen:
+  - The remaining blocker was Groq provider-side validation itself, not Linow's internal schema or reasoning logic.
+  - `gap_analysis` had become a good candidate for provider-tolerant JSON mode because we already normalize its result heavily on the app side.
+  - This keeps strict canonical validation in Linow while avoiding repeated provider-side `json_validate_failed` failures.
+
+### Tech Debt
+- Known shortcuts:
+  - `json_object` mode is less structurally enforced by the provider than strict schema mode, so Linow validation becomes the primary guardrail.
+- Follow-up needed:
+  - Re-run orchestration to confirm `gap_analysis` now clears provider generation.
+  - If successful, consider whether other brittle pack-level steps should also use `json_object` mode selectively rather than globally.
+
+## 2026-06-16 — Make Gap Analysis Draft Parsing Fully Tolerant
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Replaced the remaining shape-based `gap_analysis` draft validator with a broad envelope check that only requires the model to return a JSON object.
+  - Added coercion helpers that sanitize optional strings, arrays, integers, and gap items before normalization.
+  - Moved `gap_analysis` draft handling to a clearer three-stage flow:
+    1. provider returns a loose JSON object
+    2. Linow coerces it into a draft shape
+    3. Linow normalizes it into canonical `GapAnalysisOutput`
+
+### Reasoning
+- Why this approach was chosen:
+  - The recurring failure mode was no longer provider schema mode alone, but the repeated assumption that the model would preserve an exact draft shape across runs.
+  - In practice, the model often returns near-correct JSON with omitted or malformed optional fields. Rejecting the whole result at the draft-validation layer caused repeated orchestration failures.
+  - By making draft parsing tolerant and keeping strictness only at the final canonical output layer, the system becomes much more resilient without weakening downstream audit contracts.
+
+### Tech Debt
+- Known shortcuts:
+  - Gap draft coercion still relies on label text for some assertion-ID reconstruction when the model omits structured links.
+- Follow-up needed:
+  - Re-run orchestration to confirm the recurrent `gap_analysis` draft-shape failure is eliminated.
+  - If this pattern proves stable, consider applying the same coercion-first contract to other fragile provider-facing steps.
+  - Guard against empty or weak `gap_analysis` drafts being normalized into false full-coverage results when no covered labels or mappable gap assertions are returned.
+  - Align `readiness_score` fallback math with the final inferred covered/missing assertion sets so normalized outputs remain internally consistent.
+  - Canonicalize provider-supplied assertion labels before hashing/output so label arrays always stay in sync with canonical assertion IDs.
+
+## 2026-06-16 — Harden Gap Analysis Canonical Fallbacks
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Reworked `gap_analysis` normalization so final covered/missing assertions are resolved through one conservative helper instead of several loosely-coupled fallbacks.
+  - Stopped deriving "covered" assertions from empty gap output alone, which could previously make malformed drafts look fully covered.
+  - Added deterministic fallback coverage from existing per-document `assertion_mapping` artifacts when provider labels are absent.
+  - Canonicalized final `covered_labels`, `missing_labels`, and gap `related_assertion_labels` from canonical assertion IDs instead of trusting provider label strings.
+  - Aligned `readiness_score` fallback math with the final resolved covered/missing assertion sets.
+
+### Reasoning
+- Why this approach was chosen:
+  - The tolerant provider boundary is still the right design, but the app-side normalization needed stronger guardrails so malformed draft output could not silently become overconfident audit output.
+  - Reusing document assertion-mapping artifacts is more conservative and more trustworthy than inferring full coverage from the absence of gaps.
+  - Canonical labels should be generated from canonical IDs so downstream hashing, UI display, and proof surfaces remain internally consistent.
+
+### Tech Debt
+- Known shortcuts:
+  - Fallback coverage currently trusts existing `assertion_mapping` artifacts only; if those are absent, the result stays conservative rather than trying to recover more aggressively from classification output.
+- Follow-up needed:
+  - Re-run orchestration and confirm weak `gap_analysis` drafts now degrade safely instead of implying full coverage.
+  - Fix the unrelated workspace TypeScript errors (`createBatchRegisterEvidenceFlow` export mismatch and an implicit `any` in `app/src/app/workspace/page.tsx`) before treating full repo `tsc --noEmit` as green again.
+
+## 2026-06-16 — Synthesize Conservative Gap Items From Missing Assertions
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a conservative fallback that synthesizes minimal `gap_analysis.gaps` entries when the provider returns no concrete gaps but canonical normalization still resolves missing assertions.
+  - The fallback now builds one gap per missing assertion using existing document artifacts, especially `assertion_mapping` items marked `not_supported`, plus matching limitations/caveats/notes from other document outputs.
+  - Added assertion-specific suggested-evidence hints for common audit assertions such as Rights & Obligations, Classification, Cut-off, Accuracy, and Completeness.
+
+### Reasoning
+- Why this approach was chosen:
+  - The smoke orchestrator proved that document-level tools (`classify`, `extract`, `map_assert`) could succeed while `gap_analysis` still returned an empty gap list, which left the pack summary contradictory: missing assertions existed but no gaps or findings could be drafted.
+  - The orchestrator depends on `gap_analysis.gaps` to drive downstream finding drafting, so a conservative app-side fallback is safer than letting missing assertions disappear from the actionable flow.
+  - Reusing existing document artifacts keeps the fallback deterministic and avoids adding new provider-schema burden.
+
+### Tech Debt
+- Known shortcuts:
+  - Fallback gap narratives are intentionally generic and conservative; they are not a replacement for richer provider-authored gap rationales when those are available.
+- Follow-up needed:
+  - Re-run orchestration and confirm packs with missing assertions now also emit minimal actionable gaps and can reach `draft_finding`.
+
+## 2026-06-16 — Make Draft Finding Provider Parsing Tolerant
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/draft-finding.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/app/api/agent/draft-finding/route.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Switched `ccer_finding` generation to provider-tolerant `json_object` mode in both the standalone route and orchestration flow.
+  - Replaced the remaining strict provider-shape assumption with a coercion-first normalization path for draft findings.
+  - Added a conservative fallback finding draft so malformed or partial provider output still normalizes into a stable internal `CcerFindingOutput`.
+  - Compressed retrieved finding excerpts in the prompt by removing extra contextual wrapper lines that were inflating the response-validation burden.
+
+### Reasoning
+- Why this approach was chosen:
+  - After gap fallback synthesis began producing actionable gaps again, the next brittle step shifted to `draft_finding`, where Groq was failing to complete a strict valid JSON document before hitting completion limits.
+  - The same pattern that stabilized gap analysis applies here too: let the provider return a looser JSON object, then keep Linow strict at the normalization boundary.
+  - Reducing prompt verbosity helps without dropping evidence content or weakening the audit-oriented output contract.
+
+### Tech Debt
+- Known shortcuts:
+  - The fallback finding draft is intentionally conservative and may produce minimal citations when the provider omits them.
+- Follow-up needed:
+  - Re-run orchestration and confirm a pack with synthesized gaps can now reach at least one normalized draft finding without provider-side JSON failure.
+
+## 2026-06-16 — Add Compact Orchestrate Response For Point-2 Verification
+
+### Change
+- Files touched:
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added optional `response_mode: "compact_p2"` to the orchestrate API route.
+  - Added CLI smoke mode `orchestrate-p2` that exercises the same synthetic orchestration payload as `orchestrate` but requests the compact response.
+  - The compact response preserves the key fields needed to verify point 2:
+    - `gap_analysis`
+    - `findings`
+    - `audit_pack_summary`
+    - `flow`
+    - `usage`
+    - compact persistence proof status
+
+### Reasoning
+- Why this approach was chosen:
+  - The full orchestrate response can succeed server-side but still fail client-side transport because the payload is large and the run is slow.
+  - We need a deterministic way to verify gap/finding correctness without guessing from partial logs or shrinking the production response for everyone.
+  - Keeping the compact mode opt-in preserves the full product/debug payload while giving us a reliable test harness for point-2 validation.
+
+### Tech Debt
+- Known shortcuts:
+  - Compact mode is currently purpose-built for point-2 verification rather than a generalized response-shaping feature.
+- Follow-up needed:
+  - If this proves useful beyond debugging, consider formalizing response views (`full`, `compact`, `proof`) at the route contract level.
+
+## 2026-06-16 — Strengthen Finding Citations And Evidence Linkage
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/draft-finding.ts`
+  - `app/src/lib/agent/web3-persistence.ts`
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added deterministic fallback finding citations that reuse existing document metadata citations first, then synthesize a minimal document-backed citation only when the provider omits them.
+  - Canonicalized `missing_assertion_labels` in finding outputs directly from final normalized assertion IDs instead of trusting provider text.
+  - Stabilized Walrus manifest evidence-ref ordering and prepared Sui action candidate ordering so proof-oriented outputs are more deterministic across runs.
+  - Fixed the workspace agent panel to read prepared action candidates from `persistence_result.sui.action_candidates`, which is the actual backend response shape.
+
+### Reasoning
+- Why this approach was chosen:
+  - Empty finding citations make the audit output much less convincing even when the finding text itself is reasonable.
+  - Reusing existing metadata citations keeps the fallback honest and traceable to real document artifacts rather than inventing unsupported references.
+  - Deterministic ordering helps proof surfaces and hash-oriented review stay stable when the underlying meaning has not changed.
+  - The UI should surface the proof/action linkage the backend already computes instead of silently dropping it at the parsing boundary.
+
+### Tech Debt
+- Known shortcuts:
+  - Synthetic fallback citations are intentionally minimal and should still be treated as a safety net behind richer provider-generated citations.
+- Follow-up needed:
+  - Re-run full orchestration and confirm draft findings now contain citations consistently.
+  - Re-test the workspace agent panel with registered evidence so linked action candidates and manifest linkage counts are visible end-to-end.
+
+## 2026-06-16 — Clamp Gap Readiness to Canonical Evidence State
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-gaps.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Fixed assertion-label normalization so unknown provider labels no longer leak through as `undefined`/`null` assertion IDs.
+  - Updated readiness scoring to derive the canonical score from final covered/missing assertions and gaps, then clamp any provider-supplied score to that derived ceiling.
+
+### Reasoning
+- Why this approach was chosen:
+  - The prior run still showed `missing_assertions: [null]` and `missing_labels: ["Unknown (undefined)"]`, which meant the tolerant parsing path was still letting malformed provider labels contaminate canonical output.
+  - Provider readiness can contain useful conservatism, but it should not be able to overstate audit readiness relative to Linow's final canonical evidence state.
+  - Clamping the model score to the app-derived score keeps the result conservative and internally consistent without making the provider schema any stricter.
+
+### Tech Debt
+- Known shortcuts:
+  - Gap summaries can still end up with zero explicit gap rows while recommendations remain populated if the provider returns advisory text but no structured gaps.
+- Follow-up needed:
+  - Re-run orchestration and confirm missing assertions now resolve to canonical IDs/labels rather than `null` placeholders.
+  - Decide whether empty `gaps` plus non-empty recommendations should later synthesize a generic unresolved-gap item for better UX consistency.
+
 ## 2026-06-14 — Add Budget-Aware Agent Orchestration Profiles
 
 ### Change
