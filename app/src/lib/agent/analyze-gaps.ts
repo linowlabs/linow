@@ -52,7 +52,6 @@ export interface GapAnalysisToolInput {
 interface GroqGapItemDraft {
   title: string | null;
   severity: string | null;
-  related_assertions: Array<number | string> | null;
   related_assertion_labels: string[] | null;
   rationale: string | null;
   suggested_evidence: string[] | null;
@@ -61,17 +60,11 @@ interface GroqGapItemDraft {
 interface GroqGapAnalysisDraft {
   schema_name: "gap_analysis";
   schema_version: string;
-  pack_id: string;
-  total_assertions: number | null;
-  covered_assertions: Array<number | string> | null;
   covered_labels: string[] | null;
-  missing_assertions: Array<number | string> | null;
   missing_labels: string[] | null;
   readiness_score: number | null;
   recommendations: string[] | null;
   gaps: GroqGapItemDraft[] | null;
-  evidence_count: number | null;
-  finding_count: number | null;
 }
 
 const ASSERTION_IDS = ASSERTION_CATALOG.map((item) => item.id);
@@ -82,19 +75,9 @@ export const groqGapAnalysisSchema = {
   properties: {
     schema_name: { type: "string", const: "gap_analysis" },
     schema_version: { type: "string", const: AGENT_SCHEMA_VERSION },
-    pack_id: { type: "string", minLength: 1 },
-    total_assertions: { type: ["integer", "null"], minimum: 0 },
-    covered_assertions: {
-      type: ["array", "null"],
-      items: { type: ["integer", "string"] },
-    },
     covered_labels: {
       type: ["array", "null"],
       items: { type: "string" },
-    },
-    missing_assertions: {
-      type: ["array", "null"],
-      items: { type: ["integer", "string"] },
     },
     missing_labels: {
       type: ["array", "null"],
@@ -113,10 +96,6 @@ export const groqGapAnalysisSchema = {
         properties: {
           title: { type: ["string", "null"] },
           severity: { type: ["string", "null"] },
-          related_assertions: {
-            type: ["array", "null"],
-            items: { type: ["integer", "string"] },
-          },
           related_assertion_labels: {
             type: ["array", "null"],
             items: { type: "string" },
@@ -130,30 +109,21 @@ export const groqGapAnalysisSchema = {
         required: [
           "title",
           "severity",
-          "related_assertions",
           "related_assertion_labels",
           "rationale",
           "suggested_evidence",
         ],
       },
     },
-    evidence_count: { type: ["integer", "null"], minimum: 0 },
-    finding_count: { type: ["integer", "null"], minimum: 0 },
   },
   required: [
     "schema_name",
     "schema_version",
-    "pack_id",
-    "total_assertions",
-    "covered_assertions",
     "covered_labels",
-    "missing_assertions",
     "missing_labels",
     "readiness_score",
     "recommendations",
     "gaps",
-    "evidence_count",
-    "finding_count",
   ],
 } as const;
 
@@ -282,19 +252,18 @@ export function buildGapAnalysisMessages(input: GapAnalysisToolInput) {
         ...retrievedChunks.map((chunk) =>
           [
             `${chunk.document_name} :: ${chunk.chunk_id} [chars ${chunk.char_start}-${chunk.char_end}]`,
-            `Context: ${chunk.contextual_summary}`,
-            `Matched terms: ${chunk.matched_terms.join(", ") || "none"}`,
-            `Excerpt: ${chunk.text}`,
+            chunk.text,
           ].join("\n"),
         ),
         "Task:",
         "- Aggregate assertion coverage across the pack.",
         "- Identify open gaps, partial support, and unresolved review items.",
         "- Recommend concrete next evidence uploads or review actions.",
-        "- Keep finding_count equal to the number of gap items that would likely become findings.",
         "- Base recommendations on the compact cards and retrieved excerpts only.",
         "- If evidence remains partial, explain the limitation rather than assuming support.",
-        "- Always return every top-level field, using empty arrays when needed.",
+        "- Return covered_labels and missing_labels using canonical assertion labels only.",
+        "- For each gap, return related_assertion_labels using canonical assertion labels only.",
+        "- Always return every field, using empty arrays when needed.",
       ]
         .filter((line): line is string => Boolean(line))
         .join("\n"),
@@ -302,64 +271,45 @@ export function buildGapAnalysisMessages(input: GapAnalysisToolInput) {
   ];
 }
 
-export function isGroqGapAnalysisResult(value: unknown): value is GroqGapAnalysisDraft {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    value.schema_name === "gap_analysis" &&
-    value.schema_version === AGENT_SCHEMA_VERSION &&
-    typeof value.pack_id === "string" &&
-    (value.total_assertions === null || Number.isInteger(value.total_assertions)) &&
-    (value.covered_assertions === null ||
-      (Array.isArray(value.covered_assertions) &&
-        value.covered_assertions.every((item) => Number.isInteger(item) || typeof item === "string"))) &&
-    (value.covered_labels === null ||
-      (Array.isArray(value.covered_labels) && value.covered_labels.every((item) => typeof item === "string"))) &&
-    (value.missing_assertions === null ||
-      (Array.isArray(value.missing_assertions) &&
-        value.missing_assertions.every((item) => Number.isInteger(item) || typeof item === "string"))) &&
-    (value.missing_labels === null ||
-      (Array.isArray(value.missing_labels) && value.missing_labels.every((item) => typeof item === "string"))) &&
-    (value.readiness_score === null || Number.isInteger(value.readiness_score)) &&
-    (value.recommendations === null ||
-      (Array.isArray(value.recommendations) && value.recommendations.every((item) => typeof item === "string"))) &&
-    (value.gaps === null || (Array.isArray(value.gaps) && value.gaps.every(isGroqGapItemDraft))) &&
-    (value.evidence_count === null || Number.isInteger(value.evidence_count)) &&
-    (value.finding_count === null || Number.isInteger(value.finding_count))
-  );
+export function isGroqGapAnalysisEnvelope(value: unknown): value is Record<string, unknown> {
+  return isRecord(value);
 }
 
 export function normalizeGapAnalysisResult(
   input: GapAnalysisToolInput,
-  value: GroqGapAnalysisDraft,
+  value: unknown,
 ): GapAnalysisOutput {
-  const coveredAssertions = normalizeAssertionIds(value.covered_assertions);
-  const coveredLabels = normalizeLabels(value.covered_labels, coveredAssertions);
-  const missingAssertions = normalizeAssertionIds(value.missing_assertions);
-  const effectiveMissingAssertions =
-    missingAssertions.length > 0 ? missingAssertions : deriveMissingAssertions(coveredAssertions);
-  const gaps = normalizeGapItems(value.gaps);
+  const draft = coerceGroqGapAnalysisDraft(value);
+  const normalizedGaps = normalizeGapItems(draft.gaps);
+  const resolvedCoverage = resolvePackAssertionCoverage(input.documents, draft, normalizedGaps);
+  const gaps =
+    normalizedGaps.length > 0
+      ? normalizedGaps
+      : deriveFallbackGaps(input.documents, resolvedCoverage.missing_assertions);
   const recommendations =
-    value.recommendations && value.recommendations.length > 0
-      ? value.recommendations
+    draft.recommendations && draft.recommendations.length > 0
+      ? draft.recommendations
       : deriveRecommendations(gaps);
 
   return {
     schema_name: "gap_analysis",
     schema_version: AGENT_SCHEMA_VERSION,
     pack_id: input.pack_id,
-    total_assertions: isNonNegativeInteger(value.total_assertions) ? value.total_assertions : ASSERTION_IDS.length,
-    covered_assertions: coveredAssertions,
-    covered_labels: coveredLabels,
-    missing_assertions: effectiveMissingAssertions,
-    missing_labels: normalizeLabels(value.missing_labels, effectiveMissingAssertions),
-    readiness_score: normalizeReadinessScore(value.readiness_score, coveredAssertions, effectiveMissingAssertions, gaps),
+    total_assertions: ASSERTION_IDS.length,
+    covered_assertions: resolvedCoverage.covered_assertions,
+    covered_labels: resolvedCoverage.covered_labels,
+    missing_assertions: resolvedCoverage.missing_assertions,
+    missing_labels: resolvedCoverage.missing_labels,
+    readiness_score: normalizeReadinessScore(
+      draft.readiness_score,
+      resolvedCoverage.covered_assertions,
+      resolvedCoverage.missing_assertions,
+      gaps,
+    ),
     recommendations,
     gaps,
-    evidence_count: isNonNegativeInteger(value.evidence_count) ? value.evidence_count : input.documents.length,
-    finding_count: isNonNegativeInteger(value.finding_count) ? value.finding_count : gaps.length,
+    evidence_count: input.documents.length,
+    finding_count: gaps.length,
   };
 }
 
@@ -397,21 +347,20 @@ function parseOptionalNested<T>(
   return value;
 }
 
-function isGroqGapItemDraft(value: unknown): value is GroqGapItemDraft {
-  return (
-    isRecord(value) &&
-    (value.title === null || typeof value.title === "string") &&
-    (value.severity === null || typeof value.severity === "string") &&
-    (value.related_assertions === null ||
-      (Array.isArray(value.related_assertions) &&
-        value.related_assertions.every((item) => Number.isInteger(item) || typeof item === "string"))) &&
-    (value.related_assertion_labels === null ||
-      (Array.isArray(value.related_assertion_labels) &&
-        value.related_assertion_labels.every((item) => typeof item === "string"))) &&
-    (value.rationale === null || typeof value.rationale === "string") &&
-    (value.suggested_evidence === null ||
-      (Array.isArray(value.suggested_evidence) && value.suggested_evidence.every((item) => typeof item === "string")))
-  );
+function coerceGroqGapAnalysisDraft(value: unknown): GroqGapAnalysisDraft {
+  if (!isRecord(value)) {
+    return createEmptyGapAnalysisDraft();
+  }
+
+  return {
+    schema_name: "gap_analysis",
+    schema_version: AGENT_SCHEMA_VERSION,
+    covered_labels: coerceOptionalStringArray(value.covered_labels),
+    missing_labels: coerceOptionalStringArray(value.missing_labels),
+    readiness_score: coerceOptionalInteger(value.readiness_score),
+    recommendations: coerceOptionalStringArray(value.recommendations),
+    gaps: coerceOptionalGapItemDrafts(value.gaps),
+  };
 }
 
 function normalizeGapItems(value: GroqGapItemDraft[] | null): GapItem[] {
@@ -421,8 +370,11 @@ function normalizeGapItems(value: GroqGapItemDraft[] | null): GapItem[] {
 
   return value
     .map((item) => {
-      const relatedAssertions = normalizeAssertionIds(item.related_assertions);
-      const relatedAssertionLabels = normalizeLabels(item.related_assertion_labels, relatedAssertions);
+      const explicitRelatedAssertions = normalizeAssertionIdsFromLabels(item.related_assertion_labels);
+      const relatedAssertions =
+        explicitRelatedAssertions.length > 0
+          ? explicitRelatedAssertions
+          : inferAssertionIdsFromText([item.title, item.rationale]);
       const severity = normalizeGapSeverity(item.severity);
 
       if (!item.title || !item.rationale) {
@@ -433,7 +385,7 @@ function normalizeGapItems(value: GroqGapItemDraft[] | null): GapItem[] {
         title: item.title,
         severity,
         related_assertions: relatedAssertions,
-        related_assertion_labels: relatedAssertionLabels,
+        related_assertion_labels: buildAssertionLabels(relatedAssertions),
         rationale: item.rationale,
         suggested_evidence: item.suggested_evidence ?? [],
       } satisfies GapItem;
@@ -441,46 +393,184 @@ function normalizeGapItems(value: GroqGapItemDraft[] | null): GapItem[] {
     .filter((item): item is GapItem => item !== null);
 }
 
-function normalizeAssertionIds(value: Array<number | string> | null | undefined): AssertionId[] {
+function normalizeAssertionIdsFromLabels(value: string[] | null | undefined): AssertionId[] {
   if (!value || value.length === 0) {
     return [];
   }
 
   const normalized = value
-    .map((item) => normalizeAssertionId(item))
-    .filter((item): item is AssertionId => item !== null);
+    .map((item) => getAssertionIdByLabel(item))
+    .filter((item): item is AssertionId => item !== undefined);
 
   return Array.from(new Set(normalized)) as AssertionId[];
 }
 
-function normalizeAssertionId(value: number | string): AssertionId | null {
-  if (Number.isInteger(value) && ASSERTION_IDS.includes(value as AssertionId)) {
-    return value as AssertionId;
-  }
-
-  if (typeof value === "string") {
-    const numeric = Number.parseInt(value, 10);
-    if (Number.isInteger(numeric) && ASSERTION_IDS.includes(numeric as AssertionId)) {
-      return numeric as AssertionId;
-    }
-
-    const mapped = getAssertionIdByLabel(value);
-    return mapped ?? null;
-  }
-
-  return null;
-}
-
-function normalizeLabels(value: string[] | null | undefined, assertionIds: AssertionId[]): string[] {
-  if (value && value.length > 0) {
-    return value;
-  }
-
+function buildAssertionLabels(assertionIds: AssertionId[]): string[] {
   return assertionIds.map((assertionId) => getAssertionLabel(assertionId));
 }
 
 function deriveMissingAssertions(coveredAssertions: AssertionId[]): AssertionId[] {
   return ASSERTION_IDS.filter((assertionId) => !coveredAssertions.includes(assertionId)) as AssertionId[];
+}
+
+function resolvePackAssertionCoverage(
+  documents: GapAnalysisDocumentInput[],
+  draft: GroqGapAnalysisDraft,
+  gaps: GapItem[],
+): Pick<GapAnalysisOutput, "covered_assertions" | "covered_labels" | "missing_assertions" | "missing_labels"> {
+  const explicitCoveredAssertions = normalizeAssertionIdsFromLabels(draft.covered_labels);
+  const explicitMissingAssertions = normalizeAssertionIdsFromLabels(draft.missing_labels);
+  const gapMissingAssertions = deriveGapMissingAssertions(gaps);
+  const fallbackCoveredAssertions = deriveDocumentCoveredAssertions(documents);
+  const resolvedMissingAssertions = Array.from(
+    new Set(
+      (explicitMissingAssertions.length > 0 ? explicitMissingAssertions : gapMissingAssertions) as AssertionId[],
+    ),
+  ) as AssertionId[];
+
+  const resolvedCoveredAssertions = resolveCoveredAssertions({
+    explicitCoveredAssertions,
+    explicitMissingAssertions: resolvedMissingAssertions,
+    fallbackCoveredAssertions,
+  });
+  const finalMissingAssertions =
+    resolvedMissingAssertions.length > 0
+      ? resolvedMissingAssertions
+      : deriveMissingAssertions(resolvedCoveredAssertions);
+
+  return {
+    covered_assertions: resolvedCoveredAssertions,
+    covered_labels: buildAssertionLabels(resolvedCoveredAssertions),
+    missing_assertions: finalMissingAssertions,
+    missing_labels: buildAssertionLabels(finalMissingAssertions),
+  };
+}
+
+function resolveCoveredAssertions({
+  explicitCoveredAssertions,
+  explicitMissingAssertions,
+  fallbackCoveredAssertions,
+}: {
+  explicitCoveredAssertions: AssertionId[];
+  explicitMissingAssertions: AssertionId[];
+  fallbackCoveredAssertions: AssertionId[];
+}): AssertionId[] {
+  const excludedAssertions = new Set(explicitMissingAssertions);
+  const explicitResolved = explicitCoveredAssertions.filter((assertionId) => !excludedAssertions.has(assertionId));
+  if (explicitResolved.length > 0) {
+    return explicitResolved as AssertionId[];
+  }
+
+  const fallbackResolved = fallbackCoveredAssertions.filter((assertionId) => !excludedAssertions.has(assertionId));
+  if (fallbackResolved.length > 0) {
+    return fallbackResolved as AssertionId[];
+  }
+
+  if (explicitMissingAssertions.length > 0) {
+    return ASSERTION_IDS.filter((assertionId) => !excludedAssertions.has(assertionId)) as AssertionId[];
+  }
+
+  return [];
+}
+
+function deriveGapMissingAssertions(gaps: GapItem[]): AssertionId[] {
+  return Array.from(new Set(gaps.flatMap((gap) => gap.related_assertions))) as AssertionId[];
+}
+
+function deriveDocumentCoveredAssertions(documents: GapAnalysisDocumentInput[]): AssertionId[] {
+  const mappedAssertions = documents.flatMap((document) =>
+    document.assertion_mapping?.mapped_assertions
+      .filter((item) => item.coverage !== "not_supported")
+      .map((item) => item.assertion_id) ?? [],
+  );
+
+  return Array.from(new Set(mappedAssertions)) as AssertionId[];
+}
+
+function deriveFallbackGaps(documents: GapAnalysisDocumentInput[], missingAssertions: AssertionId[]): GapItem[] {
+  return missingAssertions.map((assertionId) => buildFallbackGap(documents, assertionId));
+}
+
+function buildFallbackGap(documents: GapAnalysisDocumentInput[], assertionId: AssertionId): GapItem {
+  const assertionLabel = getAssertionLabel(assertionId);
+  const evidenceSignals = collectFallbackGapSignals(documents, assertionId);
+  const evidenceBasis =
+    evidenceSignals.length > 0
+      ? evidenceSignals.slice(0, 2).join(" ")
+      : `Current document artifacts do not provide sufficient support for the ${assertionLabel} assertion.`;
+
+  return {
+    title: `Insufficient support for ${assertionLabel}`,
+    severity: "medium",
+    related_assertions: [assertionId],
+    related_assertion_labels: [assertionLabel],
+    rationale: evidenceBasis,
+    suggested_evidence: buildSuggestedEvidenceForAssertion(assertionLabel),
+  };
+}
+
+function collectFallbackGapSignals(documents: GapAnalysisDocumentInput[], assertionId: AssertionId): string[] {
+  const signals = documents.flatMap((document) => {
+    const unsupportedMapping = document.assertion_mapping?.mapped_assertions.find(
+      (item) => item.assertion_id === assertionId && item.coverage === "not_supported",
+    );
+    const mappingRationale = unsupportedMapping?.rationale ? [`${document.filename}: ${unsupportedMapping.rationale}`] : [];
+    const limitationMatches = [
+      ...(document.classification?.limitations ?? []),
+      ...(document.metadata?.limitations ?? []),
+      ...(document.assertion_mapping?.limitations ?? []),
+      ...(document.source_confidence?.caveats ?? []),
+      ...(document.notes ?? []),
+    ]
+      .filter((value) => matchesAssertionLabel(value, assertionId))
+      .map((value) => `${document.filename}: ${value}`);
+
+    return [...mappingRationale, ...limitationMatches];
+  });
+
+  return Array.from(new Set(signals));
+}
+
+function matchesAssertionLabel(value: string, assertionId: AssertionId): boolean {
+  const normalizedValue = value.toLowerCase();
+  const canonicalLabel = getAssertionLabel(assertionId).toLowerCase();
+  const alternateLabel = canonicalLabel.replace(/&/g, "and");
+  const simplifiedCanonical = canonicalLabel.replace(/[^a-z0-9]+/g, " ").trim();
+  const simplifiedAlternate = alternateLabel.replace(/[^a-z0-9]+/g, " ").trim();
+
+  return (
+    normalizedValue.includes(canonicalLabel) ||
+    normalizedValue.includes(alternateLabel) ||
+    normalizedValue.includes(simplifiedCanonical) ||
+    normalizedValue.includes(simplifiedAlternate)
+  );
+}
+
+function buildSuggestedEvidenceForAssertion(assertionLabel: string): string[] {
+  switch (assertionLabel) {
+    case "Rights & Obligations":
+      return [
+        "Upload signed contracts, ownership records, or approval evidence that establishes rights and obligations.",
+      ];
+    case "Classification":
+      return [
+        "Upload supporting schedules or accounting policy evidence that shows the correct financial statement classification.",
+      ];
+    case "Cut-off":
+      return [
+        "Upload dated acceptance, delivery, or go-live evidence to support the correct transaction cut-off.",
+      ];
+    case "Accuracy":
+      return [
+        "Upload calculation support, reconciliations, or approved adjustment evidence to confirm recorded amounts.",
+      ];
+    case "Completeness":
+      return [
+        "Upload reconciliations or full supporting listings to show all relevant transactions are included.",
+      ];
+    default:
+      return ["Upload additional independent supporting evidence for this unresolved assertion."];
+  }
 }
 
 function normalizeReadinessScore(
@@ -489,13 +579,15 @@ function normalizeReadinessScore(
   missingAssertions: AssertionId[],
   gaps: GapItem[],
 ): number {
-  if (isNonNegativeInteger(value)) {
-    return Math.max(0, Math.min(100, value));
-  }
-
   const coverageScore = Math.round((coveredAssertions.length / ASSERTION_IDS.length) * 100);
   const gapPenalty = Math.min(40, gaps.length * 10 + missingAssertions.length * 4);
-  return Math.max(0, Math.min(100, coverageScore - gapPenalty));
+  const derivedScore = Math.max(0, Math.min(100, coverageScore - gapPenalty));
+
+  if (!isNonNegativeInteger(value)) {
+    return derivedScore;
+  }
+
+  return Math.min(Math.max(0, Math.min(100, value)), derivedScore);
 }
 
 function deriveRecommendations(gaps: GapItem[]): string[] {
@@ -516,6 +608,76 @@ function normalizeGapSeverity(value: string | null): GapItem["severity"] {
     : "medium";
 }
 
+function inferAssertionIdsFromText(values: Array<string | null>): AssertionId[] {
+  const combined = values.filter((value): value is string => Boolean(value)).join(" ").toLowerCase();
+  const matched = ASSERTION_CATALOG.filter((item) => combined.includes(item.label.toLowerCase())).map((item) => item.id);
+  return Array.from(new Set(matched)) as AssertionId[];
+}
+
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function createEmptyGapAnalysisDraft(): GroqGapAnalysisDraft {
+  return {
+    schema_name: "gap_analysis",
+    schema_version: AGENT_SCHEMA_VERSION,
+    covered_labels: null,
+    missing_labels: null,
+    readiness_score: null,
+    recommendations: null,
+    gaps: null,
+  };
+}
+
+function coerceOptionalGapItemDrafts(value: unknown): GroqGapItemDraft[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const items = value
+    .map((item) => coerceGapItemDraft(item))
+    .filter((item): item is GroqGapItemDraft => item !== null);
+
+  return items.length > 0 ? items : [];
+}
+
+function coerceGapItemDraft(value: unknown): GroqGapItemDraft | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    title: coerceOptionalString(value.title),
+    severity: coerceOptionalString(value.severity),
+    related_assertion_labels: coerceOptionalStringArray(value.related_assertion_labels),
+    rationale: coerceOptionalString(value.rationale),
+    suggested_evidence: coerceOptionalStringArray(value.suggested_evidence),
+  };
+}
+
+function coerceOptionalStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  return normalized.length > 0 ? normalized : [];
+}
+
+function coerceOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function coerceOptionalInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
 }

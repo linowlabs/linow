@@ -1419,9 +1419,10 @@ export default function WorkspacePage() {
       const persistence = isRecord(root.persistence_result) ? root.persistence_result : {};
       const memwal = isRecord(persistence.memwal) ? persistence.memwal : {};
       const walrus = isRecord(persistence.walrus) ? persistence.walrus : {};
+      const sui = isRecord(persistence.sui) ? persistence.sui : {};
       const reviewBundle = isRecord(root.review_bundle) ? root.review_bundle : {};
 
-      const actionCandidates = readArray(persistence.action_candidates).map((candidate) => {
+      const actionCandidates = readArray(sui.action_candidates).map((candidate) => {
         const row = isRecord(candidate) ? candidate : {};
         return {
           actionType: readString(row.action_type) ?? "agent_action",

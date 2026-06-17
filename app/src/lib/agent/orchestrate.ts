@@ -54,7 +54,7 @@ import {
 import {
   buildGapAnalysisMessages,
   groqGapAnalysisSchema,
-  isGroqGapAnalysisResult,
+  isGroqGapAnalysisEnvelope,
   normalizeGapAnalysisResult,
   type GapAnalysisDocumentInput,
   type GapAnalysisToolInput,
@@ -84,6 +84,10 @@ export interface AgentOrchestrationInput {
   auditor_address?: string;
   documents: OrchestrationDocumentInput[];
   pack_notes?: string[];
+}
+
+export interface AgentOrchestrationRunOptions {
+  skipFindingDrafting?: boolean;
 }
 
 export async function resolveAgentOrchestrationInput(value: unknown): Promise<AgentOrchestrationInput> {
@@ -121,7 +125,10 @@ export async function resolveAgentOrchestrationInput(value: unknown): Promise<Ag
   };
 }
 
-export async function runAgentOrchestration(input: AgentOrchestrationInput): Promise<AgentOrchestrationResult> {
+export async function runAgentOrchestration(
+  input: AgentOrchestrationInput,
+  options: AgentOrchestrationRunOptions = {},
+): Promise<AgentOrchestrationResult> {
   const documents: DocumentAnalysisResult[] = [];
   const artifacts = createArtifactCollector(input.pack_id);
   const documentNotesById = createDocumentNotesLookup(input.documents);
@@ -216,7 +223,8 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
     schema: groqGapAnalysisSchema,
     messages: buildGapAnalysisMessages(gapInput),
-    validate: isGroqGapAnalysisResult,
+    validate: isGroqGapAnalysisEnvelope,
+    responseMode: "json_object",
   });
   addUsage(usage, gapCompletion.usage);
   const gapAnalysis = normalizeGapAnalysisResult(gapInput, gapCompletion.result);
@@ -230,46 +238,48 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
 
   const findings: CcerFindingOutput[] = [];
   const maxFindings = Math.min(profileConfig.maxFindingsPerPack, AGENT_CONFIG.limits.maxFindingsPerPack);
+  if (!options.skipFindingDrafting) {
+    for (const [index, gap] of gapAnalysis.gaps.slice(0, maxFindings).entries()) {
+      const findingInput: CcerFindingToolInput = {
+        pack_id: input.pack_id,
+        engagement_name: input.engagement_name,
+        audit_area: input.audit_area,
+        stage: input.stage,
+        finding_id: `FND-${String(index + 1).padStart(3, "0")}`,
+        gap,
+        gap_analysis: gapAnalysis,
+        documents: documents.map((document) => ({
+          document_id: document.document_id,
+          filename: document.filename,
+          document_text: input.documents.find((item) => item.documentId === document.document_id)?.documentText,
+          context: input.documents.find((item) => item.documentId === document.document_id)?.context,
+          classification: document.classification,
+          metadata: document.metadata,
+          assertion_mapping: document.assertion_mapping,
+          source_confidence: document.source_confidence,
+          notes: documentNotesById.get(document.document_id),
+        })),
+        pack_notes: effectivePackNotes,
+      };
 
-  for (const [index, gap] of gapAnalysis.gaps.slice(0, maxFindings).entries()) {
-    const findingInput: CcerFindingToolInput = {
-      pack_id: input.pack_id,
-      engagement_name: input.engagement_name,
-      audit_area: input.audit_area,
-      stage: input.stage,
-      finding_id: `FND-${String(index + 1).padStart(3, "0")}`,
-      gap,
-      gap_analysis: gapAnalysis,
-      documents: documents.map((document) => ({
-        document_id: document.document_id,
-        filename: document.filename,
-        document_text: input.documents.find((item) => item.documentId === document.document_id)?.documentText,
-        context: input.documents.find((item) => item.documentId === document.document_id)?.context,
-        classification: document.classification,
-        metadata: document.metadata,
-        assertion_mapping: document.assertion_mapping,
-        source_confidence: document.source_confidence,
-        notes: documentNotesById.get(document.document_id),
-      })),
-      pack_notes: effectivePackNotes,
-    };
-
-    const findingCompletion = await runGroqJsonCompletion({
-      schemaName: AGENT_CONFIG.schemaNames.ccerFinding,
-      schema: groqCcerFindingSchema,
-      messages: buildCcerFindingMessages(findingInput),
-      validate: isGroqDraftFindingResult,
-    });
-    addUsage(usage, findingCompletion.usage);
-    const finding = normalizeCcerFindingResult(findingInput, findingCompletion.result);
-    findings.push(finding);
-    artifacts.add({
-      hash: hashAgentArtifact(finding, `ccer_finding:${finding.finding_id}`),
-      actionType: "draft_ccer",
-      targetKind: "finding",
-      targetId: finding.finding_id,
-      findingId: finding.finding_id,
-    });
+      const findingCompletion = await runGroqJsonCompletion({
+        schemaName: AGENT_CONFIG.schemaNames.ccerFinding,
+        schema: groqCcerFindingSchema,
+        messages: buildCcerFindingMessages(findingInput),
+        validate: isGroqDraftFindingResult,
+        responseMode: "json_object",
+      });
+      addUsage(usage, findingCompletion.usage);
+      const finding = normalizeCcerFindingResult(findingInput, findingCompletion.result);
+      findings.push(finding);
+      artifacts.add({
+        hash: hashAgentArtifact(finding, `ccer_finding:${finding.finding_id}`),
+        actionType: "draft_ccer",
+        targetKind: "finding",
+        targetId: finding.finding_id,
+        findingId: finding.finding_id,
+      });
+    }
   }
 
   const auditPackSummary = buildAuditPackSummary(input, documents, gapAnalysis, findings);

@@ -285,9 +285,7 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
         ...retrievedChunks.map((chunk) =>
           [
             `${chunk.document_name} :: ${chunk.chunk_id} [chars ${chunk.char_start}-${chunk.char_end}]`,
-            `Context: ${chunk.contextual_summary}`,
-            `Matched terms: ${chunk.matched_terms.join(", ") || "none"}`,
-            `Excerpt: ${chunk.text}`,
+            chunk.text,
           ].join("\n"),
         ),
         "Task:",
@@ -306,60 +304,71 @@ export function buildCcerFindingMessages(input: CcerFindingToolInput) {
 }
 
 export function isGroqDraftFindingResult(value: unknown): value is GroqDraftFindingResult {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    value.schema_name === "ccer_finding" &&
-    value.schema_version === AGENT_SCHEMA_VERSION &&
-    typeof value.finding_id === "string" &&
-    typeof value.pack_id === "string" &&
-    typeof value.severity === "string" &&
-    typeof value.title === "string" &&
-    typeof value.condition === "string" &&
-    typeof value.criteria === "string" &&
-    typeof value.cause === "string" &&
-    typeof value.effect === "string" &&
-    typeof value.recommendation === "string" &&
-    Array.isArray(value.citations) &&
-    value.citations.every(isGroqDraftFindingCitation) &&
-    Array.isArray(value.missing_assertions) &&
-    value.missing_assertions.every((item) => typeof item === "string" || Number.isInteger(item)) &&
-    Array.isArray(value.missing_assertion_labels) &&
-    value.missing_assertion_labels.every((item) => typeof item === "string") &&
-    typeof value.status === "string"
-  );
+  return isRecord(value);
 }
 
 export function normalizeCcerFindingResult(
   input: CcerFindingToolInput,
-  value: GroqDraftFindingResult,
+  value: unknown,
 ): CcerFindingOutput {
+  const draft = coerceGroqDraftFindingResult(value, input);
   const fallbackFindingId = input.finding_id ?? buildFindingId(input);
   const allowedDocuments = new Set(input.documents.map((document) => `${document.document_id}::${document.filename}`));
-  const normalizedCitations = value.citations.filter((citation) =>
+  const normalizedCitations = draft.citations.filter((citation) =>
     allowedDocuments.has(`${citation.document_id}::${citation.filename}`),
   );
-  const normalizedMissingAssertions = normalizeMissingAssertions(value.missing_assertions, input.gap.related_assertions);
-  const normalizedMissingAssertionLabels = normalizeMissingAssertionLabels(
-    value.missing_assertion_labels,
-    normalizedMissingAssertions,
-    input.gap.related_assertion_labels,
-  );
+  const fallbackCitations = deriveFallbackFindingCitations(input);
+  const normalizedMissingAssertions = normalizeMissingAssertions(draft.missing_assertions, input.gap.related_assertions);
+  const normalizedMissingAssertionLabels = buildAssertionLabelsFromIds(normalizedMissingAssertions);
 
   return {
-    ...value,
     schema_name: "ccer_finding",
     schema_version: AGENT_SCHEMA_VERSION,
     finding_id: fallbackFindingId,
     pack_id: input.pack_id,
-    severity: normalizeFindingSeverity(value.severity, input.gap.severity),
-    citations: normalizedCitations,
+    severity: normalizeFindingSeverity(draft.severity, input.gap.severity),
+    title: draft.title,
+    condition: draft.condition,
+    criteria: draft.criteria,
+    cause: draft.cause,
+    effect: draft.effect,
+    recommendation: draft.recommendation,
+    citations: normalizedCitations.length > 0 ? normalizedCitations : fallbackCitations,
     missing_assertions: normalizedMissingAssertions,
     missing_assertion_labels: normalizedMissingAssertionLabels,
     status: "DRAFT",
   };
+}
+
+function coerceGroqDraftFindingResult(value: unknown, input: CcerFindingToolInput): GroqDraftFindingResult {
+  if (!isRecord(value)) {
+    return createFallbackDraftFinding(input);
+  }
+
+  return (
+    {
+      schema_name: "ccer_finding",
+      schema_version: AGENT_SCHEMA_VERSION,
+      finding_id: coerceOptionalString(value.finding_id) ?? input.finding_id ?? buildFindingId(input),
+      pack_id: input.pack_id,
+      severity: coerceOptionalString(value.severity) ?? input.gap.severity,
+      title: coerceOptionalString(value.title) ?? input.gap.title,
+      condition: coerceOptionalString(value.condition) ?? input.gap.rationale,
+      criteria:
+        coerceOptionalString(value.criteria) ??
+        "Sufficient and appropriate audit evidence should support the relevant assertion before reliance or approval.",
+      cause: coerceOptionalString(value.cause) ?? "Supporting evidence for the identified assertion gap is incomplete.",
+      effect: coerceOptionalString(value.effect) ?? "The evidence pack remains unresolved for the affected assertion.",
+      recommendation:
+        coerceOptionalString(value.recommendation) ??
+        (input.gap.suggested_evidence[0] ??
+          "Upload additional independent supporting evidence and complete reviewer follow-up."),
+      citations: coerceDraftFindingCitations(value.citations),
+      missing_assertions: coerceMissingAssertions(value.missing_assertions),
+      missing_assertion_labels: coerceOptionalStringArray(value.missing_assertion_labels) ?? [],
+      status: coerceOptionalString(value.status) ?? "DRAFT",
+    } satisfies GroqDraftFindingResult
+  );
 }
 
 function parseFindingDocument(value: unknown): CcerFindingDocumentInput {
@@ -466,22 +475,6 @@ function normalizeMissingAssertions(
   return normalized.length > 0 ? dedupeAssertionIds(normalized) : [...fallback];
 }
 
-function normalizeMissingAssertionLabels(
-  value: string[],
-  assertionIds: GapItem["related_assertions"],
-  fallback: string[],
-): string[] {
-  if (value.length > 0) {
-    return value;
-  }
-
-  if (fallback.length > 0) {
-    return [...fallback];
-  }
-
-  return assertionIds.map((assertionId) => getAssertionLabel(assertionId));
-}
-
 function normalizeAssertionId(value: number | string): GapItem["related_assertions"][number] | null {
   if (Number.isInteger(value) && ASSERTION_IDS.includes(value as (typeof ASSERTION_IDS)[number])) {
     return value as GapItem["related_assertions"][number];
@@ -509,6 +502,10 @@ function dedupeAssertionIds(values: GapItem["related_assertions"]): GapItem["rel
   return Array.from(new Set(values)) as GapItem["related_assertions"];
 }
 
+function buildAssertionLabelsFromIds(assertionIds: GapItem["related_assertions"]): string[] {
+  return assertionIds.map((assertionId) => getAssertionLabel(assertionId));
+}
+
 function isFindingSeverityText(value: string): value is CcerFindingOutput["severity"] {
   return FINDING_SEVERITIES.includes(value as CcerFindingOutput["severity"]);
 }
@@ -532,6 +529,67 @@ function normalizeAssertionLabel(value: string): string {
     .trim();
 }
 
+function createFallbackDraftFinding(input: CcerFindingToolInput): GroqDraftFindingResult {
+  return {
+    schema_name: "ccer_finding",
+    schema_version: AGENT_SCHEMA_VERSION,
+    finding_id: input.finding_id ?? buildFindingId(input),
+    pack_id: input.pack_id,
+    severity: input.gap.severity,
+    title: input.gap.title,
+    condition: input.gap.rationale,
+    criteria: "Sufficient and appropriate audit evidence should support the relevant assertion before reliance or approval.",
+    cause: "Supporting evidence for the identified assertion gap is incomplete.",
+    effect: "The evidence pack remains unresolved for the affected assertion.",
+    recommendation:
+      input.gap.suggested_evidence[0] ??
+      "Upload additional independent supporting evidence and complete reviewer follow-up.",
+    citations: deriveFallbackFindingCitations(input),
+    missing_assertions: [...input.gap.related_assertions],
+    missing_assertion_labels:
+      buildAssertionLabelsFromIds(input.gap.related_assertions),
+    status: "DRAFT",
+  };
+}
+
+function coerceOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function coerceOptionalStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  return normalized.length > 0 ? normalized : [];
+}
+
+function coerceDraftFindingCitations(value: unknown): GroqDraftFindingCitation[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isGroqDraftFindingCitation);
+}
+
+function coerceMissingAssertions(value: unknown): Array<number | string> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is number | string => typeof item === "string" || Number.isInteger(item));
+}
+
 function summarizeFindingDocument(document: CcerFindingDocumentInput) {
   return {
     document_id: document.document_id,
@@ -553,4 +611,77 @@ function summarizeFindingDocument(document: CcerFindingDocumentInput) {
       })) ?? [],
     notes: document.notes ?? [],
   };
+}
+
+function deriveFallbackFindingCitations(input: CcerFindingToolInput): GroqDraftFindingCitation[] {
+  const relevantDocuments = selectRelevantFindingDocuments(input);
+  const metadataCitations = relevantDocuments.flatMap((document) =>
+    (document.metadata?.citations ?? []).map((citation) => ({
+      document_id: citation.document_id,
+      filename: citation.filename,
+      reference: citation.reference,
+      page: citation.page ?? null,
+      confidence: citation.confidence,
+    })),
+  );
+
+  const dedupedMetadataCitations = dedupeFindingCitations(metadataCitations);
+  if (dedupedMetadataCitations.length > 0) {
+    return dedupedMetadataCitations.slice(0, 3);
+  }
+
+  const syntheticCitations = relevantDocuments
+    .map((document) => buildSyntheticFindingCitation(document))
+    .filter((citation): citation is GroqDraftFindingCitation => citation !== null);
+
+  return dedupeFindingCitations(syntheticCitations).slice(0, 3);
+}
+
+function selectRelevantFindingDocuments(input: CcerFindingToolInput): CcerFindingDocumentInput[] {
+  const directlyRelevant = input.documents.filter((document) => {
+    const mappedAssertionIds =
+      document.assertion_mapping?.mapped_assertions
+        .filter((item) => item.coverage !== "not_supported")
+        .map((item) => item.assertion_id) ?? [];
+
+    return input.gap.related_assertions.some((assertionId) => mappedAssertionIds.includes(assertionId));
+  });
+
+  return directlyRelevant.length > 0 ? directlyRelevant : input.documents;
+}
+
+function buildSyntheticFindingCitation(document: CcerFindingDocumentInput): GroqDraftFindingCitation | null {
+  const reference =
+    document.metadata?.document_reference ??
+    document.document_text?.slice(0, 180).replace(/\s+/g, " ").trim() ??
+    document.notes?.[0];
+
+  if (!reference) {
+    return null;
+  }
+
+  return {
+    document_id: document.document_id,
+    filename: document.filename,
+    reference,
+    page: null,
+    confidence: 0.6,
+  };
+}
+
+function dedupeFindingCitations(citations: GroqDraftFindingCitation[]): GroqDraftFindingCitation[] {
+  const seen = new Set<string>();
+  const deduped: GroqDraftFindingCitation[] = [];
+
+  for (const citation of citations) {
+    const key = `${citation.document_id}::${citation.filename}::${citation.reference}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(citation);
+  }
+
+  return deduped;
 }
