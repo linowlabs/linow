@@ -1219,3 +1219,48 @@
 - Follow-up needed:
   - None.
 
+## 2026-06-17 -- Render SO-23 Workspace Agent Outputs
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Parsed the agent orchestration `response_mode: "workspace"` payload into a UI-facing review model.
+  - Added per-document agent review panels for classification, source confidence, metadata hints, and assertion mapping.
+  - Upgraded the Findings workspace into an audit-readiness review surface with readiness score, covered/missing assertions, recommendations, and C-C-C-E-R finding fields.
+  - Expanded the right agent panel and bottom status tabs to show reviewed documents, findings, memory artifact IDs, and prepared approval candidates without claiming on-chain submission.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-23 B is a UI rendering task for the agent workspace contract already provided by the agent route, so the app should consume the structured response instead of adding new agent or SDK behavior.
+  - The copy keeps Linow's boundary clear: the agent proposes and prepares output hashes, but a human still has to approve/sign before the chain proves anything.
+
+### Tech Debt
+- Known shortcuts:
+  - AgentAction signing/logging is still not wired from this approval queue; it remains a prepared-only UI until SO-25.
+  - Memory fallback/proof UX is only surfaced from the returned status fields; SO-24/24a still need their dedicated UI flow.
+- Follow-up needed:
+  - Add explicit approve/log controls once the AgentAction proof return is hardened.
+  - Add a clearer memory fallback panel when SO-24/24a moves into the workspace.
+
+## 2026-06-17 -- Fix Workspace Agent Profile
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Changed the workspace agent orchestration request from the old `sui_overflow_demo` profile to the supported `balanced` profile.
+
+### Reasoning
+- Why this approach was chosen:
+  - The agent route validates `profile` against `cheap`, `balanced`, and `full`; using `balanced` keeps the judge-facing workspace on the normal rich analysis path without triggering a 400.
+
+### Tech Debt
+- Known shortcuts:
+  - The workspace does not yet expose a runtime profile picker.
+- Follow-up needed:
+  - Consider adding a small settings control for `cheap`/`balanced`/`full` if demo iteration needs faster runs.
+

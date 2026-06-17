@@ -126,7 +126,70 @@ interface AgentActionCandidate {
   outputHash: string;
   targetKind?: string;
   targetId?: string;
+  evidenceId?: string;
+  documentId?: string;
+  findingId?: string;
   requiresHumanApproval: boolean;
+}
+
+interface AgentDocumentReview {
+  id: string;
+  filename: string;
+  evidenceId?: string;
+  documentType: string;
+  confidence?: number;
+  classificationRationale?: string;
+  classificationLimitations: string[];
+  sourceConfidence?: string;
+  sourceReason?: string;
+  sourceCaveats: string[];
+  mappedAssertions: Array<{
+    label: string;
+    coverage: string;
+    confidence?: number;
+    rationale?: string;
+  }>;
+  metadataSummary: string[];
+}
+
+interface AgentFindingReview {
+  id: string;
+  title: string;
+  severity: string;
+  status: string;
+  condition?: string;
+  criteria?: string;
+  cause?: string;
+  effect?: string;
+  recommendation?: string;
+  missingAssertions: string[];
+  citationCount: number;
+}
+
+interface AgentWorkspaceReview {
+  documents: AgentDocumentReview[];
+  findings: AgentFindingReview[];
+  gapSummary: {
+    readinessScore?: number;
+    coveredLabels: string[];
+    missingLabels: string[];
+    recommendations: string[];
+  };
+  approval: {
+    requiresHumanApproval: boolean;
+    chainWriteReady: boolean;
+    outputHashes: string[];
+    nextSteps: string[];
+  };
+  persistence: {
+    memoryNamespace?: string;
+    memwalStatus?: string;
+    walrusStatus?: string;
+    manifestBlobId?: string;
+    artifactBlobId?: string;
+    linkedDocuments?: number;
+    totalDocuments?: number;
+  };
 }
 
 interface AgentRunState {
@@ -367,6 +430,129 @@ function readArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return readArray(value).map(readString).filter((item): item is string => Boolean(item));
+}
+
+function formatPercent(value: number | undefined): string {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "n/a";
+}
+
+function buildMetadataSummary(metadata: Record<string, unknown>): string[] {
+  const summary = [
+    readString(metadata.document_date) ? `Date ${readString(metadata.document_date)}` : null,
+    readString(metadata.period_start) && readString(metadata.period_end)
+      ? `Period ${readString(metadata.period_start)} to ${readString(metadata.period_end)}`
+      : null,
+    readString(metadata.document_reference) ? `Ref ${readString(metadata.document_reference)}` : null,
+  ].filter((item): item is string => Boolean(item));
+
+  const parties = readArray(metadata.parties)
+    .map((party) => {
+      const row = isRecord(party) ? party : {};
+      const name = readString(row.name);
+      const role = readString(row.role);
+      return name ? `${name}${role ? ` (${role})` : ""}` : undefined;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  if (parties.length > 0) summary.push(`Parties ${parties.slice(0, 2).join(", ")}`);
+
+  return summary;
+}
+
+function parseAgentWorkspaceReview(raw: unknown): AgentWorkspaceReview {
+  const root = isRecord(raw) ? raw : {};
+  const gap = isRecord(root.gap_analysis) ? root.gap_analysis : {};
+  const approvalControls = isRecord(root.approval_controls) ? root.approval_controls : {};
+  const persistence = isRecord(root.persistence_result) ? root.persistence_result : {};
+  const manifest = isRecord(persistence.manifest) ? persistence.manifest : {};
+  const memwal = isRecord(persistence.memwal) ? persistence.memwal : {};
+  const walrus = isRecord(persistence.walrus) ? persistence.walrus : {};
+
+  const documents = readArray(root.documents).map((document, index): AgentDocumentReview => {
+    const row = isRecord(document) ? document : {};
+    const classification = isRecord(row.classification) ? row.classification : {};
+    const metadata = isRecord(row.metadata) ? row.metadata : {};
+    const mapping = isRecord(row.assertion_mapping) ? row.assertion_mapping : {};
+    const sourceConfidence = isRecord(row.source_confidence) ? row.source_confidence : {};
+    const evidenceRef = isRecord(row.evidence_ref) ? row.evidence_ref : {};
+
+    return {
+      id: readString(row.document_id) ?? `document-${index + 1}`,
+      filename: readString(row.filename) ?? readString(classification.filename) ?? `Document ${index + 1}`,
+      evidenceId: readString(evidenceRef.evidence_id),
+      documentType: readString(classification.document_type) ?? "unclassified",
+      confidence: readNumber(classification.confidence),
+      classificationRationale: readString(classification.rationale),
+      classificationLimitations: readStringArray(classification.limitations),
+      sourceConfidence: readString(sourceConfidence.source_confidence) ?? readString(classification.source_confidence),
+      sourceReason: readString(sourceConfidence.source_confidence_reason) ?? readString(classification.source_confidence_reason),
+      sourceCaveats: [
+        ...readStringArray(sourceConfidence.caveats),
+        ...readStringArray(sourceConfidence.upgrade_path).map((item) => `Upgrade: ${item}`),
+      ],
+      mappedAssertions: readArray(mapping.mapped_assertions).map((assertion) => {
+        const item = isRecord(assertion) ? assertion : {};
+        return {
+          label: readString(item.assertion_label) ?? "Assertion",
+          coverage: readString(item.coverage) ?? "unknown",
+          confidence: readNumber(item.confidence),
+          rationale: readString(item.rationale),
+        };
+      }),
+      metadataSummary: buildMetadataSummary(metadata),
+    };
+  });
+
+  const findings = readArray(root.findings).map((finding, index): AgentFindingReview => {
+    const row = isRecord(finding) ? finding : {};
+    return {
+      id: readString(row.finding_id) ?? `finding-${index + 1}`,
+      title: readString(row.title) ?? readString(row.condition) ?? `Draft finding ${index + 1}`,
+      severity: readString(row.severity) ?? "unrated",
+      status: readString(row.status) ?? "draft",
+      condition: readString(row.condition),
+      criteria: readString(row.criteria),
+      cause: readString(row.cause),
+      effect: readString(row.effect),
+      recommendation: readString(row.recommendation),
+      missingAssertions: readStringArray(row.missing_assertion_labels),
+      citationCount: readArray(row.citations).length,
+    };
+  });
+
+  return {
+    documents,
+    findings,
+    gapSummary: {
+      readinessScore: readNumber(gap.readiness_score),
+      coveredLabels: readStringArray(gap.covered_labels),
+      missingLabels: readStringArray(gap.missing_labels),
+      recommendations: readStringArray(gap.recommendations),
+    },
+    approval: {
+      requiresHumanApproval: readBoolean(approvalControls.requires_human_approval) ?? true,
+      chainWriteReady: readBoolean(approvalControls.chain_write_ready) ?? false,
+      outputHashes: readStringArray(approvalControls.output_hashes),
+      nextSteps: readStringArray(approvalControls.next_steps),
+    },
+    persistence: {
+      memoryNamespace: readString(persistence.memory_namespace),
+      memwalStatus: readString(memwal.status),
+      walrusStatus: readString(walrus.status),
+      manifestBlobId: readString(walrus.manifest_blob_id),
+      artifactBlobId: readString(walrus.artifact_blob_id),
+      linkedDocuments: readNumber(manifest.linked_documents),
+      totalDocuments: readNumber(manifest.total_documents),
+    },
+  };
+}
+
 export default function WorkspacePage() {
   const wallet = useWalletBridge();
   const addDocumentInputRef = useRef<HTMLInputElement | null>(null);
@@ -487,6 +673,11 @@ export default function WorkspacePage() {
 
   const selectedBatchReady =
     selectedBatchDocuments.length > 0 && incompleteSelectedBatchDocuments.length === 0;
+
+  const agentReview = useMemo(
+    () => parseAgentWorkspaceReview(agentRun.raw),
+    [agentRun.raw],
+  );
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 1100px)");
@@ -1404,7 +1595,7 @@ export default function WorkspacePage() {
 
       const result = await postJson<unknown>("/api/agent/orchestrate", {
         response_mode: "workspace",
-        profile: "sui_overflow_demo",
+        profile: "balanced",
         pack_id: packId,
         engagement_name: "Q2 2026 Audit Readiness",
         audit_area: "Audit readiness",
@@ -1433,6 +1624,9 @@ export default function WorkspacePage() {
           outputHash: readString(row.agent_output_hash) ?? "hash unavailable",
           targetKind: readString(row.target_kind),
           targetId: readString(row.target_id),
+          evidenceId: readString(row.evidence_id),
+          documentId: readString(row.document_id),
+          findingId: readString(row.finding_id),
           requiresHumanApproval: row.requires_human_approval !== false,
         };
       });
@@ -1540,6 +1734,67 @@ export default function WorkspacePage() {
 
     return <span className={`tree-status ${className}`} />;
   };
+
+  const findAgentDocumentReview = (input: { fileName?: string; evidenceId?: string; localId?: string }) =>
+    agentReview.documents.find((document) =>
+      (input.evidenceId && document.evidenceId === input.evidenceId) ||
+      (input.localId && document.id === input.localId) ||
+      (input.fileName && document.filename === input.fileName),
+    );
+
+  const renderAgentDocumentReview = (review?: AgentDocumentReview) => (
+    <div className="card">
+      <div className="card-section-title">Agent Document Review</div>
+      {review ? (
+        <div className="agent-review-card">
+          <div className="agent-review-head">
+            <div>
+              <strong>{review.documentType}</strong>
+              <span>{review.filename}</span>
+            </div>
+            <code>{review.sourceConfidence ?? "L?"}</code>
+          </div>
+          <p>{review.classificationRationale ?? "No classification rationale returned."}</p>
+          <div className="agent-review-grid">
+            <div>
+              <span>Classification confidence</span>
+              <strong>{formatPercent(review.confidence)}</strong>
+            </div>
+            <div>
+              <span>Evidence proof</span>
+              <strong>{review.evidenceId ? "linked" : "local only"}</strong>
+            </div>
+          </div>
+          {review.metadataSummary.length > 0 && (
+            <div className="agent-chip-row">
+              {review.metadataSummary.map((item) => <span key={item}>{item}</span>)}
+            </div>
+          )}
+          {review.mappedAssertions.length > 0 && (
+            <div className="agent-assertion-list">
+              {review.mappedAssertions.slice(0, 6).map((assertion) => (
+                <div key={`${assertion.label}-${assertion.coverage}`}>
+                  <strong>{assertion.label}</strong>
+                  <span>{assertion.coverage}{assertion.confidence !== undefined ? ` / ${formatPercent(assertion.confidence)}` : ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {(review.sourceReason || review.sourceCaveats.length > 0 || review.classificationLimitations.length > 0) && (
+            <p className="ide-muted">
+              {[
+                review.sourceReason,
+                ...review.sourceCaveats,
+                ...review.classificationLimitations,
+              ].filter(Boolean).slice(0, 3).join(" ")}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="ide-muted">Run the agent to populate classification, source confidence, metadata, and assertion mapping for this evidence.</p>
+      )}
+    </div>
+  );
 
   const renderMainContent = () => {
     if (activeRailPanel === "settings" || activeItemId === "settings") {
@@ -1839,6 +2094,7 @@ export default function WorkspacePage() {
           <p className="result-message">{registerError}</p>
         </div>
       )}
+      {renderAgentDocumentReview(findAgentDocumentReview({ localId: document.id, fileName: document.fileName }))}
       {renderSteps("register")}
       {registerResult && renderRegisterResult()}
     </div>
@@ -1988,6 +2244,7 @@ export default function WorkspacePage() {
           )}
         </section>
       </div>
+      {renderAgentDocumentReview(findAgentDocumentReview({ evidenceId: record.id, fileName: record.fileName }))}
     </div>
   );
 
@@ -2006,16 +2263,97 @@ export default function WorkspacePage() {
         </button>
       </div>
       {renderSteps("agent")}
+      <div className="agent-gap-card">
+        <div className="agent-gap-metrics">
+          <div>
+            <span>Readiness</span>
+            <strong>
+              {agentReview.gapSummary.readinessScore !== undefined
+                ? `${agentReview.gapSummary.readinessScore}/100`
+                : agentRun.readinessScore !== undefined
+                  ? `${agentRun.readinessScore}/100`
+                  : "n/a"}
+            </strong>
+          </div>
+          <div>
+            <span>Covered</span>
+            <strong>{agentReview.gapSummary.coveredLabels.length}</strong>
+          </div>
+          <div>
+            <span>Missing</span>
+            <strong>{agentReview.gapSummary.missingLabels.length}</strong>
+          </div>
+        </div>
+        <div className="agent-chip-row">
+          {agentReview.gapSummary.coveredLabels.slice(0, 6).map((label) => (
+            <span key={`covered-${label}`} className="covered">{label}</span>
+          ))}
+          {agentReview.gapSummary.missingLabels.slice(0, 6).map((label) => (
+            <span key={`missing-${label}`} className="missing">{label}</span>
+          ))}
+          {agentReview.gapSummary.coveredLabels.length === 0 && agentReview.gapSummary.missingLabels.length === 0 && (
+            <span>No assertion coverage returned yet</span>
+          )}
+        </div>
+        {agentReview.gapSummary.recommendations.length > 0 && (
+          <div className="agent-recommendations">
+            {agentReview.gapSummary.recommendations.slice(0, 3).map((recommendation) => (
+              <p key={recommendation}>{recommendation}</p>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="ide-folder-grid">
-        {agentRun.findings.length > 0 ? (
-          agentRun.findings.map((finding) => (
-            <div key={finding.id} className="ide-finding-row">
-              {renderStatusDot(finding.status === "blocked" ? "tampered" : finding.status === "approved" ? "attested-record" : "registering")}
-              <div>
-                <strong>{finding.title}</strong>
-                <span>{finding.severity} / {finding.status}</span>
+        {agentReview.findings.length > 0 ? (
+          agentReview.findings.map((finding) => (
+            <article key={finding.id} className="agent-finding-card">
+              <div className="agent-finding-head">
+                {renderStatusDot(finding.status === "blocked" ? "tampered" : finding.status === "approved" ? "attested-record" : "registering")}
+                <div>
+                  <strong>{finding.title}</strong>
+                  <span>{finding.severity} / {finding.status} / {finding.citationCount} citation(s)</span>
+                </div>
               </div>
-            </div>
+              <div className="agent-finding-body">
+                {finding.condition && (
+                  <div>
+                    <span>Condition</span>
+                    <p>{finding.condition}</p>
+                  </div>
+                )}
+                {finding.criteria && (
+                  <div>
+                    <span>Criteria</span>
+                    <p>{finding.criteria}</p>
+                  </div>
+                )}
+                {finding.cause && (
+                  <div>
+                    <span>Cause</span>
+                    <p>{finding.cause}</p>
+                  </div>
+                )}
+                {finding.effect && (
+                  <div>
+                    <span>Effect</span>
+                    <p>{finding.effect}</p>
+                  </div>
+                )}
+                {finding.recommendation && (
+                  <div>
+                    <span>Recommendation</span>
+                    <p>{finding.recommendation}</p>
+                  </div>
+                )}
+              </div>
+              {finding.missingAssertions.length > 0 && (
+                <div className="agent-chip-row">
+                  {finding.missingAssertions.map((assertion) => (
+                    <span key={`${finding.id}-${assertion}`} className="missing">{assertion}</span>
+                  ))}
+                </div>
+              )}
+            </article>
           ))
         ) : (
           <div className="ide-empty">
@@ -2237,14 +2575,19 @@ export default function WorkspacePage() {
           {bottomTab === "memory" && (
             <div className="ide-status-line">
               <span>{agentRun.memoryStatus ?? "No memory write has been observed in this workspace session."}</span>
-              <span>AgentAction event proof return is not fully wired in SDK yet.</span>
+              <span>Namespace: {agentReview.persistence.memoryNamespace ?? "pending"}</span>
+              <span>Manifest: {agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 18) : "pending"}</span>
+              <span>Artifact: {agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 18) : "pending"}</span>
             </div>
           )}
           {bottomTab === "agent" && (
             <div className="ide-status-line">
               <span>{agentRun.message}</span>
               <span>Readable docs: {readableEvidenceCount}</span>
+              <span>Reviewed docs: {agentReview.documents.length}</span>
+              <span>Findings: {agentReview.findings.length}</span>
               <span>Action candidates: {agentRun.actionCandidates.length}</span>
+              <span>Chain write: {agentReview.approval.chainWriteReady ? "ready after approval" : "not submitted"}</span>
             </div>
           )}
           {bottomTab === "privacy" && (
@@ -2302,12 +2645,27 @@ export default function WorkspacePage() {
         <p>{agentRun.message}</p>
         <div className="ide-mini-grid">
           <span>Docs</span>
-          <strong>{agentRun.documentsAnalyzed ?? 0}</strong>
+          <strong>{agentReview.documents.length || agentRun.documentsAnalyzed || 0}</strong>
           <span>Readiness</span>
-          <strong>{agentRun.readinessScore ?? "n/a"}</strong>
+          <strong>
+            {agentReview.gapSummary.readinessScore !== undefined
+              ? `${agentReview.gapSummary.readinessScore}/100`
+              : agentRun.readinessScore !== undefined
+                ? `${agentRun.readinessScore}/100`
+                : "n/a"}
+          </strong>
+          <span>Findings</span>
+          <strong>{agentReview.findings.length}</strong>
           <span>Memory</span>
           <strong>{agentRun.memoryStatus ?? "pending"}</strong>
         </div>
+        {agentReview.approval.nextSteps.length > 0 && (
+          <div className="agent-next-steps">
+            {agentReview.approval.nextSteps.slice(0, 3).map((step) => (
+              <p key={step}>{step}</p>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="ide-agent-section">
@@ -2316,12 +2674,23 @@ export default function WorkspacePage() {
           agentRun.actionCandidates.slice(0, 5).map((candidate, index) => (
             <div key={`${candidate.outputHash}-${index}`} className="ide-action-candidate">
               <span>{candidate.actionType}</span>
+              <small>
+                {[
+                  candidate.targetKind,
+                  candidate.targetId ? truncateValue(candidate.targetId, 16) : undefined,
+                  candidate.evidenceId ? `evidence ${truncateValue(candidate.evidenceId, 14)}` : undefined,
+                  candidate.findingId ? `finding ${candidate.findingId}` : undefined,
+                ].filter(Boolean).join(" / ") || "workspace action"}
+              </small>
               <code>{truncateValue(candidate.outputHash, 18)}</code>
-              <small>human approval required</small>
+              <small>{candidate.requiresHumanApproval ? "prepared; human approval required" : "prepared; approval status returned false"}</small>
             </div>
           ))
         ) : (
           <p className="ide-muted">No action candidates yet. AgentAction submission is intentionally not faked; SDK proof return needs hardening before this panel can show event details.</p>
+        )}
+        {agentReview.approval.outputHashes.length > 0 && (
+          <p className="ide-muted">Output hashes are ready for review, but no AgentAction has been signed or submitted from this panel yet.</p>
         )}
       </div>
     </aside>
