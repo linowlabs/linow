@@ -86,6 +86,12 @@ async function main() {
     case "orchestrate-files":
       await runOrchestrateFiles();
       return;
+    case "orchestrate-p2":
+      await runOrchestratePointTwo();
+      return;
+    case "orchestrate-p1":
+      await runOrchestratePointOne();
+      return;
     case "orchestrate":
       await runOrchestrate();
       return;
@@ -271,6 +277,49 @@ async function runOrchestrate() {
   print("orchestrate", result);
 }
 
+async function runOrchestratePointTwo() {
+  const payload = {
+    response_mode: "compact_p2",
+    pack_id: "pack_linow_isa_q2_demo",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage: "before_remediation",
+    pack_notes: [
+      "Synthetic CLI smoke test aligned to isa_q2_engagement",
+      "Expect approval and cut-off issues before remediation",
+    ],
+    documents: [bankStatementDoc, contractDoc, cutoffLogDoc, adjustmentDoc].map((document) => ({
+      ...document,
+      notes: [`Seeded from ${document.context.filePath}`],
+    })),
+  };
+
+  const result = await postJson("/api/agent/orchestrate", payload);
+  print("orchestrate-p2", result);
+}
+
+async function runOrchestratePointOne() {
+  const payload = {
+    response_mode: "compact_p1",
+    pack_id: "pack_linow_isa_q2_demo",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage: "before_remediation",
+    pack_notes: [
+      "Synthetic CLI smoke test aligned to isa_q2_engagement",
+      "Point 1 verification with seeded evidence references",
+    ],
+    documents: [bankStatementDoc, contractDoc, cutoffLogDoc, adjustmentDoc].map((document, index) => ({
+      ...document,
+      notes: [`Seeded from ${document.context.filePath}`],
+      evidence_ref: buildSyntheticEvidenceRef(document, index),
+    })),
+  };
+
+  const result = await postJson("/api/agent/orchestrate", payload);
+  print("orchestrate-p1", result);
+}
+
 async function runOrchestrateFiles() {
   ensureFileArgs("orchestrate-files");
 
@@ -327,6 +376,17 @@ function print(label, value) {
 
 function slugId(filename) {
   return `doc_${filename.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40)}`;
+}
+
+function buildSyntheticEvidenceRef(document, index) {
+  const slug = slugId(document.documentName).replace(/^doc_/, "");
+  const hexSeed = Buffer.from(`linow-${slug}-${index}`).toString("hex").slice(0, 64).padEnd(64, "0");
+
+  return {
+    evidence_id: `evidence_${slug}`,
+    walrus_blob_id: `walrus_blob_${slug}`,
+    commitment: `0x${hexSeed}`,
+  };
 }
 
 function ensureFileArg(currentMode) {

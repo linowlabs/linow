@@ -113,7 +113,8 @@ export function buildWalrusMemoryManifest(result: AgentOrchestrationResult): Wal
         evidenceId: evidenceRef.evidence_id,
         walrusBlobId: evidenceRef.walrus_blob_id,
         commitment: evidenceRef.commitment,
-      })),
+      }))
+      .sort((left, right) => left.evidenceId.localeCompare(right.evidenceId)),
     agentOutputHashes: result.artifact_catalog.map((artifact) => ({
       schemaName: artifact.schema_name,
       schemaVersion: artifact.schema_version,
@@ -136,17 +137,23 @@ function buildAgentActionCandidates(result: AgentOrchestrationResult): PreparedA
       .map((document) => [document.document_id, document.evidence_ref?.evidence_id]),
   );
 
-  return result.artifact_catalog.map((artifact) => ({
-    pack_id: result.pack_id,
-    evidence_id: artifact.document_id ? evidenceIdByDocumentId.get(artifact.document_id) : undefined,
-    action_type: artifact.action_type,
-    agent_output_hash: artifact.sha256,
-    target_kind: artifact.target_kind,
-    target_id: artifact.target_id,
-    document_id: artifact.document_id,
-    finding_id: artifact.finding_id,
-    requires_human_approval: true,
-  }));
+  return result.artifact_catalog
+    .map((artifact) => ({
+      pack_id: result.pack_id,
+      evidence_id: artifact.document_id ? evidenceIdByDocumentId.get(artifact.document_id) : undefined,
+      action_type: artifact.action_type,
+      agent_output_hash: artifact.sha256,
+      target_kind: artifact.target_kind,
+      target_id: artifact.target_id,
+      document_id: artifact.document_id,
+      finding_id: artifact.finding_id,
+      requires_human_approval: true as const,
+    }))
+    .sort((left, right) =>
+      left.target_kind.localeCompare(right.target_kind) ||
+      left.target_id.localeCompare(right.target_id) ||
+      left.action_type.localeCompare(right.action_type),
+    );
 }
 
 async function persistToMemWal(

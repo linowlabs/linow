@@ -280,14 +280,12 @@ export function normalizeGapAnalysisResult(
   value: unknown,
 ): GapAnalysisOutput {
   const draft = coerceGroqGapAnalysisDraft(value);
-  const gaps = normalizeGapItems(draft.gaps);
-  const coveredAssertions = normalizeAssertionIdsFromLabels(draft.covered_labels);
-  const inferredCoveredAssertions =
-    coveredAssertions.length > 0 ? coveredAssertions : deriveCoveredAssertionsFromGaps(gaps);
-  const coveredLabels = normalizeLabels(draft.covered_labels, inferredCoveredAssertions);
-  const missingAssertions = normalizeAssertionIdsFromLabels(draft.missing_labels);
-  const effectiveMissingAssertions =
-    missingAssertions.length > 0 ? missingAssertions : deriveMissingAssertions(inferredCoveredAssertions);
+  const normalizedGaps = normalizeGapItems(draft.gaps);
+  const resolvedCoverage = resolvePackAssertionCoverage(input.documents, draft, normalizedGaps);
+  const gaps =
+    normalizedGaps.length > 0
+      ? normalizedGaps
+      : deriveFallbackGaps(input.documents, resolvedCoverage.missing_assertions);
   const recommendations =
     draft.recommendations && draft.recommendations.length > 0
       ? draft.recommendations
@@ -298,11 +296,16 @@ export function normalizeGapAnalysisResult(
     schema_version: AGENT_SCHEMA_VERSION,
     pack_id: input.pack_id,
     total_assertions: ASSERTION_IDS.length,
-    covered_assertions: inferredCoveredAssertions,
-    covered_labels: coveredLabels,
-    missing_assertions: effectiveMissingAssertions,
-    missing_labels: normalizeLabels(draft.missing_labels, effectiveMissingAssertions),
-    readiness_score: normalizeReadinessScore(draft.readiness_score, coveredAssertions, effectiveMissingAssertions, gaps),
+    covered_assertions: resolvedCoverage.covered_assertions,
+    covered_labels: resolvedCoverage.covered_labels,
+    missing_assertions: resolvedCoverage.missing_assertions,
+    missing_labels: resolvedCoverage.missing_labels,
+    readiness_score: normalizeReadinessScore(
+      draft.readiness_score,
+      resolvedCoverage.covered_assertions,
+      resolvedCoverage.missing_assertions,
+      gaps,
+    ),
     recommendations,
     gaps,
     evidence_count: input.documents.length,
@@ -367,11 +370,11 @@ function normalizeGapItems(value: GroqGapItemDraft[] | null): GapItem[] {
 
   return value
     .map((item) => {
+      const explicitRelatedAssertions = normalizeAssertionIdsFromLabels(item.related_assertion_labels);
       const relatedAssertions =
-        normalizeAssertionIdsFromLabels(item.related_assertion_labels).length > 0
-          ? normalizeAssertionIdsFromLabels(item.related_assertion_labels)
+        explicitRelatedAssertions.length > 0
+          ? explicitRelatedAssertions
           : inferAssertionIdsFromText([item.title, item.rationale]);
-      const relatedAssertionLabels = normalizeLabels(item.related_assertion_labels, relatedAssertions);
       const severity = normalizeGapSeverity(item.severity);
 
       if (!item.title || !item.rationale) {
@@ -382,7 +385,7 @@ function normalizeGapItems(value: GroqGapItemDraft[] | null): GapItem[] {
         title: item.title,
         severity,
         related_assertions: relatedAssertions,
-        related_assertion_labels: relatedAssertionLabels,
+        related_assertion_labels: buildAssertionLabels(relatedAssertions),
         rationale: item.rationale,
         suggested_evidence: item.suggested_evidence ?? [],
       } satisfies GapItem;
@@ -397,16 +400,12 @@ function normalizeAssertionIdsFromLabels(value: string[] | null | undefined): As
 
   const normalized = value
     .map((item) => getAssertionIdByLabel(item))
-    .filter((item): item is AssertionId => item !== null);
+    .filter((item): item is AssertionId => item !== undefined);
 
   return Array.from(new Set(normalized)) as AssertionId[];
 }
 
-function normalizeLabels(value: string[] | null | undefined, assertionIds: AssertionId[]): string[] {
-  if (value && value.length > 0) {
-    return value;
-  }
-
+function buildAssertionLabels(assertionIds: AssertionId[]): string[] {
   return assertionIds.map((assertionId) => getAssertionLabel(assertionId));
 }
 
@@ -414,9 +413,164 @@ function deriveMissingAssertions(coveredAssertions: AssertionId[]): AssertionId[
   return ASSERTION_IDS.filter((assertionId) => !coveredAssertions.includes(assertionId)) as AssertionId[];
 }
 
-function deriveCoveredAssertionsFromGaps(gaps: GapItem[]): AssertionId[] {
-  const missing = new Set(gaps.flatMap((gap) => gap.related_assertions));
-  return ASSERTION_IDS.filter((assertionId) => !missing.has(assertionId)) as AssertionId[];
+function resolvePackAssertionCoverage(
+  documents: GapAnalysisDocumentInput[],
+  draft: GroqGapAnalysisDraft,
+  gaps: GapItem[],
+): Pick<GapAnalysisOutput, "covered_assertions" | "covered_labels" | "missing_assertions" | "missing_labels"> {
+  const explicitCoveredAssertions = normalizeAssertionIdsFromLabels(draft.covered_labels);
+  const explicitMissingAssertions = normalizeAssertionIdsFromLabels(draft.missing_labels);
+  const gapMissingAssertions = deriveGapMissingAssertions(gaps);
+  const fallbackCoveredAssertions = deriveDocumentCoveredAssertions(documents);
+  const resolvedMissingAssertions = Array.from(
+    new Set(
+      (explicitMissingAssertions.length > 0 ? explicitMissingAssertions : gapMissingAssertions) as AssertionId[],
+    ),
+  ) as AssertionId[];
+
+  const resolvedCoveredAssertions = resolveCoveredAssertions({
+    explicitCoveredAssertions,
+    explicitMissingAssertions: resolvedMissingAssertions,
+    fallbackCoveredAssertions,
+  });
+  const finalMissingAssertions =
+    resolvedMissingAssertions.length > 0
+      ? resolvedMissingAssertions
+      : deriveMissingAssertions(resolvedCoveredAssertions);
+
+  return {
+    covered_assertions: resolvedCoveredAssertions,
+    covered_labels: buildAssertionLabels(resolvedCoveredAssertions),
+    missing_assertions: finalMissingAssertions,
+    missing_labels: buildAssertionLabels(finalMissingAssertions),
+  };
+}
+
+function resolveCoveredAssertions({
+  explicitCoveredAssertions,
+  explicitMissingAssertions,
+  fallbackCoveredAssertions,
+}: {
+  explicitCoveredAssertions: AssertionId[];
+  explicitMissingAssertions: AssertionId[];
+  fallbackCoveredAssertions: AssertionId[];
+}): AssertionId[] {
+  const excludedAssertions = new Set(explicitMissingAssertions);
+  const explicitResolved = explicitCoveredAssertions.filter((assertionId) => !excludedAssertions.has(assertionId));
+  if (explicitResolved.length > 0) {
+    return explicitResolved as AssertionId[];
+  }
+
+  const fallbackResolved = fallbackCoveredAssertions.filter((assertionId) => !excludedAssertions.has(assertionId));
+  if (fallbackResolved.length > 0) {
+    return fallbackResolved as AssertionId[];
+  }
+
+  if (explicitMissingAssertions.length > 0) {
+    return ASSERTION_IDS.filter((assertionId) => !excludedAssertions.has(assertionId)) as AssertionId[];
+  }
+
+  return [];
+}
+
+function deriveGapMissingAssertions(gaps: GapItem[]): AssertionId[] {
+  return Array.from(new Set(gaps.flatMap((gap) => gap.related_assertions))) as AssertionId[];
+}
+
+function deriveDocumentCoveredAssertions(documents: GapAnalysisDocumentInput[]): AssertionId[] {
+  const mappedAssertions = documents.flatMap((document) =>
+    document.assertion_mapping?.mapped_assertions
+      .filter((item) => item.coverage !== "not_supported")
+      .map((item) => item.assertion_id) ?? [],
+  );
+
+  return Array.from(new Set(mappedAssertions)) as AssertionId[];
+}
+
+function deriveFallbackGaps(documents: GapAnalysisDocumentInput[], missingAssertions: AssertionId[]): GapItem[] {
+  return missingAssertions.map((assertionId) => buildFallbackGap(documents, assertionId));
+}
+
+function buildFallbackGap(documents: GapAnalysisDocumentInput[], assertionId: AssertionId): GapItem {
+  const assertionLabel = getAssertionLabel(assertionId);
+  const evidenceSignals = collectFallbackGapSignals(documents, assertionId);
+  const evidenceBasis =
+    evidenceSignals.length > 0
+      ? evidenceSignals.slice(0, 2).join(" ")
+      : `Current document artifacts do not provide sufficient support for the ${assertionLabel} assertion.`;
+
+  return {
+    title: `Insufficient support for ${assertionLabel}`,
+    severity: "medium",
+    related_assertions: [assertionId],
+    related_assertion_labels: [assertionLabel],
+    rationale: evidenceBasis,
+    suggested_evidence: buildSuggestedEvidenceForAssertion(assertionLabel),
+  };
+}
+
+function collectFallbackGapSignals(documents: GapAnalysisDocumentInput[], assertionId: AssertionId): string[] {
+  const signals = documents.flatMap((document) => {
+    const unsupportedMapping = document.assertion_mapping?.mapped_assertions.find(
+      (item) => item.assertion_id === assertionId && item.coverage === "not_supported",
+    );
+    const mappingRationale = unsupportedMapping?.rationale ? [`${document.filename}: ${unsupportedMapping.rationale}`] : [];
+    const limitationMatches = [
+      ...(document.classification?.limitations ?? []),
+      ...(document.metadata?.limitations ?? []),
+      ...(document.assertion_mapping?.limitations ?? []),
+      ...(document.source_confidence?.caveats ?? []),
+      ...(document.notes ?? []),
+    ]
+      .filter((value) => matchesAssertionLabel(value, assertionId))
+      .map((value) => `${document.filename}: ${value}`);
+
+    return [...mappingRationale, ...limitationMatches];
+  });
+
+  return Array.from(new Set(signals));
+}
+
+function matchesAssertionLabel(value: string, assertionId: AssertionId): boolean {
+  const normalizedValue = value.toLowerCase();
+  const canonicalLabel = getAssertionLabel(assertionId).toLowerCase();
+  const alternateLabel = canonicalLabel.replace(/&/g, "and");
+  const simplifiedCanonical = canonicalLabel.replace(/[^a-z0-9]+/g, " ").trim();
+  const simplifiedAlternate = alternateLabel.replace(/[^a-z0-9]+/g, " ").trim();
+
+  return (
+    normalizedValue.includes(canonicalLabel) ||
+    normalizedValue.includes(alternateLabel) ||
+    normalizedValue.includes(simplifiedCanonical) ||
+    normalizedValue.includes(simplifiedAlternate)
+  );
+}
+
+function buildSuggestedEvidenceForAssertion(assertionLabel: string): string[] {
+  switch (assertionLabel) {
+    case "Rights & Obligations":
+      return [
+        "Upload signed contracts, ownership records, or approval evidence that establishes rights and obligations.",
+      ];
+    case "Classification":
+      return [
+        "Upload supporting schedules or accounting policy evidence that shows the correct financial statement classification.",
+      ];
+    case "Cut-off":
+      return [
+        "Upload dated acceptance, delivery, or go-live evidence to support the correct transaction cut-off.",
+      ];
+    case "Accuracy":
+      return [
+        "Upload calculation support, reconciliations, or approved adjustment evidence to confirm recorded amounts.",
+      ];
+    case "Completeness":
+      return [
+        "Upload reconciliations or full supporting listings to show all relevant transactions are included.",
+      ];
+    default:
+      return ["Upload additional independent supporting evidence for this unresolved assertion."];
+  }
 }
 
 function normalizeReadinessScore(
@@ -425,13 +579,15 @@ function normalizeReadinessScore(
   missingAssertions: AssertionId[],
   gaps: GapItem[],
 ): number {
-  if (isNonNegativeInteger(value)) {
-    return Math.max(0, Math.min(100, value));
-  }
-
   const coverageScore = Math.round((coveredAssertions.length / ASSERTION_IDS.length) * 100);
   const gapPenalty = Math.min(40, gaps.length * 10 + missingAssertions.length * 4);
-  return Math.max(0, Math.min(100, coverageScore - gapPenalty));
+  const derivedScore = Math.max(0, Math.min(100, coverageScore - gapPenalty));
+
+  if (!isNonNegativeInteger(value)) {
+    return derivedScore;
+  }
+
+  return Math.min(Math.max(0, Math.min(100, value)), derivedScore);
 }
 
 function deriveRecommendations(gaps: GapItem[]): string[] {

@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       schema: groqCcerFindingSchema,
       messages: buildCcerFindingMessages(input),
       validate: isGroqDraftFindingResult,
+      responseMode: "json_object",
     });
 
     return NextResponse.json({
