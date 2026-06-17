@@ -92,6 +92,9 @@ async function main() {
     case "orchestrate-p1":
       await runOrchestratePointOne();
       return;
+    case "orchestrate-workspace":
+      await runOrchestrateWorkspace();
+      return;
     case "orchestrate":
       await runOrchestrate();
       return;
@@ -318,6 +321,30 @@ async function runOrchestratePointOne() {
 
   const result = await postJson("/api/agent/orchestrate", payload);
   print("orchestrate-p1", result);
+}
+
+async function runOrchestrateWorkspace() {
+  const payload = {
+    response_mode: "workspace",
+    profile: "sui_overflow_demo",
+    pack_id: "pack_linow_isa_q2_demo",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage: "fieldwork",
+    pack_owner_address: "0xworkspace_demo_owner",
+    pack_notes: [
+      "Synthetic CLI smoke test aligned to the workspace contract",
+      "Verify stable runner/output payload for SO-23 person A",
+    ],
+    documents: [bankStatementDoc, contractDoc, cutoffLogDoc, adjustmentDoc].map((document, index) => ({
+      ...document,
+      notes: [`Seeded from ${document.context.filePath}`],
+      evidence_ref: buildSyntheticEvidenceRef(document, index),
+    })),
+  };
+
+  const result = await postJson("/api/agent/orchestrate", payload);
+  print("orchestrate-workspace", result);
 }
 
 async function runOrchestrateFiles() {

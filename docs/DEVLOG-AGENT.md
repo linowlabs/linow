@@ -982,3 +982,38 @@
   - Re-run the orchestration smoke path against live Groq credentials and compare `cheap` vs `balanced` usage totals on the same evidence pack.
   - Add a cache/reuse layer keyed by evidence commitment or document hash so already-analyzed documents can skip repeated LLM passes entirely.
   - Consider direct Walrus manifest restore for structured replay when MemWal is unavailable or when deterministic artifact reuse is preferred over semantic recall.
+
+## 2026-06-17 — Add Workspace Agent Runner Contract For SO-23
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/orchestrate-response.ts`
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a dedicated `response_mode: "workspace"` contract for `/api/agent/orchestrate` so the workspace can consume a stable, smaller backend payload instead of parsing the full orchestration object directly.
+  - Moved orchestrate response shaping into a new `orchestrate-response` helper to keep route logic modular and avoid duplicating compact response builders.
+  - Included the A-side outputs needed by SO-23 in the workspace contract:
+    - per-document analysis artifacts (`classification`, `source_confidence`, `metadata`, `assertion_mapping`)
+    - `gap_analysis`
+    - `findings`
+    - `review_bundle`
+    - approval-control output (`action_candidates`, `requires_human_approval`, `chain_write_ready`)
+    - persistence and memory summary for Walrus and MemWal
+  - Updated the workspace runner to request `response_mode: "workspace"` and preserve the new contract in `agentRun.raw` without changing the UI rendering layer owned by person B.
+  - Added CLI smoke mode `orchestrate-workspace` to verify the SO-23 person-A contract independently of the browser UI.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-23 is split between two people, and person A’s responsibility is to provide the analysis runner and output contract, not to build the rendering layer.
+  - The workspace previously depended on the full orchestration payload shape, which was heavy and coupled the UI parser to low-level backend internals.
+  - A dedicated workspace response mode gives person B a clearer, more stable contract for rendering classifications, source confidence, gaps, findings, and approval controls later.
+
+### Tech Debt
+- Known shortcuts:
+  - The workspace still stores the response under `agentRun.raw`; no new dedicated frontend types or richer rendering components were introduced here because those belong to person B’s scope.
+- Follow-up needed:
+  - Run `npm run agent:smoke -- orchestrate-workspace` against the dev server and capture the resulting contract for handoff to person B.
+  - When person B starts rendering, consider moving the ad hoc workspace parsing helpers into typed frontend adapters so the contract stays explicit on the UI side too.
