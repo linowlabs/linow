@@ -573,11 +573,6 @@ function buildSuggestedEvidenceForAssertion(assertionLabel: string): string[] {
   }
 }
 
-function deriveCoveredAssertionsFromGaps(gaps: GapItem[]): AssertionId[] {
-  const missing = new Set(gaps.flatMap((gap) => gap.related_assertions));
-  return ASSERTION_IDS.filter((assertionId) => !missing.has(assertionId)) as AssertionId[];
-}
-
 function normalizeReadinessScore(
   value: number | null,
   coveredAssertions: AssertionId[],
