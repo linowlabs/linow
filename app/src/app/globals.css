@@ -1865,6 +1865,194 @@ input, textarea, select {
   font-size: 0.78rem;
 }
 
+.agent-review-card,
+.agent-gap-card,
+.agent-finding-card {
+  display: grid;
+  gap: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.agent-review-head,
+.agent-finding-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+}
+
+.agent-finding-head {
+  grid-template-columns: 12px minmax(0, 1fr);
+}
+
+.agent-review-head strong,
+.agent-finding-head strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-high);
+  font-weight: 700;
+}
+
+.agent-review-head span,
+.agent-finding-head span {
+  display: block;
+  margin-top: 0.18rem;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.agent-review-head code {
+  padding: 0.22rem 0.44rem;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.agent-review-card p,
+.agent-finding-body p,
+.agent-recommendations p,
+.agent-next-steps p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.agent-review-grid,
+.agent-gap-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.agent-gap-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.agent-review-grid div,
+.agent-gap-metrics div {
+  min-width: 0;
+  padding: 0.68rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.agent-review-grid span,
+.agent-gap-metrics span,
+.agent-finding-body span {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-review-grid strong,
+.agent-gap-metrics strong {
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.agent-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.agent-chip-row span {
+  max-width: 100%;
+  padding: 0.26rem 0.5rem;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.agent-chip-row span.covered {
+  border-color: rgba(13, 148, 136, 0.2);
+  background: rgba(13, 148, 136, 0.06);
+  color: var(--turquoise);
+}
+
+.agent-chip-row span.missing {
+  border-color: rgba(217, 119, 6, 0.24);
+  background: rgba(217, 119, 6, 0.07);
+  color: #b45309;
+}
+
+.agent-assertion-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.agent-assertion-list div {
+  min-width: 0;
+  padding: 0.55rem;
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.agent-assertion-list strong,
+.agent-assertion-list span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-assertion-list strong {
+  color: var(--text-high);
+  font-size: 0.72rem;
+}
+
+.agent-assertion-list span {
+  margin-top: 0.18rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.agent-gap-card,
+.agent-finding-card {
+  padding: 0.9rem;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.54);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.agent-finding-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.agent-finding-body div {
+  min-width: 0;
+}
+
+.agent-recommendations,
+.agent-next-steps {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.15rem;
+}
+
 .ide-record-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.82fr);
