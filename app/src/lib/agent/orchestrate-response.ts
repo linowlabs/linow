@@ -1,10 +1,12 @@
 import type { AgentOrchestrationResult } from "@/lib/agent/orchestration-contract";
 import type { AgentWeb3PersistenceResult } from "@/lib/agent/web3-persistence";
 
-export type AgentOrchestrateResponseMode = "full" | "compact_p1" | "compact_p2" | "workspace";
+export type AgentOrchestrateResponseMode = "full" | "compact_p1" | "compact_p2" | "workspace" | "memory";
 
 export function resolveOrchestrateResponseMode(value: unknown): AgentOrchestrateResponseMode {
-  return value === "compact_p1" || value === "compact_p2" || value === "workspace" ? value : "full";
+  return value === "compact_p1" || value === "compact_p2" || value === "workspace" || value === "memory"
+    ? value
+    : "full";
 }
 
 export function buildOrchestrateApiResponse(input: {
@@ -22,6 +24,10 @@ export function buildOrchestrateApiResponse(input: {
 
   if (input.mode === "workspace") {
     return buildWorkspaceResponse(input.result, input.persistenceResult);
+  }
+
+  if (input.mode === "memory") {
+    return buildMemoryResponse(input.result, input.persistenceResult);
   }
 
   return {
@@ -162,6 +168,8 @@ function buildWorkspaceResponse(
     flow: result.flow,
     usage: result.usage,
     recalled_prior_memory_count: result.recalled_prior_memory_count,
+    recall_summary: result.recall_summary,
+    agent_memory_payload: result.agent_memory_payload,
     cached_document_count: result.cached_document_count,
     review_bundle: result.review_bundle,
     approval_controls: {
@@ -186,6 +194,45 @@ function buildWorkspaceResponse(
         requires_human_approval: persistenceResult.sui.requires_human_approval,
         action_candidate_count: persistenceResult.sui.action_candidates.length,
         action_candidates: persistenceResult.sui.action_candidates,
+      },
+    },
+  };
+}
+
+function buildMemoryResponse(
+  result: AgentOrchestrationResult,
+  persistenceResult: AgentWeb3PersistenceResult,
+) {
+  return {
+    provider: result.provider,
+    model: result.model,
+    profile: result.profile,
+    pack_id: result.pack_id,
+    engagement_name: result.engagement_name,
+    audit_area: result.audit_area,
+    stage: result.stage,
+    recall_summary: result.recall_summary,
+    agent_memory_payload: result.agent_memory_payload,
+    recalled_prior_memory_count: result.recalled_prior_memory_count,
+    cached_document_count: result.cached_document_count,
+    usage: result.usage,
+    point_so24_a_check: {
+      skipped_draft_finding: true,
+      recalled_memory_notes_count: result.recall_summary.notes.length,
+      recalled_memory_item_count: result.recall_summary.items.length,
+      memory_document_count: result.agent_memory_payload.documents.length,
+      memory_output_hash_count: result.agent_memory_payload.output_hashes.length,
+      memory_artifact_count: result.agent_memory_payload.artifact_catalog.length,
+      memory_finding_count: result.agent_memory_payload.findings.length,
+    },
+    persistence_result: {
+      memory_namespace: persistenceResult.memory_namespace,
+      memwal: persistenceResult.memwal,
+      walrus: persistenceResult.walrus,
+      manifest: {
+        total_documents: persistenceResult.manifest.total_documents,
+        linked_documents: persistenceResult.manifest.linked_documents,
+        complete_evidence_refs: persistenceResult.manifest.complete_evidence_refs,
       },
     },
   };

@@ -46,6 +46,19 @@ export interface DocumentAnalysisResult {
   };
 }
 
+export interface AgentMemoryDocumentRecord {
+  document_id: string;
+  filename: string;
+  evidence_ref?: AgentDocumentProofReference;
+  analysis_source: DocumentAnalysisResult["analysis_source"];
+  cache_key?: string;
+  classification: DocumentAnalysisResult["classification"];
+  metadata: DocumentAnalysisResult["metadata"];
+  assertion_mapping: DocumentAnalysisResult["assertion_mapping"];
+  source_confidence: DocumentAnalysisResult["source_confidence"];
+  hashes: DocumentAnalysisResult["hashes"];
+}
+
 export type OrchestrationArtifactActionType =
   | "classify"
   | "extract"
@@ -86,6 +99,40 @@ export interface AgentPersistencePlan {
   };
 }
 
+export interface AgentMemoryPayload {
+  schema_name: "agent_memory_payload";
+  schema_version: string;
+  pack_id: string;
+  engagement_name: string;
+  audit_area?: string;
+  stage?: string;
+  memory_namespace: string;
+  created_at: string;
+  documents: AgentMemoryDocumentRecord[];
+  gap_analysis: GapAnalysisOutput;
+  findings: CcerFindingOutput[];
+  audit_pack_summary: AuditPackSummaryOutput;
+  artifact_catalog: OrchestrationArtifactReference[];
+  output_hashes: string[];
+  review_bundle: AgentReviewBundle;
+  flow: OrchestrationFlowStep[];
+}
+
+export interface RecalledAgentMemoryItem {
+  schema_name?: string;
+  summary: string;
+  distance: number;
+}
+
+export interface AgentRecallSummary {
+  schema_name: "agent_recall_summary";
+  schema_version: string;
+  pack_id: string;
+  recalled_count: number;
+  notes: string[];
+  items: RecalledAgentMemoryItem[];
+}
+
 export interface OrchestrationFlowStep {
   step: string;
   artifact_count: number;
@@ -108,6 +155,8 @@ export interface AgentOrchestrationResult {
   audit_pack_summary: AuditPackSummaryOutput;
   hashes: AgentArtifactHashRecord[];
   artifact_catalog: OrchestrationArtifactReference[];
+  agent_memory_payload: AgentMemoryPayload;
+  recall_summary: AgentRecallSummary;
   review_bundle: AgentReviewBundle;
   persistence: AgentPersistencePlan;
   proposed_action: AgentReviewBundle;

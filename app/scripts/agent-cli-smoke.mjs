@@ -95,6 +95,9 @@ async function main() {
     case "orchestrate-workspace":
       await runOrchestrateWorkspace();
       return;
+    case "orchestrate-memory":
+      await runOrchestrateMemory();
+      return;
     case "orchestrate":
       await runOrchestrate();
       return;
@@ -345,6 +348,29 @@ async function runOrchestrateWorkspace() {
 
   const result = await postJson("/api/agent/orchestrate", payload);
   print("orchestrate-workspace", result);
+}
+
+async function runOrchestrateMemory() {
+  const payload = {
+    response_mode: "memory",
+    profile: "cheap",
+    pack_id: "pack_linow_isa_q2_memory",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage: "fieldwork",
+    pack_notes: [
+      "Synthetic CLI smoke test for SO-24 person A",
+      "Verify canonical agent memory payload and recall summary contracts",
+    ],
+    documents: [bankStatementDoc, contractDoc, cutoffLogDoc, adjustmentDoc].map((document, index) => ({
+      ...document,
+      notes: [`Seeded from ${document.context.filePath}`],
+      evidence_ref: buildSyntheticEvidenceRef(document, index),
+    })),
+  };
+
+  const result = await postJson("/api/agent/orchestrate", payload);
+  print("orchestrate-memory", result);
 }
 
 async function runOrchestrateFiles() {

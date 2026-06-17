@@ -66,6 +66,7 @@ import {
   normalizeCcerFindingResult,
   type CcerFindingToolInput,
 } from "@/lib/agent/draft-finding";
+import { buildAgentMemoryPayload, buildAgentRecallSummary } from "@/lib/agent/agent-memory";
 import { hashAgentArtifact } from "@/lib/agent/artifacts";
 import { recallPriorAuditMemory } from "@linow/sdk/memwal";
 
@@ -135,8 +136,9 @@ export async function runAgentOrchestration(
   const usage = createUsageAccumulator();
   const profileConfig = AGENT_CONFIG.orchestrationProfiles[input.profile];
   const useDocumentAnalysisBundle = profileConfig.combineDocumentPasses && AGENT_CONFIG.groq.enableDocumentAnalysisBundle;
-  const priorMemoryNotes = profileConfig.recallPriorMemory ? await recallPriorMemoryNotes(input.pack_id, profileConfig.maxPriorMemoryNotes) : [];
-  const effectivePackNotes = mergePackNotes(input.pack_notes, priorMemoryNotes);
+  const recalledMemories = profileConfig.recallPriorMemory ? await recallPriorAuditMemory(input.pack_id) : [];
+  const recallSummary = buildAgentRecallSummary(input.pack_id, recalledMemories, profileConfig.maxPriorMemoryNotes);
+  const effectivePackNotes = mergePackNotes(input.pack_notes, recallSummary.notes);
   let cachedDocumentCount = 0;
   let model: string = AGENT_CONFIG.groq.defaultModel;
 
@@ -292,9 +294,37 @@ export async function runAgentOrchestration(
   });
 
   const reviewBundle = buildAgentReviewBundle(input.pack_id, artifacts.hashes);
+  const persistence = buildAgentPersistencePlan({
+    packId: input.pack_id,
+    evidenceCount: documents.length,
+    findingCount: findings.length,
+    artifactCatalog: artifacts.artifactCatalog,
+  });
+  const flow = [
+    {
+      step: useDocumentAnalysisBundle ? "analyze_document_bundle" : "classify_extract_map",
+      artifact_count: documents.length * 4,
+      schema_names: ["evidence_classification", "metadata_extraction", "assertion_mapping", "source_confidence"],
+    },
+    {
+      step: "analyze_gaps",
+      artifact_count: 1,
+      schema_names: ["gap_analysis"],
+    },
+    {
+      step: "draft_findings",
+      artifact_count: findings.length,
+      schema_names: ["ccer_finding"],
+    },
+    {
+      step: "build_summary_and_hashes",
+      artifact_count: 1 + artifacts.hashes.length,
+      schema_names: ["audit_pack_summary"],
+    },
+  ] satisfies AgentOrchestrationResult["flow"];
 
-  return {
-    provider: "groq",
+  const baseResult = {
+    provider: "groq" as const,
     model,
     profile: input.profile,
     pack_id: input.pack_id,
@@ -309,39 +339,21 @@ export async function runAgentOrchestration(
     audit_pack_summary: auditPackSummary,
     hashes: artifacts.hashes,
     artifact_catalog: artifacts.artifactCatalog,
+    recall_summary: recallSummary,
     review_bundle: reviewBundle,
-    persistence: buildAgentPersistencePlan({
-      packId: input.pack_id,
-      evidenceCount: documents.length,
-      findingCount: findings.length,
-      artifactCatalog: artifacts.artifactCatalog,
-    }),
+    persistence,
     proposed_action: reviewBundle,
-    flow: [
-      {
-        step: useDocumentAnalysisBundle ? "analyze_document_bundle" : "classify_extract_map",
-        artifact_count: documents.length * 4,
-        schema_names: ["evidence_classification", "metadata_extraction", "assertion_mapping", "source_confidence"],
-      },
-      {
-        step: "analyze_gaps",
-        artifact_count: 1,
-        schema_names: ["gap_analysis"],
-      },
-      {
-        step: "draft_findings",
-        artifact_count: findings.length,
-        schema_names: ["ccer_finding"],
-      },
-      {
-        step: "build_summary_and_hashes",
-        artifact_count: 1 + artifacts.hashes.length,
-        schema_names: ["audit_pack_summary"],
-      },
-    ],
-    recalled_prior_memory_count: priorMemoryNotes.length,
+    flow,
+    recalled_prior_memory_count: recallSummary.recalled_count,
     cached_document_count: cachedDocumentCount,
     usage,
+  } satisfies Omit<AgentOrchestrationResult, "agent_memory_payload">;
+
+  const agentMemoryPayload = buildAgentMemoryPayload(baseResult);
+
+  return {
+    ...baseResult,
+    agent_memory_payload: agentMemoryPayload,
   };
 }
 
@@ -640,60 +652,6 @@ async function runPreferredDocumentAnalysis(
   }
 }
 
-async function recallPriorMemoryNotes(packId: string, limit: number): Promise<string[]> {
-  const priorMemories = await recallPriorAuditMemory(packId);
-  return priorMemories
-    .slice(0, limit)
-    .map((memory) => summarizePriorMemory(memory.text))
-    .filter((note, index, notes) => note.length > 0 && notes.indexOf(note) === index);
-}
-
-function summarizePriorMemory(value: string): string {
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    const schemaName = typeof parsed.schema_name === "string" ? parsed.schema_name : undefined;
-
-    if (schemaName === "audit_pack_summary") {
-      return compactNote(
-        `Prior summary: readiness ${stringValue(parsed.readiness_score)}, findings ${countValue(parsed.finding_ids)}, missing ${countValue(parsed.missing_assertions)}.`,
-      );
-    }
-
-    if (schemaName === "gap_analysis") {
-      return compactNote(
-        `Prior gap analysis: readiness ${stringValue(parsed.readiness_score)}, open gaps ${countValue(parsed.gaps)}.`,
-      );
-    }
-
-    if (schemaName === "ccer_finding") {
-      return compactNote(
-        `Prior finding ${stringValue(parsed.finding_id)}: ${stringValue(parsed.title)} severity ${stringValue(parsed.severity)}.`,
-      );
-    }
-
-    if (schemaName === "evidence_classification") {
-      return compactNote(
-        `Prior classification ${stringValue(parsed.filename)}: ${stringValue(parsed.document_type)} at ${stringValue(parsed.source_confidence)}.`,
-      );
-    }
-
-    if (schemaName === "source_confidence") {
-      return compactNote(
-        `Prior source confidence ${stringValue(parsed.filename)}: ${stringValue(parsed.source_confidence)}.`,
-      );
-    }
-  } catch {
-    return compactNote(`Prior memory: ${value}`);
-  }
-
-  return compactNote(`Prior memory: ${value}`);
-}
-
-function compactNote(value: string): string {
-  const compacted = value.replace(/\s+/g, " ").trim();
-  return compacted.length > 220 ? `${compacted.slice(0, 217)}...` : compacted;
-}
-
 function mergePackNotes(packNotes: string[] | undefined, priorMemoryNotes: string[]): string[] | undefined {
   const merged = [...(packNotes ?? []), ...priorMemoryNotes];
   return merged.length > 0 ? merged : undefined;
@@ -719,14 +677,6 @@ function sumUsage(...usageItems: Array<GroqUsageStats | undefined>): GroqUsageSt
   }
 
   return total;
-}
-
-function countValue(value: unknown): number {
-  return Array.isArray(value) ? value.length : 0;
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === "string" || typeof value === "number" ? String(value) : "unknown";
 }
 
 function createUsageAccumulator(): GroqUsageStats {

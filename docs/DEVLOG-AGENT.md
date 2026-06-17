@@ -1017,3 +1017,57 @@
 - Follow-up needed:
   - Run `npm run agent:smoke -- orchestrate-workspace` against the dev server and capture the resulting contract for handoff to person B.
   - When person B starts rendering, consider moving the ad hoc workspace parsing helpers into typed frontend adapters so the contract stays explicit on the UI side too.
+
+## 2026-06-17 — Formalize Agent Memory Contract For SO-24 Person A
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/orchestration-contract.ts`
+  - `app/src/lib/agent/agent-memory.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/lib/agent/orchestrate-response.ts`
+  - `app/src/lib/agent/web3-persistence.ts`
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added explicit A-side contracts for `agent_memory_payload` and `recall_summary` so orchestration no longer leaves the persisted/recalled memory shape implicit.
+  - Replaced free-form recalled-memory note construction inside `orchestrate.ts` with a structured recall-summary builder that still feeds compact notes into prompts.
+  - Wired orchestration output to include both the canonical memory payload and the canonical recall summary.
+  - Updated the Walrus memory bundle to persist the explicit A-side contracts instead of reassembling ad hoc slices of orchestration output.
+  - Added `response_mode: "memory"` plus CLI smoke mode `orchestrate-memory` to verify the SO-24 person-A contract without stepping into UI or persistence-availability ownership.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-24 person A owns the content and structure of agent memory, not the app’s decision-making around when MemWal or Walrus should be invoked.
+  - Making the memory payload and recall summary explicit reduces backend ambiguity for person B and keeps future persistence/reload flows from depending on loosely coupled orchestration internals.
+  - Reusing the same structured recall summary for both prompt notes and response output keeps the implementation DRY while still protecting token budgets.
+
+### Tech Debt
+- Known shortcuts:
+  - `created_at` values for the memory payload and Walrus manifest are generated independently, so they may differ slightly within the same orchestration run.
+  - MemWal persistence still stores the broader orchestration result through the existing SDK boundary; this change formalizes the A-side contract without refactoring the B-side storage call.
+- Follow-up needed:
+  - Run `npm run agent:smoke -- orchestrate-memory` against the dev server and capture the response for handoff to person B.
+  - If person B later needs a single shared timestamp across the payload, manifest, and Walrus artifact bundle, thread that value through from orchestration instead of generating it in separate layers.
+
+## 2026-06-17 — Isolate SO-24 Memory Smoke From Draft Finding Failures
+
+### Change
+- Files touched:
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `app/src/lib/agent/orchestrate-response.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Updated `response_mode: "memory"` so the SO-24 person-A smoke path skips `draft_finding`, matching its purpose as a memory-contract verifier rather than a full finding-generation test.
+  - Added an explicit `skipped_draft_finding` marker to the compact memory response.
+
+### Reasoning
+- Why this approach was chosen:
+  - The SO-24 person-A smoke should verify the canonical memory and recall contracts without being blocked by unrelated provider fragility in `ccer_finding`.
+  - Full orchestration behavior remains unchanged; only the dedicated memory smoke harness is isolated.
+
+### Tech Debt
+- Known shortcuts:
+  - The memory smoke now verifies the persistence-ready contract with zero drafted findings in this mode, so finding generation still needs to be validated through the full orchestration or point-1 flows.
+- Follow-up needed:
+  - Re-run `npm run agent:smoke -- orchestrate-memory` and confirm the compact response returns the expected recall and memory payload fields.

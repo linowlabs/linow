@@ -65,13 +65,8 @@ interface WalrusAgentMemoryBundle {
   schema_version: string;
   pack_id: string;
   created_at: string;
-  review_bundle: AgentOrchestrationResult["review_bundle"];
-  artifact_catalog: AgentOrchestrationResult["artifact_catalog"];
-  documents: AgentOrchestrationResult["documents"];
-  gap_analysis: AgentOrchestrationResult["gap_analysis"];
-  findings: AgentOrchestrationResult["findings"];
-  audit_pack_summary: AgentOrchestrationResult["audit_pack_summary"];
-  flow: AgentOrchestrationResult["flow"];
+  memory_payload: AgentOrchestrationResult["agent_memory_payload"];
+  recall_summary: AgentOrchestrationResult["recall_summary"];
 }
 
 export async function persistAgentOutputsForWeb3(
@@ -247,13 +242,8 @@ function buildWalrusAgentMemoryBundle(
     schema_version: MEMORY_BUNDLE_SCHEMA_VERSION,
     pack_id: result.pack_id,
     created_at: createdAt,
-    review_bundle: result.review_bundle,
-    artifact_catalog: result.artifact_catalog,
-    documents: result.documents,
-    gap_analysis: result.gap_analysis,
-    findings: result.findings,
-    audit_pack_summary: result.audit_pack_summary,
-    flow: result.flow,
+    memory_payload: result.agent_memory_payload,
+    recall_summary: result.recall_summary,
   };
 }
 

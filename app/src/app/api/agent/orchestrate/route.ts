@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     const responseMode = resolveOrchestrateResponseMode(body.response_mode);
     const input = await resolveAgentOrchestrationInput(body);
     const result = await runAgentOrchestration(input, {
-      skipFindingDrafting: responseMode === "compact_p2",
+      skipFindingDrafting: responseMode === "compact_p2" || responseMode === "memory",
     });
     const persistence_result = await persistAgentOutputsForWeb3(result);
 
