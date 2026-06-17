@@ -1403,6 +1403,7 @@ export default function WorkspacePage() {
       ].filter((note): note is string => Boolean(note));
 
       const result = await postJson<unknown>("/api/agent/orchestrate", {
+        response_mode: "workspace",
         profile: "sui_overflow_demo",
         pack_id: packId,
         engagement_name: "Q2 2026 Audit Readiness",
@@ -1416,13 +1417,16 @@ export default function WorkspacePage() {
       const root = isRecord(result) ? result : {};
       const gap = isRecord(root.gap_analysis) ? root.gap_analysis : {};
       const summary = isRecord(root.audit_pack_summary) ? root.audit_pack_summary : {};
+      const approvalControls = isRecord(root.approval_controls) ? root.approval_controls : {};
       const persistence = isRecord(root.persistence_result) ? root.persistence_result : {};
       const memwal = isRecord(persistence.memwal) ? persistence.memwal : {};
       const walrus = isRecord(persistence.walrus) ? persistence.walrus : {};
       const sui = isRecord(persistence.sui) ? persistence.sui : {};
       const reviewBundle = isRecord(root.review_bundle) ? root.review_bundle : {};
 
-      const actionCandidates = readArray(sui.action_candidates).map((candidate) => {
+      const actionCandidates = readArray(
+        readArray(approvalControls.action_candidates).length > 0 ? approvalControls.action_candidates : sui.action_candidates,
+      ).map((candidate) => {
         const row = isRecord(candidate) ? candidate : {};
         return {
           actionType: readString(row.action_type) ?? "agent_action",
@@ -1469,8 +1473,11 @@ export default function WorkspacePage() {
         actionCandidates,
         memoryStatus,
         raw: {
+          documents: root.documents,
           gap_analysis: root.gap_analysis,
+          findings: root.findings,
           audit_pack_summary: root.audit_pack_summary,
+          approval_controls: root.approval_controls,
           review_bundle: reviewBundle,
           persistence_result: root.persistence_result,
           pack_notes: packNotes,
