@@ -2213,6 +2213,11 @@ input, textarea, select {
   background: rgba(255, 255, 255, 0.52);
 }
 
+.ide-chain-panel {
+  display: grid;
+  gap: 0.65rem;
+}
+
 .ide-memory-panel {
   display: grid;
   gap: 0.65rem;

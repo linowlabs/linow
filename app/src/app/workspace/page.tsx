@@ -6,6 +6,7 @@ import {
   createAttestationFlow,
   createAuditPackFlow,
   createBatchRegisterEvidenceFlow,
+  createEmitAgentActionFlow,
   createRegisterEvidenceFlow,
   createVerifyEvidenceFlow,
   encryptJson,
@@ -13,6 +14,7 @@ import {
   serializeEncryptedPayload,
   type AssertionId,
   type AttestationType,
+  type AgentActionEventProof,
   type ExecuteTransactionBlockInput,
   type JsonValue,
   type SourceConfidenceLevel,
@@ -111,6 +113,10 @@ interface ProofArtifactsSnapshot {
   verificationStatus?: "success" | "tampered";
   checkedFileLabel?: string;
   memoryStatus?: string;
+  agentActionTxDigest?: string;
+  agentActionEventType?: string;
+  agentActionEventSeq?: string;
+  agentActionOutputHash?: string;
   updatedAt: string;
 }
 
@@ -122,6 +128,7 @@ interface AgentFindingSummary {
 }
 
 interface AgentActionCandidate {
+  packId?: string;
   actionType: string;
   outputHash: string;
   targetKind?: string;
@@ -130,6 +137,30 @@ interface AgentActionCandidate {
   documentId?: string;
   findingId?: string;
   requiresHumanApproval: boolean;
+}
+
+interface LoggedAgentAction {
+  key: string;
+  packId: string;
+  evidenceId?: string;
+  actionType: string;
+  outputHash: string;
+  targetKind?: string;
+  targetId?: string;
+  signer: string;
+  txDigest?: string;
+  packageId?: string;
+  eventCount: number;
+  objectChangeCount: number;
+  event?: AgentActionEventProof;
+  loggedAt: string;
+}
+
+interface AgentActionLogState {
+  status: "idle" | "signing" | "success" | "error";
+  message: string;
+  activeKey?: string;
+  logs: LoggedAgentAction[];
 }
 
 interface AgentDocumentReview {
@@ -321,6 +352,12 @@ const DEFAULT_MEMORY_RELOAD_STATE: WalrusMemoryReloadState = {
   message: "Run agent analysis with Walrus fallback configured, then reload the encrypted memory artifact.",
 };
 
+const DEFAULT_AGENT_ACTION_LOG_STATE: AgentActionLogState = {
+  status: "idle",
+  message: "Approve an agent action candidate to log its output hash on Sui.",
+  logs: [],
+};
+
 async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
   const response = await fetch(url, {
     method: "POST",
@@ -436,6 +473,10 @@ function inferDocumentType(fileName: string): string {
 
 function getFileExtension(fileName: string): string {
   return fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
+}
+
+function isSuiObjectId(value: string | undefined): value is string {
+  return Boolean(value && /^0x[0-9a-fA-F]{2,}$/.test(value));
 }
 
 async function readAgentText(file: File): Promise<{ text?: string; warning?: string }> {
@@ -661,6 +702,7 @@ export default function WorkspacePage() {
   const [agentRun, setAgentRun] = useState<AgentRunState>(DEFAULT_AGENT_STATE);
   const [agentInstruction, setAgentInstruction] = useState("");
   const [memoryReload, setMemoryReload] = useState<WalrusMemoryReloadState>(DEFAULT_MEMORY_RELOAD_STATE);
+  const [agentActionLog, setAgentActionLog] = useState<AgentActionLogState>(DEFAULT_AGENT_ACTION_LOG_STATE);
 
   const signerAddress = wallet.address ?? "";
   const signTransaction = wallet.signTransaction;
@@ -1664,6 +1706,7 @@ export default function WorkspacePage() {
       ).map((candidate) => {
         const row = isRecord(candidate) ? candidate : {};
         return {
+          packId: readString(row.pack_id),
           actionType: readString(row.action_type) ?? "agent_action",
           outputHash: readString(row.agent_output_hash) ?? "hash unavailable",
           targetKind: readString(row.target_kind),
@@ -1745,6 +1788,135 @@ export default function WorkspacePage() {
         status: "error",
         message: getErrorMessage(error, "Agent orchestration failed."),
       });
+    }
+  };
+
+  const getAgentActionCandidateKey = (candidate: AgentActionCandidate) =>
+    [
+      candidate.packId ?? auditPack.id ?? "no-pack",
+      candidate.targetKind ?? "target",
+      candidate.targetId ?? "no-target",
+      candidate.actionType,
+      candidate.outputHash,
+    ].join("|");
+
+  const isAgentActionLogged = (candidate: AgentActionCandidate) => {
+    const key = getAgentActionCandidateKey(candidate);
+    return agentActionLog.logs.some((log) => log.key === key);
+  };
+
+  const handleApproveAgentAction = async (candidate: AgentActionCandidate) => {
+    const key = getAgentActionCandidateKey(candidate);
+    const packId = candidate.packId ?? auditPack.id;
+
+    if (!signerAddress) {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: "Connect a Sui wallet before approving an AgentAction.",
+      }));
+      return;
+    }
+
+    if (!isSuiObjectId(packId)) {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: "AgentAction approval needs a real Sui AuditPack object ID. Create the AuditPack before logging agent actions.",
+      }));
+      return;
+    }
+
+    if (!/^[0-9a-fA-F]+$/.test(candidate.outputHash) || candidate.outputHash === "hash unavailable") {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: "AgentAction approval needs a valid hex output hash.",
+      }));
+      return;
+    }
+
+    setAgentActionLog((prev) => ({
+      ...prev,
+      status: "signing",
+      activeKey: key,
+      message: "Waiting for wallet approval to log the AgentAction hash on Sui.",
+    }));
+
+    try {
+      const emitAgentAction = createEmitAgentActionFlow({
+        packageId: PACKAGE_ID,
+        signerAddress,
+        signTransaction,
+        tatum: serverTatumExecute,
+        tatumNetwork: "testnet",
+      });
+      const result = await emitAgentAction({
+        packId,
+        evidenceId: candidate.evidenceId,
+        actionType: candidate.actionType,
+        agentOutputHash: candidate.outputHash,
+      });
+      const loggedAt = nowLabel();
+      const loggedAction: LoggedAgentAction = {
+        key,
+        packId,
+        evidenceId: candidate.evidenceId,
+        actionType: candidate.actionType,
+        outputHash: candidate.outputHash,
+        targetKind: candidate.targetKind,
+        targetId: candidate.targetId,
+        signer: signerAddress,
+        txDigest: result.transactionDigest,
+        packageId: result.packageId,
+        eventCount: result.eventCount,
+        objectChangeCount: result.objectChangeCount,
+        event: result.agentActionEvent,
+        loggedAt,
+      };
+
+      setAgentActionLog((prev) => ({
+        status: "success",
+        activeKey: key,
+        message: "AgentAction logged on Sui. Only the approved output hash and lifecycle event were written.",
+        logs: [loggedAction, ...prev.logs.filter((log) => log.key !== key)],
+      }));
+      if (candidate.findingId) {
+        setAgentRun((prev) => ({
+          ...prev,
+          findings: prev.findings.map((finding) =>
+            finding.id === candidate.findingId ? { ...finding, status: "logged" } : finding,
+          ),
+        }));
+      }
+      setProofSnapshot((prev) => ({
+        auditPackId: packId,
+        evidenceId: candidate.evidenceId ?? prev?.evidenceId,
+        txDigest: result.transactionDigest ?? prev?.txDigest,
+        packageId: result.packageId ?? PACKAGE_ID,
+        commitment: prev?.commitment,
+        blobReference: prev?.blobReference,
+        attestationId: prev?.attestationId,
+        verificationStatus: prev?.verificationStatus,
+        checkedFileLabel: prev?.checkedFileLabel,
+        memoryStatus: prev?.memoryStatus,
+        agentActionTxDigest: result.transactionDigest,
+        agentActionEventType: result.agentActionEvent?.type,
+        agentActionEventSeq: result.agentActionEvent?.id?.eventSeq,
+        agentActionOutputHash: candidate.outputHash,
+        updatedAt: loggedAt,
+      }));
+      setBottomTab("chain");
+    } catch (error) {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: getErrorMessage(error, "AgentAction logging failed."),
+      }));
     }
   };
 
@@ -2615,6 +2787,18 @@ export default function WorkspacePage() {
           <span className="proof-label">Memory</span>
           <span className="proof-value">{proofSnapshot.memoryStatus ?? "pending"}</span>
         </div>
+        <div className="proof-row">
+          <span className="proof-label">AgentAction Tx</span>
+          <span className="proof-value">{proofSnapshot.agentActionTxDigest ? truncateValue(proofSnapshot.agentActionTxDigest, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">AgentAction Event</span>
+          <span className="proof-value">{proofSnapshot.agentActionEventType ? truncateValue(proofSnapshot.agentActionEventType, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Agent Output Hash</span>
+          <span className="proof-value">{proofSnapshot.agentActionOutputHash ? truncateValue(proofSnapshot.agentActionOutputHash, 34) : "pending"}</span>
+        </div>
       </div>
     </div>
   );
@@ -2629,6 +2813,7 @@ export default function WorkspacePage() {
       verificationResult,
       attestResult,
       memoryReload,
+      agentActionLog,
       agentRun: agentRun.raw ?? {
         status: agentRun.status,
         message: agentRun.message,
@@ -2661,12 +2846,34 @@ export default function WorkspacePage() {
             </div>
           )}
           {bottomTab === "chain" && (
-            <div className="ide-status-line">
-              <span>Package {truncateValue(PACKAGE_ID, 28)}</span>
-              <span>Pack {auditPack.id ? truncateValue(auditPack.id, 20) : "not created"}</span>
-              <span>Pack evidence links: {registry.filter((record) => record.auditPackId === auditPack.id).length}</span>
-              <span>Tx {proofSnapshot?.txDigest ? truncateValue(proofSnapshot.txDigest, 24) : "pending"}</span>
-              <span>Attestation {proofSnapshot?.attestationId ? truncateValue(proofSnapshot.attestationId, 18) : "pending"}</span>
+            <div className="ide-chain-panel">
+              <div className="ide-status-line">
+                <span>Package {truncateValue(PACKAGE_ID, 28)}</span>
+                <span>Pack {auditPack.id ? truncateValue(auditPack.id, 20) : "not created"}</span>
+                <span>Pack evidence links: {registry.filter((record) => record.auditPackId === auditPack.id).length}</span>
+                <span>Tx {proofSnapshot?.txDigest ? truncateValue(proofSnapshot.txDigest, 24) : "pending"}</span>
+                <span>Attestation {proofSnapshot?.attestationId ? truncateValue(proofSnapshot.attestationId, 18) : "pending"}</span>
+              </div>
+              <div className={`ide-memory-result ${agentActionLog.status === "error" ? "error" : agentActionLog.status === "success" ? "success" : "idle"}`}>
+                <strong>AgentAction log</strong>
+                <p>{agentActionLog.message}</p>
+                {agentActionLog.logs[0] && (
+                  <div className="ide-memory-grid">
+                    <span>Tx</span>
+                    <code>{agentActionLog.logs[0].txDigest ? truncateValue(agentActionLog.logs[0].txDigest, 18) : "pending"}</code>
+                    <span>Event</span>
+                    <code>{agentActionLog.logs[0].event?.type ? truncateValue(agentActionLog.logs[0].event.type, 18) : "pending"}</code>
+                    <span>Seq</span>
+                    <code>{agentActionLog.logs[0].event?.id?.eventSeq ?? "pending"}</code>
+                    <span>Events/Objects</span>
+                    <code>{agentActionLog.logs[0].eventCount}/{agentActionLog.logs[0].objectChangeCount}</code>
+                    <span>Output hash</span>
+                    <code>{truncateValue(agentActionLog.logs[0].outputHash, 18)}</code>
+                    <span>Signer</span>
+                    <code>{truncateValue(agentActionLog.logs[0].signer, 18)}</code>
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {bottomTab === "memory" && (
@@ -2820,27 +3027,56 @@ export default function WorkspacePage() {
       <div className="ide-agent-section">
         <div className="card-section-title">Approval Queue</div>
         {agentRun.actionCandidates.length > 0 ? (
-          agentRun.actionCandidates.slice(0, 5).map((candidate, index) => (
-            <div key={`${candidate.outputHash}-${index}`} className="ide-action-candidate">
-              <span>{candidate.actionType}</span>
-              <small>
-                {[
-                  candidate.targetKind,
-                  candidate.targetId ? truncateValue(candidate.targetId, 16) : undefined,
-                  candidate.evidenceId ? `evidence ${truncateValue(candidate.evidenceId, 14)}` : undefined,
-                  candidate.findingId ? `finding ${candidate.findingId}` : undefined,
-                ].filter(Boolean).join(" / ") || "workspace action"}
-              </small>
-              <code>{truncateValue(candidate.outputHash, 18)}</code>
-              <small>{candidate.requiresHumanApproval ? "prepared; human approval required" : "prepared; approval status returned false"}</small>
-            </div>
-          ))
+          agentRun.actionCandidates.slice(0, 5).map((candidate, index) => {
+            const key = getAgentActionCandidateKey(candidate);
+            const logged = isAgentActionLogged(candidate);
+            const signing = agentActionLog.status === "signing" && agentActionLog.activeKey === key;
+            const hasPackObject = isSuiObjectId(candidate.packId ?? auditPack.id);
+
+            return (
+              <div key={`${candidate.outputHash}-${index}`} className="ide-action-candidate">
+                <span>{candidate.actionType}</span>
+                <small>
+                  {[
+                    candidate.targetKind,
+                    candidate.targetId ? truncateValue(candidate.targetId, 16) : undefined,
+                    candidate.evidenceId ? `evidence ${truncateValue(candidate.evidenceId, 14)}` : undefined,
+                    candidate.findingId ? `finding ${candidate.findingId}` : undefined,
+                  ].filter(Boolean).join(" / ") || "workspace action"}
+                </small>
+                <code>{truncateValue(candidate.outputHash, 18)}</code>
+                <small>
+                  {logged
+                    ? "logged on Sui"
+                    : !hasPackObject
+                      ? "create AuditPack before logging"
+                      : candidate.requiresHumanApproval
+                        ? "prepared; human approval required"
+                        : "prepared; approval status returned false"}
+                </small>
+                <button
+                  className="btn-secondary full-width"
+                  type="button"
+                  disabled={signing || logged || !signerAddress || !hasPackObject}
+                  onClick={() => handleApproveAgentAction(candidate)}
+                >
+                  {signing ? "Signing..." : logged ? "Logged" : "Approve & log"}
+                </button>
+              </div>
+            );
+          })
         ) : (
-          <p className="ide-muted">No action candidates yet. AgentAction submission is intentionally not faked; SDK proof return needs hardening before this panel can show event details.</p>
+          <p className="ide-muted">No action candidates yet. Run analysis after adding readable evidence to prepare hash-only AgentAction candidates.</p>
         )}
-        {agentReview.approval.outputHashes.length > 0 && (
-          <p className="ide-muted">Output hashes are ready for review, but no AgentAction has been signed or submitted from this panel yet.</p>
-        )}
+        <p className="ide-muted">
+          {agentActionLog.status === "success"
+            ? "Latest approved AgentAction was signed by the connected wallet and emitted as a Sui event."
+            : agentActionLog.status === "error"
+              ? agentActionLog.message
+              : agentReview.approval.outputHashes.length > 0
+                ? "Output hashes are ready. Approving logs only the hash/event metadata, never private agent text."
+                : "AgentAction logging appears after a workspace analysis run prepares output hashes."}
+        </p>
       </div>
     </aside>
   );
