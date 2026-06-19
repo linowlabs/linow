@@ -1264,3 +1264,29 @@
 - Follow-up needed:
   - Consider adding a small settings control for `cheap`/`balanced`/`full` if demo iteration needs faster runs.
 
+## 2026-06-19 -- Add Walrus Memory Reload Proof
+
+### Change
+- Files touched:
+  - `app/src/app/api/walrus/memory/reload/route.ts`
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added an app-owned Walrus memory reload API that reads encrypted memory manifest and agent artifact blobs through the SDK read helpers.
+  - The route decrypts server-side with `LINOW_AGENT_MEMORY_ENCRYPTION_KEY` and returns only safe summary counts instead of raw agent memory content.
+  - Added a workspace Memory tab action to reload the direct Walrus fallback artifact and display pack, evidence-ref, output-hash, finding-hash, document, and finding counts.
+  - Added explicit copy that the reload proves encrypted Walrus artifact availability/decryptability, not document truth.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-24/SO-24a need a demo-visible save/reload proof path without changing agent logic.
+  - The SDK already had encrypted Walrus read helpers, so the app only needed a server-side route to protect the memory key and a small workspace proof surface.
+
+### Tech Debt
+- Known shortcuts:
+  - The reload button proves direct Walrus fallback artifacts, while MemWal semantic recall remains represented by the existing orchestration recall status.
+  - The route returns counts and identifiers only; a richer memory inspector can be added later if reviewers need per-artifact drilldown.
+- Follow-up needed:
+  - Connect this memory reload result into the larger SO-28 proof dashboard/export surface.
+
