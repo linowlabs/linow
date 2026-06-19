@@ -1369,3 +1369,28 @@
 - Follow-up needed:
   - Add a verifier import/check path and consider storing signed export manifests as durable artifacts once the proof dashboard stabilizes.
 
+## 2026-06-19 -- Add Judge-Facing Proof Dashboard
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a Proof Dashboard view inside the verifier/export rail.
+  - Displayed chain anchors, AuditPack refs, EvidenceRecord IDs, commitments, Walrus blob IDs, attestation refs, AgentAction tx/event refs, and memory artifact refs in a readable inspector surface.
+  - Added explicit per-evidence labels for commitment match, mismatch, or not checked in this browser session.
+  - Added dashboard copy that preserves Linow's limits: integrity and lifecycle proof, not document truth or audit sufficiency.
+
+### Reasoning
+- Why this approach was chosen:
+  - Judges and external reviewers need a quick proof surface before inspecting the raw JSON export.
+  - The dashboard uses existing workspace state only, so it does not change the SDK, agent, or on-chain behavior.
+
+### Tech Debt
+- Known shortcuts:
+  - Verification status is based on the latest browser-session verification result, not a persisted per-record verification history.
+  - The dashboard is read-only and generated from loaded workspace state.
+- Follow-up needed:
+  - Add persisted verification history if the shared reviewer flow needs a durable record of every local hash check.
+

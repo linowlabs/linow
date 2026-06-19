@@ -1386,6 +1386,25 @@ export default function WorkspacePage() {
     setExportMessage("Verifier export downloaded as JSON.");
   };
 
+  const getEvidenceVerificationState = (recordId: string) => {
+    if (lastVerificationSession?.evidenceId !== recordId) {
+      return {
+        label: "Not checked in this session",
+        tone: "idle",
+      };
+    }
+
+    return lastVerificationSession.status === "success"
+      ? {
+          label: "Commitment match",
+          tone: "success",
+        }
+      : {
+          label: "Mismatch detected",
+          tone: "error",
+        };
+  };
+
   const prepareLocalDocument = (document: LocalDocument) => {
     setActiveItemId(`local:${document.id}`);
     setActiveLocalDocumentId(document.id);
@@ -2705,6 +2724,10 @@ export default function WorkspacePage() {
   );
 
   const renderMainContent = () => {
+    if (activeRailPanel === "export" && activeItemId === "proof-dashboard") {
+      return renderVerifierProofDashboard();
+    }
+
     if (activeRailPanel === "export" || activeItemId === "export") {
       return renderExportPanel();
     }
@@ -3315,6 +3338,239 @@ export default function WorkspacePage() {
       </div>
     </div>
   );
+
+  const renderVerifierProofDashboard = () => {
+    const attestedCount = registry.filter((record) => record.latestAttestation).length;
+    const memoryReady = Boolean(agentReview.persistence.manifestBlobId && agentReview.persistence.artifactBlobId);
+    const latestAgentAction = agentActionLog.logs[0];
+
+    return (
+      <div className="ide-main-stack">
+        <div className="ide-panel-header">
+          <div>
+            <span className="workspace-eyebrow">Proof Dashboard</span>
+            <h1 className="workspace-title">Judge-Facing Proof Surface</h1>
+            <p className="workspace-desc">
+              Inspect the live chain, Walrus, memory, attestation, and AgentAction references behind this workspace. This proves integrity and lifecycle actions, not document truth.
+            </p>
+          </div>
+        </div>
+
+        <div className="export-summary-grid">
+          <div>
+            <span>AuditPack</span>
+            <strong>{auditPack.id ? "ready" : "pending"}</strong>
+          </div>
+          <div>
+            <span>Evidence</span>
+            <strong>{registry.length}</strong>
+          </div>
+          <div>
+            <span>Attested</span>
+            <strong>{attestedCount}</strong>
+          </div>
+          <div>
+            <span>AgentActions</span>
+            <strong>{agentActionLog.logs.length}</strong>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Chain Anchor</div>
+          <div className="proof-grid">
+            <div className="proof-row">
+              <span className="proof-label">Package ID</span>
+              <span className="proof-value">{truncateValue(PACKAGE_ID, 42)}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">AuditPack ID</span>
+              <span className="proof-value">{auditPack.id ? truncateValue(auditPack.id, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">AuditPack Tx</span>
+              <span className="proof-value">{auditPack.txDigest ? truncateValue(auditPack.txDigest, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Engagement</span>
+              <span className="proof-value">{demoEngagement.id ? truncateValue(demoEngagement.id, 42) : "local workspace"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Company Wallet</span>
+              <span className="proof-value">{demoEngagement.companyWallet ? truncateValue(demoEngagement.companyWallet, 42) : "unassigned"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Auditor Wallet</span>
+              <span className="proof-value">{demoEngagement.auditorWallet ? truncateValue(demoEngagement.auditorWallet, 42) : "unassigned"}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Evidence Proofs</div>
+          {registry.length > 0 ? (
+            <div className="proof-dashboard-list">
+              {registry.map((record) => {
+                const verificationState = getEvidenceVerificationState(record.id);
+
+                return (
+                  <div key={record.id} className="proof-dashboard-item">
+                    <div className="proof-dashboard-item-header">
+                      <div>
+                        <strong>{record.fileName ?? record.type}</strong>
+                        <span>{record.type} / {record.source}</span>
+                      </div>
+                      <span className={`proof-status-pill ${verificationState.tone}`}>{verificationState.label}</span>
+                    </div>
+                    <div className="proof-dashboard-grid">
+                      <div>
+                        <span>EvidenceRecord</span>
+                        <code>{truncateValue(record.id, 32)}</code>
+                      </div>
+                      <div>
+                        <span>Commitment</span>
+                        <code>{truncateValue(record.commitment, 32)}</code>
+                      </div>
+                      <div>
+                        <span>Walrus Blob</span>
+                        <code>{truncateValue(record.blobId, 32)}</code>
+                      </div>
+                      <div>
+                        <span>AuditPack Link</span>
+                        <code>{record.auditPackId ? truncateValue(record.auditPackId, 32) : "pending"}</code>
+                      </div>
+                      <div>
+                        <span>Attestation</span>
+                        <code>{record.latestAttestation ? truncateValue(record.latestAttestation.id, 32) : "not attested"}</code>
+                      </div>
+                      <div>
+                        <span>Attestation Tx</span>
+                        <code>{record.latestAttestation ? truncateValue(record.latestAttestation.txDigest, 32) : "pending"}</code>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="ide-muted">No registered evidence records yet.</p>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">AgentAction Proofs</div>
+          {agentActionLog.logs.length > 0 ? (
+            <div className="proof-dashboard-list">
+              {agentActionLog.logs.map((log) => (
+                <div key={log.key} className="proof-dashboard-item">
+                  <div className="proof-dashboard-item-header">
+                    <div>
+                      <strong>{log.actionType}</strong>
+                      <span>{log.evidenceId ? `Evidence ${truncateValue(log.evidenceId, 20)}` : `Pack ${truncateValue(log.packId, 20)}`}</span>
+                    </div>
+                    <span className="proof-status-pill success">Human signed</span>
+                  </div>
+                  <div className="proof-dashboard-grid">
+                    <div>
+                      <span>Output Hash</span>
+                      <code>{truncateValue(log.outputHash, 32)}</code>
+                    </div>
+                    <div>
+                      <span>Tx Digest</span>
+                      <code>{log.txDigest ? truncateValue(log.txDigest, 32) : "pending"}</code>
+                    </div>
+                    <div>
+                      <span>Event Type</span>
+                      <code>{log.event?.type ? truncateValue(log.event.type, 32) : "pending"}</code>
+                    </div>
+                    <div>
+                      <span>Event Seq</span>
+                      <code>{log.event?.id?.eventSeq ?? "pending"}</code>
+                    </div>
+                    <div>
+                      <span>Signer</span>
+                      <code>{truncateValue(log.signer, 32)}</code>
+                    </div>
+                    <div>
+                      <span>Events / Objects</span>
+                      <code>{log.eventCount}/{log.objectChangeCount}</code>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="ide-muted">No approved AgentAction has been logged yet.</p>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Walrus Memory Proofs</div>
+          <div className="proof-grid">
+            <div className="proof-row">
+              <span className="proof-label">MemWal</span>
+              <span className="proof-value">{agentReview.persistence.memwalStatus ?? "not run"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Direct Walrus</span>
+              <span className="proof-value">{agentReview.persistence.walrusStatus ?? "not run"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Namespace</span>
+              <span className="proof-value">{agentReview.persistence.memoryNamespace ?? "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Manifest Blob</span>
+              <span className="proof-value">{agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Artifact Blob</span>
+              <span className="proof-value">{agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Reload Check</span>
+              <span className="proof-value">{memoryReady ? memoryReload.status : "pending"}</span>
+            </div>
+          </div>
+          {memoryReload.result && (
+            <div className="proof-dashboard-grid compact">
+              <div>
+                <span>Evidence Refs</span>
+                <code>{memoryReload.result.manifest.evidenceRefCount}</code>
+              </div>
+              <div>
+                <span>Output Hashes</span>
+                <code>{memoryReload.result.manifest.agentOutputHashCount}</code>
+              </div>
+              <div>
+                <span>Finding Hashes</span>
+                <code>{memoryReload.result.manifest.findingHashCount}</code>
+              </div>
+              <div>
+                <span>Documents / Findings</span>
+                <code>{memoryReload.result.artifact.documentCount}/{memoryReload.result.artifact.findingCount}</code>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Proof Limits</div>
+          <div className="export-limitations">
+            <p>Hash match means the checked file bytes matched the registered commitment in this browser session.</p>
+            <p>Reviewer attestation means a reviewer wallet signed an attestation; it is not an automatic claim that the document is true or audit-sufficient.</p>
+            <p>AgentAction proofs contain approved output hashes and event metadata only. The agent does not sign transactions.</p>
+            <p>The current workspace stores only the latest verification session, so records not checked in this session are labeled that way.</p>
+          </div>
+        </div>
+
+        {latestAgentAction && (
+          <p className="ide-section-note">
+            Latest AgentAction tx: {latestAgentAction.txDigest ? truncateValue(latestAgentAction.txDigest, 36) : "pending"}.
+          </p>
+        )}
+      </div>
+    );
+  };
 
   const renderExportPanel = () => (
     <div className="ide-main-stack">
@@ -3958,7 +4214,7 @@ export default function WorkspacePage() {
             aria-label="Export"
             onClick={() => {
               setActiveRailPanel("export");
-              setActiveItemId("export");
+              setActiveItemId("proof-dashboard");
               setIsSidebarOpen(true);
             }}
           >
@@ -4057,7 +4313,19 @@ export default function WorkspacePage() {
           ) : activeRailPanel === "export" ? (
             <div className="sidebar-section">
               <div className="sidebar-section-label">Verifier Export</div>
-              <button className="tree-item active" type="button" onClick={() => setActiveItemId("export")}>
+              <button
+                className={`tree-item folder${activeItemId === "proof-dashboard" ? " active" : ""}`}
+                type="button"
+                onClick={() => setActiveItemId("proof-dashboard")}
+              >
+                <span>Proof Dashboard</span>
+                <small>{registry.length}</small>
+              </button>
+              <button
+                className={`tree-item folder${activeItemId === "export" ? " active" : ""}`}
+                type="button"
+                onClick={() => setActiveItemId("export")}
+              >
                 <span>JSON Summary</span>
                 <small>{verifierExport.evidence.length}</small>
               </button>
