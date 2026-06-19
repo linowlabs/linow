@@ -1443,3 +1443,25 @@
   - Retention metadata is static ("epoch-based") rather than queried from Walrus. Testnet does not expose per-blob expiry timestamps.
 - Follow-up needed:
   - When Walrus production provides retention metadata APIs, replace static labels with live blob retention/expiry data.
+
+## 2026-06-19 -- Fix Workspace Chat Panel Build
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Restored the missing function close after the proof dashboard renderer so the workspace page parses again.
+  - Removed stale commented registration code that duplicated the live registration helpers.
+  - Preserved the updated chat-style AI Co-Auditor panel and fixed the batch registration result shape by restoring source confidence.
+
+### Reasoning
+- Why this approach was chosen:
+  - The build failure was caused by a missing renderer boundary, not by the chat panel behavior itself.
+  - Removing dead commented code keeps the file easier to parse and matches the project hygiene rule.
+
+### Tech Debt
+- Known shortcuts:
+  - The chat panel still uses inline style objects in the new UI blocks.
+- Follow-up needed:
+  - Move the chat panel styling into `globals.css` when polishing the workspace layout.

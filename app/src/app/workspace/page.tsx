@@ -865,7 +865,7 @@ export default function WorkspacePage() {
   const [agentActionLog, setAgentActionLog] = useState<AgentActionLogState>(DEFAULT_AGENT_ACTION_LOG_STATE);
   const [demoEngagement, setDemoEngagement] = useState<DemoEngagementState>(DEFAULT_DEMO_ENGAGEMENT_STATE);
   const [engagementInput, setEngagementInput] = useState("");
-  const [exportMessage, setExportMessage] = useState("Generate or copy a verifier export after evidence and proof actions exist.");
+  const [exportMessage, setExportMessage] = useState("Generate or copy a compliance export summary after evidence and proof actions exist.");
 
   const signerAddress = wallet.address ?? "";
   const signTransaction = wallet.signTransaction;
@@ -1369,9 +1369,9 @@ export default function WorkspacePage() {
   const handleCopyVerifierExport = async () => {
     try {
       await navigator.clipboard.writeText(getVerifierExportJson());
-      setExportMessage("Verifier export copied to clipboard.");
+      setExportMessage("Compliance export summary copied to clipboard.");
     } catch (error) {
-      setExportMessage(getErrorMessage(error, "Could not copy verifier export."));
+      setExportMessage(getErrorMessage(error, "Could not copy compliance export summary."));
     }
   };
 
@@ -1380,10 +1380,10 @@ export default function WorkspacePage() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `linow-verifier-export-${demoEngagement.id ?? "local"}-${Date.now()}.json`;
+    anchor.download = `linow-compliance-export-${demoEngagement.id ?? "local"}-${Date.now()}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-    setExportMessage("Verifier export downloaded as JSON.");
+    setExportMessage("Compliance export summary downloaded as JSON.");
   };
 
   const getEvidenceVerificationState = (recordId: string) => {
@@ -1686,13 +1686,13 @@ export default function WorkspacePage() {
 
     const steps: ProgressStep[] = [
       {
-        label: activeAuditPackId ? "Reuse AuditPack" : "Create AuditPack",
+        label: activeAuditPackId ? "Reuse Audit Pack" : "Create Audit Pack",
         status: "pending",
         detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Needed for evidence link",
       },
       { label: "Computing SHA-256 hash", status: "pending" },
       { label: "Encrypting file and metadata", status: "pending" },
-      { label: "Uploading encrypted blob to Walrus", status: "pending" },
+      { label: "Uploading encrypted payload to secure storage", status: "pending" },
       { label: "Signing and submitting Sui registration", status: "pending" },
     ];
 
@@ -1820,7 +1820,7 @@ export default function WorkspacePage() {
 
     const steps: ProgressStep[] = [
       {
-        label: activeAuditPackId ? "Reuse AuditPack" : "Create AuditPack",
+        label: activeAuditPackId ? "Reuse Audit Pack" : "Create Audit Pack",
         status: "pending",
         detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Needed for batch link",
       },
@@ -1828,7 +1828,7 @@ export default function WorkspacePage() {
       { label: "Encrypt and upload selected files", status: "pending" },
       { label: "Sign one Sui batch registration", status: "pending" },
       {
-        label: "Link each record to AuditPack",
+        label: "Link each record to Audit Pack",
         status: "pending",
         detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Pending",
       },
@@ -2752,6 +2752,23 @@ export default function WorkspacePage() {
       return renderProofFolder();
     }
 
+
+    if (selectedLocalDocument) {
+      return renderLocalDocument(selectedLocalDocument);
+    }
+
+    if (selectedRecord) {
+      return renderRegisteredRecord(selectedRecord);
+    }
+
+    if (activeItemId === "folder:findings") {
+      return renderFindingsFolder();
+    }
+
+    if (activeItemId === "folder:proof") {
+      return renderProofFolder();
+    }
+
     return renderEvidenceFolder();
   };
 
@@ -2760,17 +2777,17 @@ export default function WorkspacePage() {
       <div className="ide-panel-header">
         <div>
           <span className="workspace-eyebrow">Explorer</span>
-          <h1 className="workspace-title">Q2 AuditPack Evidence</h1>
+          <h1 className="workspace-title">Audit Evidence Pack</h1>
           <p className="workspace-desc">
-            Local session files are prepared here, then registered through the live SDK path. Registered evidence can be verified and attested by the reviewer wallet.
+            Upload and prepare local documents. Once registered, secure cryptographic proofs are written to the Sui blockchain registry, allowing reviewers to verify and attest to them.
           </p>
         </div>
         <div className="ide-panel-actions">
           <button className="btn-secondary" type="button" onClick={() => addDocumentInputRef.current?.click()}>
             Add document
           </button>
-          <div className={`ide-auditpack-status${auditPack.id ? " ready" : ""}`} title={auditPack.id ?? "No AuditPack created"}>
-            {auditPack.id ? `AuditPack ready: ${truncateValue(auditPack.id, 18)}` : "No AuditPack created"}
+          <div className={`ide-auditpack-status${auditPack.id ? " ready" : ""}`} title={auditPack.id ?? "No active Audit Pack"}>
+            {auditPack.id ? `Audit Pack: ${truncateValue(auditPack.id, 18)}` : "No active Audit Pack"}
           </div>
           <button
             className="btn-primary"
@@ -2824,7 +2841,7 @@ export default function WorkspacePage() {
 
       {!auditPack.id && selectableLocalDocuments.length > 0 && (
         <p className="ide-section-note warning">
-          Batch registration will create an AuditPack first, then register each selected evidence record against that active `auditPackId`.
+          Batch registration will create an Audit Pack on-chain first, then register each selected evidence record against that active package reference.
         </p>
       )}
 
@@ -2913,10 +2930,10 @@ export default function WorkspacePage() {
     <div className="ide-main-stack">
       <div className="ide-panel-header">
         <div>
-          <span className="workspace-eyebrow">Local Session File</span>
+          <span className="workspace-eyebrow">Local Session Document</span>
           <h1 className="workspace-title">{document.fileName}</h1>
           <p className="workspace-desc">
-            This file is local to the browser session until you register it. Registration hashes locally, encrypts before Walrus, and writes only commitments to Sui.
+            This document is stored locally in your browser. Registration calculates cryptographic commitments locally, encrypts the file before uploading to decentralized storage, and records only secure, privacy-safe metadata on-chain.
           </p>
         </div>
         <span className="ide-state-pill">{document.status}</span>
@@ -2924,7 +2941,7 @@ export default function WorkspacePage() {
 
       <div className="card">
         <div className="draft-section-header">
-          <div className="card-section-title">Registration Draft</div>
+          <div className="card-section-title">Document Metadata & Assertions</div>
           <button
             className="draft-save-button"
             type="button"
@@ -3040,10 +3057,10 @@ export default function WorkspacePage() {
     <div className="ide-main-stack">
       <div className="ide-panel-header">
         <div>
-          <span className="workspace-eyebrow">Registered Evidence</span>
+          <span className="workspace-eyebrow">Registered Document</span>
           <h1 className="workspace-title">{record.fileName ?? record.type}</h1>
           <p className="workspace-desc">
-            Registered evidence can be re-checked against its Sui commitment. Attestation remains a separate reviewer action.
+            This document has a cryptographic proof recorded on-chain. You can verify its integrity at any time or check reviewer attestations.
           </p>
         </div>
         <span className="ide-state-pill">{record.latestAttestation ? "attested" : "registered"}</span>
@@ -3051,7 +3068,7 @@ export default function WorkspacePage() {
 
       <div className="ide-record-grid">
         <section className="card">
-          <div className="card-section-title">Integrity Check</div>
+          <div className="card-section-title">On-Chain Verification</div>
           <div className="proof-grid">
             <div className="proof-row">
               <span className="proof-label">Evidence ID</span>
@@ -3113,10 +3130,10 @@ export default function WorkspacePage() {
         </section>
 
         <section className="card">
-          <div className="card-section-title">Reviewer Attestation</div>
+          <div className="card-section-title">Reviewer Sign-off</div>
           <div className="tamper-toggle">
             <div className="tamper-info">
-              <div className="tamper-title">Human reviewer gate</div>
+              <div className="tamper-title">Reviewer Attestation Gate</div>
               <div className="tamper-desc">
                 {selectedRecordVerified
                   ? `Ready to attest. ${lastVerificationSession?.checkedFileLabel ?? "Selected file"} matched the commitment.`
@@ -3189,9 +3206,9 @@ export default function WorkspacePage() {
       <div className="ide-panel-header">
         <div>
           <span className="workspace-eyebrow">Findings</span>
-          <h1 className="workspace-title">Agent Draft Findings</h1>
+          <h1 className="workspace-title">AI Co-Auditor Findings</h1>
           <p className="workspace-desc">
-            Findings are draft work products until a human approves or edits them. No private finding text is stored on-chain.
+            AI-generated compliance draft findings. Review and approve findings to secure them as audit evidence on the blockchain.
           </p>
         </div>
         <button className="btn-primary" type="button" disabled={agentRun.status === "running"} onClick={handleRunAgent}>
@@ -3305,10 +3322,10 @@ export default function WorkspacePage() {
     <div className="ide-main-stack">
       <div className="ide-panel-header">
         <div>
-          <span className="workspace-eyebrow">Proof</span>
-          <h1 className="workspace-title">Proof Dashboard</h1>
+          <span className="workspace-eyebrow">Proofs</span>
+          <h1 className="workspace-title">Integrity Proof Dashboard</h1>
           <p className="workspace-desc">
-            Judge-facing trail for package, AuditPack, evidence, Walrus, memory, and attestations. This proves integrity and lifecycle actions, not document truth.
+            Verifiable audit trail for packages, evidence uploads, secure memory, and attestations. This proves mathematical integrity and chain of custody.
           </p>
         </div>
       </div>
@@ -3319,7 +3336,7 @@ export default function WorkspacePage() {
         </div>
       )}
       <div className="card">
-        <div className="card-section-title">AuditPack Evidence Links</div>
+        <div className="card-section-title">Linked Evidence Registry</div>
         {registry.length > 0 ? (
           <div className="ide-proof-list">
             {registry.map((record) => (
@@ -3348,10 +3365,10 @@ export default function WorkspacePage() {
       <div className="ide-main-stack">
         <div className="ide-panel-header">
           <div>
-            <span className="workspace-eyebrow">Proof Dashboard</span>
-            <h1 className="workspace-title">Judge-Facing Proof Surface</h1>
+            <span className="workspace-eyebrow">Verification Panel</span>
+            <h1 className="workspace-title">Compliance Verification Summary</h1>
             <p className="workspace-desc">
-              Inspect the live chain, Walrus, memory, attestation, and AgentAction references behind this workspace. This proves integrity and lifecycle actions, not document truth.
+              Verifiable register of all evidence upload commitments, reviewer attestations, and AI signatures recorded on the Sui blockchain.
             </p>
           </div>
         </div>
@@ -3406,7 +3423,7 @@ export default function WorkspacePage() {
         </div>
 
         <div className="card">
-          <div className="card-section-title">Evidence Proofs</div>
+          <div className="card-section-title">On-Chain Evidence Registry</div>
           {registry.length > 0 ? (
             <div className="proof-dashboard-list">
               {registry.map((record) => {
@@ -3435,7 +3452,7 @@ export default function WorkspacePage() {
                         <code>{truncateValue(record.blobId, 32)}</code>
                       </div>
                       <div>
-                        <span>AuditPack Link</span>
+                        <span>Audit Pack Link</span>
                         <code>{record.auditPackId ? truncateValue(record.auditPackId, 32) : "pending"}</code>
                       </div>
                       <div>
@@ -3457,7 +3474,7 @@ export default function WorkspacePage() {
         </div>
 
         <div className="card">
-          <div className="card-section-title">AgentAction Proofs</div>
+          <div className="card-section-title">On-Chain Audit Actions</div>
           {agentActionLog.logs.length > 0 ? (
             <div className="proof-dashboard-list">
               {agentActionLog.logs.map((log) => (
@@ -3504,26 +3521,26 @@ export default function WorkspacePage() {
         </div>
 
         <div className="card">
-          <div className="card-section-title">Walrus Memory Proofs</div>
+          <div className="card-section-title">Audit Memory Integrity Proofs</div>
           <div className="proof-grid">
             <div className="proof-row">
-              <span className="proof-label">MemWal</span>
+              <span className="proof-label">Auditor Memory Index</span>
               <span className="proof-value">{agentReview.persistence.memwalStatus ?? "not run"}</span>
             </div>
             <div className="proof-row">
-              <span className="proof-label">Direct Walrus</span>
+              <span className="proof-label">Storage Backup Status</span>
               <span className="proof-value">{agentReview.persistence.walrusStatus ?? "not run"}</span>
             </div>
             <div className="proof-row">
-              <span className="proof-label">Namespace</span>
+              <span className="proof-label">Audit Domain Namespace</span>
               <span className="proof-value">{agentReview.persistence.memoryNamespace ?? "pending"}</span>
             </div>
             <div className="proof-row">
-              <span className="proof-label">Manifest Blob</span>
+              <span className="proof-label">Index Reference</span>
               <span className="proof-value">{agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 42) : "pending"}</span>
             </div>
             <div className="proof-row">
-              <span className="proof-label">Artifact Blob</span>
+              <span className="proof-label">Evidence Bundle Reference</span>
               <span className="proof-value">{agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 42) : "pending"}</span>
             </div>
             <div className="proof-row">
@@ -3631,17 +3648,18 @@ export default function WorkspacePage() {
           </p>
         )}
       </div>
-    );
+
+  );
   };
 
   const renderExportPanel = () => (
     <div className="ide-main-stack">
       <div className="ide-panel-header">
         <div>
-          <span className="workspace-eyebrow">Verifier Export</span>
-          <h1 className="workspace-title">Portable Proof Summary</h1>
+          <span className="workspace-eyebrow">Compliance Summary</span>
+          <h1 className="workspace-title">Verify and Export Compliance Report</h1>
           <p className="workspace-desc">
-            Export the engagement proof state as JSON for a verifier or judge. The export includes commitments, blob IDs, tx/event references, and limitations, not raw evidence bytes.
+            Generate a portable JSON report containing all secure blockchain proofs, reviewer signatures, and AI verification references for independent third-party verification.
           </p>
         </div>
         <div className="ide-panel-actions">
@@ -3716,9 +3734,9 @@ export default function WorkspacePage() {
     <div className="ide-main-stack">
       <div className="ide-panel-header">
         <div>
-          <span className="workspace-eyebrow">Settings</span>
-          <h1 className="workspace-title">Workspace Runtime</h1>
-          <p className="workspace-desc">Minimal hackathon settings for role, package, and infrastructure status.</p>
+          <span className="workspace-eyebrow">Configuration</span>
+          <h1 className="workspace-title">Audit Workspace Settings</h1>
+          <p className="workspace-desc">Manage active roles, project wallet connections, and Sui blockchain configuration.</p>
         </div>
       </div>
       <div className="card">
@@ -3865,7 +3883,7 @@ export default function WorkspacePage() {
 
   const renderProofSnapshot = () => proofSnapshot && (
     <div className="card">
-      <div className="card-section-title">Latest Proof Snapshot</div>
+      <div className="card-section-title">Blockchain Evidence Proofs</div>
       <div className="proof-grid">
         <div className="proof-row">
           <span className="proof-label">AuditPack ID</span>
@@ -3936,16 +3954,26 @@ export default function WorkspacePage() {
     return (
       <section className="ide-bottom-panel">
         <div className="ide-bottom-tabs">
-          {(["details", "chain", "memory", "agent", "privacy", "raw"] as BottomTab[]).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={bottomTab === tab ? "active" : ""}
-              onClick={() => setBottomTab(tab)}
-            >
-              {tab}
-            </button>
-          ))}
+          {(["details", "chain", "memory", "agent", "privacy", "raw"] as BottomTab[]).map((tab) => {
+            const labels: Record<BottomTab, string> = {
+              details: "Details Summary",
+              chain: "On-Chain Activity",
+              memory: "Auditor Memory",
+              agent: "Co-Auditor Status",
+              privacy: "Privacy & Compliance",
+              raw: "State JSON"
+            };
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={bottomTab === tab ? "active" : ""}
+                onClick={() => setBottomTab(tab)}
+              >
+                {labels[tab]}
+              </button>
+            );
+          })}
         </div>
         <div className="ide-bottom-content">
           {bottomTab === "details" && (
@@ -3995,8 +4023,8 @@ export default function WorkspacePage() {
               <div className="ide-status-line">
                 <span>{agentRun.memoryStatus ?? "No memory write has been observed in this workspace session."}</span>
                 <span>Namespace: {agentReview.persistence.memoryNamespace ?? "pending"}</span>
-                <span>MemWal: {agentReview.persistence.memwalStatus ?? "pending"}</span>
-                <span>Walrus: {agentReview.persistence.walrusStatus ?? "pending"}</span>
+                <span>Memory Index: {agentReview.persistence.memwalStatus ?? "pending"}</span>
+                <span>Storage: {agentReview.persistence.walrusStatus ?? "pending"}</span>
                 <span>Manifest: {agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 18) : "pending"}</span>
                 <span>Artifact: {agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 18) : "pending"}</span>
               </div>
@@ -4011,12 +4039,12 @@ export default function WorkspacePage() {
                   }
                   onClick={handleReloadWalrusMemory}
                 >
-                  {memoryReload.status === "loading" ? "Reloading..." : "Reload Walrus memory"}
+                  {memoryReload.status === "loading" ? "Reloading..." : "Reload secure memory"}
                 </button>
                 <span>
                   {agentReview.persistence.manifestBlobId && agentReview.persistence.artifactBlobId
-                    ? "Reads encrypted direct Walrus fallback artifacts and returns a safe summary."
-                    : "Direct Walrus reload needs stored manifest and artifact blob IDs."}
+                    ? "Reads encrypted decentralized storage backup artifacts and returns a safe summary."
+                    : "Secure memory reload needs stored manifest and artifact references."}
                 </span>
               </div>
               <div className={`ide-memory-result ${memoryReload.status}`}>
@@ -4046,7 +4074,7 @@ export default function WorkspacePage() {
                 )}
               </div>
               <p className="ide-section-note">
-                This reload proves encrypted Walrus artifact availability and decryptability. It does not prove document truth or replace reviewer judgment.
+                This reload verifies encrypted storage artifact availability and decryptability. It does not prove document truth or replace reviewer judgment.
               </p>
             </div>
           )}
@@ -4079,118 +4107,210 @@ export default function WorkspacePage() {
     <aside className="ide-agent-panel">
       <div className="ide-agent-header">
         <div>
-          <span className="workspace-eyebrow">Agent</span>
-          <h2>Context Panel</h2>
+          <span className="workspace-eyebrow">AI Co-Auditor</span>
+          <h2>Compliance Chat</h2>
         </div>
         <span className={`ide-agent-state ${agentRun.status}`}>{agentRun.status}</span>
       </div>
 
-      <div className="ide-agent-section">
-        <div className="card-section-title">Active Context</div>
-        <p>{selectedLocalDocument?.fileName ?? selectedRecord?.fileName ?? "Q2 AuditPack"}</p>
-        <p className="ide-muted">Role: {role}. Agent proposes only; the wallet signs proof actions.</p>
-      </div>
-
-      <div className="ide-agent-section">
-        <div className="card-section-title">Run</div>
-        <label className="field-label" htmlFor="agent-instruction">
-          Additional audit instruction
-        </label>
-        <textarea
-          id="agent-instruction"
-          className="field-textarea ide-agent-instruction"
-          rows={4}
-          value={agentInstruction}
-          onChange={(event) => setAgentInstruction(event.target.value)}
-          placeholder="e.g. Focus on revenue cutoff, missing approval evidence, and any reviewer caveats."
-        />
-        <button className="btn-primary full-width" type="button" disabled={agentRun.status === "running"} onClick={handleRunAgent}>
-          {agentRun.status === "running" ? "Analyzing..." : "Run analysis"}
-        </button>
-        {renderSteps("agent")}
-      </div>
-
-      <div className="ide-agent-section">
-        <div className="card-section-title">Output</div>
-        <p>{agentRun.message}</p>
-        <div className="ide-mini-grid">
-          <span>Docs</span>
-          <strong>{agentReview.documents.length || agentRun.documentsAnalyzed || 0}</strong>
-          <span>Readiness</span>
-          <strong>
-            {agentReview.gapSummary.readinessScore !== undefined
-              ? `${agentReview.gapSummary.readinessScore}/100`
-              : agentRun.readinessScore !== undefined
-                ? `${agentRun.readinessScore}/100`
-                : "n/a"}
-          </strong>
-          <span>Findings</span>
-          <strong>{agentReview.findings.length}</strong>
-          <span>Memory</span>
-          <strong>{agentRun.memoryStatus ?? "pending"}</strong>
+      <div className="agent-chat-feed">
+        <div className="chat-message">
+          <div className="chat-sender assistant">
+            <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+            <span>AI Co-Auditor</span>
+          </div>
+          <div className="chat-bubble assistant">
+            <p>Hello! I am your AI compliance co-auditor. I can scan your uploaded documents to match them against required ISA assertions, evaluate classification readiness, and flag compliance gaps.</p>
+            <p style={{ marginTop: '0.4rem' }}>Upload text or CSV evidence documents, select them in the Explorer, and click the send icon below to start analysis.</p>
+          </div>
         </div>
-        {agentReview.approval.nextSteps.length > 0 && (
-          <div className="agent-next-steps">
-            {agentReview.approval.nextSteps.slice(0, 3).map((step) => (
-              <p key={step}>{step}</p>
-            ))}
+
+        {(selectedLocalDocument || selectedRecord) && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>System</span>
+            </div>
+            <div className="chat-bubble system">
+              {selectedLocalDocument ? (
+                <>Active context: <strong>{selectedLocalDocument.fileName}</strong> ({selectedLocalDocument.fileSize}). Ready for compliance evaluation.</>
+              ) : (
+                <>Active context: Registered record <strong>{selectedRecord?.fileName ?? truncateValue(selectedRecord?.id ?? "", 14)}</strong>. Ready for verification check.</>
+              )}
+            </div>
+          </div>
+        )}
+
+        {operationProgress && operationProgress.type === "agent" && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>Compliance Run Progress</span>
+            </div>
+            <div className="chat-bubble system" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', textAlign: 'left', alignItems: 'stretch' }}>
+              {operationProgress.steps.map((step, index) => (
+                <div key={`${step.label}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.72rem' }}>
+                  <span className={`ide-progress-dot ${step.status}`} />
+                  <span>{step.label}</span>
+                  {step.detail && <code style={{ marginLeft: 'auto', fontSize: '0.64rem', color: 'var(--accent)' }}>{step.detail}</code>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {agentRun.status === "success" && (
+          <div className="chat-message">
+            <div className="chat-sender assistant">
+              <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+              <span>AI Co-Auditor</span>
+            </div>
+            <div className="chat-bubble assistant">
+              <p>Analysis complete! Here is the compliance report for the active pack:</p>
+              <div className="ide-mini-grid">
+                <span>Documents Scanned</span>
+                <strong>{agentReview.documents.length || agentRun.documentsAnalyzed || 0}</strong>
+                <span>Readiness Index</span>
+                <strong>
+                  {agentReview.gapSummary.readinessScore !== undefined
+                    ? `${agentReview.gapSummary.readinessScore}/100`
+                    : agentRun.readinessScore !== undefined
+                      ? `${agentRun.readinessScore}/100`
+                      : "n/a"}
+                </strong>
+                <span>Compliance Findings</span>
+                <strong>{agentReview.findings.length}</strong>
+                <span>Secure Memory Proof</span>
+                <strong>{agentReview.persistence.manifestBlobId && agentReview.persistence.artifactBlobId ? "Created" : "None"}</strong>
+              </div>
+              {agentReview.approval.nextSteps.length > 0 && (
+                <div style={{ marginTop: '0.6rem', borderTop: '1px solid rgba(37,99,235,0.1)', paddingTop: '0.4rem' }}>
+                  <span style={{ fontSize: '0.64rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--accent)', opacity: 0.8 }}>Recommended Next Steps:</span>
+                  {agentReview.approval.nextSteps.slice(0, 3).map((step, idx) => (
+                    <p key={step} style={{ marginTop: '0.2rem', fontSize: '0.74rem' }}>{idx + 1}. {step}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {agentRun.status === "error" && (
+          <div className="chat-message">
+            <div className="chat-sender assistant">
+              <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+              <span>AI Co-Auditor</span>
+            </div>
+            <div className="chat-bubble assistant" style={{ borderColor: 'rgba(220, 38, 38, 0.2)', backgroundColor: 'rgba(220, 38, 38, 0.03)' }}>
+              <p style={{ color: '#dc2626', fontWeight: 600 }}>Compliance run failed</p>
+              <p style={{ fontSize: '0.74rem', marginTop: '0.2rem' }}>{agentRun.message}</p>
+            </div>
+          </div>
+        )}
+
+        {agentRun.actionCandidates.length > 0 && (
+          <div className="chat-message">
+            <div className="chat-sender assistant">
+              <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+              <span>AI Co-Auditor</span>
+            </div>
+            <div className="chat-bubble action">
+              <strong style={{ display: 'block', marginBottom: '0.35rem', color: 'var(--text-high)', fontSize: '0.78rem' }}>On-Chain Verification Actions Prepared</strong>
+              <p style={{ fontSize: '0.74rem', marginBottom: '0.5rem' }}>I have prepared cryptographic hashes for human sign-off. Approving these records them securely on the Sui blockchain registry.</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {agentRun.actionCandidates.slice(0, 5).map((candidate, index) => {
+                  const key = getAgentActionCandidateKey(candidate);
+                  const logged = isAgentActionLogged(candidate);
+                  const signing = agentActionLog.status === "signing" && agentActionLog.activeKey === key;
+                  const hasPackObject = isSuiObjectId(candidate.packId ?? auditPack.id);
+
+                  return (
+                    <div key={`${candidate.outputHash}-${index}`} className="ide-action-candidate" style={{ borderBottom: '1px solid rgba(217, 119, 6, 0.1)', paddingBottom: '0.4rem' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>{candidate.actionType}</span>
+                      <small style={{ color: 'var(--text-secondary)', fontSize: '0.66rem' }}>
+                        {[
+                          candidate.targetKind,
+                          candidate.targetId ? truncateValue(candidate.targetId, 16) : undefined,
+                          candidate.evidenceId ? `evidence ${truncateValue(candidate.evidenceId, 14)}` : undefined,
+                          candidate.findingId ? `finding ${candidate.findingId}` : undefined,
+                        ].filter(Boolean).join(" / ") || "workspace action"}
+                      </small>
+                      <code style={{ fontSize: '0.64rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', marginTop: '0.1rem', wordBreak: 'break-all' }}>Hash: {truncateValue(candidate.outputHash, 18)}</code>
+                      <small style={{ display: 'block', marginTop: '0.1rem', fontSize: '0.64rem', color: logged ? 'var(--turquoise)' : 'var(--text-muted)' }}>
+                        {logged
+                          ? "✓ Logged on Sui"
+                          : !hasPackObject
+                            ? "⚠️ Create Audit Pack on-chain before signing"
+                            : candidate.requiresHumanApproval
+                              ? "Awaiting human review"
+                              : "Prepared; approval status returned false"}
+                      </small>
+                      <button
+                        className="btn-primary full-width"
+                        type="button"
+                        style={{ marginTop: '0.4rem', padding: '0.35rem 0.5rem', fontSize: '0.74rem', minHeight: 'auto' }}
+                        disabled={signing || logged || !signerAddress || !auditorWalletMatches || !hasPackObject}
+                        onClick={() => handleApproveAgentAction(candidate)}
+                      >
+                        {signing ? "Signing..." : logged ? "Logged" : "Review & Sign Action"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {agentActionLog.status !== "idle" && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>System Log</span>
+            </div>
+            <div className={`chat-bubble ${agentActionLog.status === "success" ? "success" : "error"}`}>
+              <strong style={{ display: 'block', fontSize: '0.74rem' }}>
+                {agentActionLog.status === "success" ? "On-chain action recorded" : "Action signature blocked"}
+              </strong>
+              <p style={{ fontSize: '0.74rem', marginTop: '0.15rem' }}>{agentActionLog.message}</p>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="ide-agent-section">
-        <div className="card-section-title">Approval Queue</div>
-        {agentRun.actionCandidates.length > 0 ? (
-          agentRun.actionCandidates.slice(0, 5).map((candidate, index) => {
-            const key = getAgentActionCandidateKey(candidate);
-            const logged = isAgentActionLogged(candidate);
-            const signing = agentActionLog.status === "signing" && agentActionLog.activeKey === key;
-            const hasPackObject = isSuiObjectId(candidate.packId ?? auditPack.id);
-
-            return (
-              <div key={`${candidate.outputHash}-${index}`} className="ide-action-candidate">
-                <span>{candidate.actionType}</span>
-                <small>
-                  {[
-                    candidate.targetKind,
-                    candidate.targetId ? truncateValue(candidate.targetId, 16) : undefined,
-                    candidate.evidenceId ? `evidence ${truncateValue(candidate.evidenceId, 14)}` : undefined,
-                    candidate.findingId ? `finding ${candidate.findingId}` : undefined,
-                  ].filter(Boolean).join(" / ") || "workspace action"}
-                </small>
-                <code>{truncateValue(candidate.outputHash, 18)}</code>
-                <small>
-                  {logged
-                    ? "logged on Sui"
-                    : !hasPackObject
-                      ? "create AuditPack before logging"
-                      : candidate.requiresHumanApproval
-                        ? "prepared; human approval required"
-                        : "prepared; approval status returned false"}
-                </small>
-                <button
-                  className="btn-secondary full-width"
-                  type="button"
-                  disabled={signing || logged || !signerAddress || !auditorWalletMatches || !hasPackObject}
-                  onClick={() => handleApproveAgentAction(candidate)}
-                >
-                  {signing ? "Signing..." : logged ? "Logged" : "Approve & log"}
-                </button>
-              </div>
-            );
-          })
-        ) : (
-          <p className="ide-muted">No action candidates yet. Run analysis after adding readable evidence to prepare hash-only AgentAction candidates.</p>
-        )}
-        <p className="ide-muted">
-          {agentActionLog.status === "success"
-            ? "Latest approved AgentAction was signed by the connected wallet and emitted as a Sui event."
-            : agentActionLog.status === "error"
-              ? agentActionLog.message
-              : agentReview.approval.outputHashes.length > 0
-                ? "Output hashes are ready. Approving logs only the hash/event metadata, never private agent text."
-                : "AgentAction logging appears after a workspace analysis run prepares output hashes."}
-        </p>
+      <div className="chat-input-area">
+        <div className="chat-input-field">
+          <textarea
+            className="chat-textarea"
+            rows={2}
+            value={agentInstruction}
+            onChange={(event) => setAgentInstruction(event.target.value)}
+            placeholder="Type custom auditing rules or guidelines..."
+            disabled={agentRun.status === "running"}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (agentRun.status !== "running") handleRunAgent();
+              }
+            }}
+          />
+          <button
+            className="chat-send-btn"
+            type="button"
+            disabled={agentRun.status === "running" || readableEvidenceCount === 0}
+            onClick={handleRunAgent}
+            title="Run AI compliance analysis"
+          >
+            {agentRun.status === "running" ? (
+              <div className="spinner" style={{ width: '12.5px', height: '12.5px', borderWidth: '1.5px' }} />
+            ) : (
+              <svg viewBox="0 0 24 24">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+            )}
+          </button>
+        </div>
+        <span style={{ fontSize: '0.64rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+          Press Enter to run AI Co-Auditor analysis. Proposes proof actions only.
+        </span>
       </div>
     </aside>
   );
@@ -4202,7 +4322,7 @@ export default function WorkspacePage() {
           <Image className="topbar-logo" src="/mascot.png" alt="Linow mascot" width={22} height={22} priority />
           <div className="topbar-brand-block">
             <span className="topbar-brand">Linow</span>
-            <span className="topbar-badge">AUDIT IDE</span>
+            <span className="topbar-badge">AUDIT WORKSPACE</span>
           </div>
         </div>
 
@@ -4292,11 +4412,11 @@ export default function WorkspacePage() {
           {activeRailPanel === "explorer" ? (
             <>
               <div className="sidebar-section">
-                <div className="sidebar-section-label">Q2 AuditPack</div>
+                <div className="sidebar-section-label">ACTIVE AUDIT PACK</div>
 
                 <div className="sidebar-folder-group">
                   <button className={`tree-item folder${activeItemId === "folder:evidence" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:evidence")}>
-                    <span>Evidence</span>
+                    <span>Evidence Files</span>
                     <small>{visibleLocalDocuments.length + registry.length}</small>
                   </button>
                   {visibleLocalDocuments.length + registry.length > 0 && (
@@ -4340,7 +4460,7 @@ export default function WorkspacePage() {
 
                 <div className="sidebar-folder-group">
                   <button className={`tree-item folder${activeItemId === "folder:proof" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:proof")}>
-                    <span>Proof</span>
+                    <span>On-Chain Proofs</span>
                     <small>{proofSnapshot ? "1" : "0"}</small>
                   </button>
                 </div>
@@ -4361,26 +4481,26 @@ export default function WorkspacePage() {
                   Add document
                 </button>
                 <div className="guardrails-block">
-                  <div className="guardrails-title">Status colors</div>
+                  <div className="guardrails-title">VERIFICATION STATUS</div>
                   <ul className="guardrails-list">
-                    <li>Gray: local only.</li>
-                    <li>Blue: registered on Sui.</li>
-                    <li>Yellow: pending human approval.</li>
-                    <li>Green: attested by reviewer.</li>
-                    <li>Red: mismatch or blocked.</li>
+                    <li>Gray: Local session file (draft)</li>
+                    <li>Blue: Registered on Sui blockchain</li>
+                    <li>Yellow: Awaiting human reviewer sign-off</li>
+                    <li>Green: Attested by human reviewer</li>
+                    <li>Red: Verification failed or mismatch</li>
                   </ul>
                 </div>
               </div>
             </>
           ) : activeRailPanel === "export" ? (
             <div className="sidebar-section">
-              <div className="sidebar-section-label">Verifier Export</div>
+              <div className="sidebar-section-label">COMPLIANCE REPORT</div>
               <button
                 className={`tree-item folder${activeItemId === "proof-dashboard" ? " active" : ""}`}
                 type="button"
                 onClick={() => setActiveItemId("proof-dashboard")}
               >
-                <span>Proof Dashboard</span>
+                <span>Verification Dashboard</span>
                 <small>{registry.length}</small>
               </button>
               <button
@@ -4388,16 +4508,16 @@ export default function WorkspacePage() {
                 type="button"
                 onClick={() => setActiveItemId("export")}
               >
-                <span>JSON Summary</span>
+                <span>Audit Registry JSON</span>
                 <small>{verifierExport.evidence.length}</small>
               </button>
               <div className="guardrails-block">
-                <div className="guardrails-title">Included</div>
+                <div className="guardrails-title">REPORT DETAILS</div>
                 <ul className="guardrails-list">
-                  <li>Evidence IDs and commitments.</li>
-                  <li>Walrus blob and memory refs.</li>
-                  <li>Attestation and AgentAction proofs.</li>
-                  <li>No raw evidence bytes.</li>
+                  <li>Evidence IDs & commitments</li>
+                  <li>Walrus blobs & memory references</li>
+                  <li>Reviewer attestations & AI signatures</li>
+                  <li>Excludes raw evidence (privacy-safe)</li>
                 </ul>
               </div>
             </div>
