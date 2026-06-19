@@ -118,6 +118,7 @@ export type {
   GetAuditPackResult,
 } from "./audit-pack.js";
 export type {
+  AgentActionEventProof,
   CreateSuiEmitAgentActionHandlerConfig,
   EmitAgentActionChainInput,
   EmitAgentActionChainResult,

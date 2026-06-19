@@ -715,3 +715,26 @@ Appended matching entry will also be added to DEVLOG-APP if relevant, but this i
   - Walrus uploads still run before the Sui signature, so a later transaction failure can leave encrypted uploaded blobs without corresponding EvidenceRecord objects.
 - Follow-up needed:
   - Add SDK tests or a smoke script for multi-item batch extraction once a test fixture for Sui execution output is available.
+
+## 2026-06-19 -- Return AgentAction Event Proof
+
+### Change
+- Files touched:
+  - `sdk/src/agent-action.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Extended the AgentAction emit chain result with event count, object change count, and the matching `agent_action::AgentAction` event summary.
+  - Propagated the event proof fields through `createEmitAgentActionFlow`.
+  - Exported the `AgentActionEventProof` type from the public SDK surface.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-25 needs the app to show tx/event details after human approval, and the SDK was already requesting `showEvents` and `showObjectChanges`.
+  - Returning a small parsed proof shape keeps the app from reaching into raw Sui/Tatum response internals.
+
+### Tech Debt
+- Known shortcuts:
+  - The SDK still does not expose the full raw Sui execution response for AgentAction logs.
+- Follow-up needed:
+  - Add a fixture-backed parser test for AgentAction event extraction once a stable Sui execution payload is available.

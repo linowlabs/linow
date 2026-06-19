@@ -2,9 +2,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { createLinowClient, type LinowClient } from "./client.js";
 import { createTatumSuiClient, type TatumSuiClient, type TatumSuiNetwork } from "./tatum.js";
 import type {
-  AgentAction,
   EvidenceId,
-  IsoTimestamp,
   WalletAddress,
 } from "./types.js";
 
@@ -19,6 +17,21 @@ export interface EmitAgentActionChainInput {
 export interface EmitAgentActionChainResult {
   transactionDigest?: string;
   packageId?: string;
+  eventCount: number;
+  objectChangeCount: number;
+  agentActionEvent?: AgentActionEventProof;
+}
+
+export interface AgentActionEventProof {
+  type?: string;
+  id?: {
+    txDigest?: string;
+    eventSeq?: string;
+  };
+  packageId?: string;
+  transactionModule?: string;
+  sender?: string;
+  parsedJson?: unknown;
 }
 
 export interface CreateSuiEmitAgentActionHandlerConfig {
@@ -78,6 +91,10 @@ export type SignAgentActionTransaction = (
 
 export interface EmitAgentActionResult {
   transactionDigest?: string;
+  packageId?: string;
+  eventCount: number;
+  objectChangeCount: number;
+  agentActionEvent?: AgentActionEventProof;
   warnings: string[];
 }
 
@@ -110,7 +127,7 @@ export function createEmitAgentActionFlow(
   });
 
   return async function emit(input) {
-    await emitOnChain({
+    const result = await emitOnChain({
       packId: input.packId,
       evidenceId: input.evidenceId,
       actionType: input.actionType,
@@ -118,6 +135,11 @@ export function createEmitAgentActionFlow(
     });
 
     return {
+      transactionDigest: result.transactionDigest,
+      packageId: result.packageId,
+      eventCount: result.eventCount,
+      objectChangeCount: result.objectChangeCount,
+      agentActionEvent: result.agentActionEvent,
       warnings: [
         "Agent action logged on-chain as event only. No private data is stored.",
       ],
@@ -186,6 +208,9 @@ export function createSuiEmitAgentActionHandler(
     return {
       transactionDigest: extractTransactionDigest(execution),
       packageId: config.packageId,
+      eventCount: extractArrayField(execution, "events").length,
+      objectChangeCount: extractArrayField(execution, "objectChanges").length,
+      agentActionEvent: extractAgentActionEvent(execution),
     };
   };
 }
@@ -214,6 +239,45 @@ function extractTransactionDigest(execution: unknown): string | undefined {
     return execution.digest;
   }
   return undefined;
+}
+
+function extractAgentActionEvent(execution: unknown): AgentActionEventProof | undefined {
+  const events = extractArrayField(execution, "events");
+  const event = events
+    .map((item) => isRecord(item) ? item : undefined)
+    .find((item) => typeof item?.type === "string" && item.type.includes("::agent_action::AgentAction"));
+
+  if (!event) return undefined;
+
+  const id = isRecord(event.id) ? event.id : undefined;
+
+  return {
+    type: readString(event.type),
+    id: id
+      ? {
+        txDigest: readString(id.txDigest),
+        eventSeq: readString(id.eventSeq),
+      }
+      : undefined,
+    packageId: readString(event.packageId),
+    transactionModule: readString(event.transactionModule),
+    sender: readString(event.sender),
+    parsedJson: event.parsedJson,
+  };
+}
+
+function extractArrayField(value: unknown, field: string): unknown[] {
+  if (!isRecord(value)) return [];
+  const nested = value[field];
+  return Array.isArray(nested) ? nested : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 function hexToBytes(hex: string): Uint8Array {

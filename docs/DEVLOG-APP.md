@@ -1290,3 +1290,28 @@
 - Follow-up needed:
   - Connect this memory reload result into the larger SO-28 proof dashboard/export surface.
 
+## 2026-06-19 -- Wire AgentAction Approval Logging
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added workspace state for approved/logged AgentAction candidates.
+  - Added `Approve & log` controls to the agent Approval Queue.
+  - Wired the controls to `createEmitAgentActionFlow`, using the connected wallet for signing and the existing server Tatum execute route for submission.
+  - Added chain/proof display for AgentAction tx digest, event type, event sequence, output hash, signer, and event/object counts.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-25 belongs at the human approval boundary: the agent prepares hash-only candidates, then the connected user explicitly signs the on-chain AgentAction event.
+  - The UI preserves Linow's boundary by logging only approved output hashes and event metadata, never private agent text.
+
+### Tech Debt
+- Known shortcuts:
+  - The workspace currently shows the latest logged AgentAction in the chain panel; SO-28 can turn the log list into a fuller proof dashboard.
+  - Role separation is still light-touch until SO-26 formalizes the company/auditor two-wallet flow.
+- Follow-up needed:
+  - Rehearse with a live wallet after a fresh agent run to confirm the emitted event shape from testnet matches the displayed summary.
+
