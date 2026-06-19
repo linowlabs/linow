@@ -1219,7 +1219,7 @@
 - Follow-up needed:
   - None.
 
-## 2026-06-17 -- Render SO-23 Workspace Agent Outputs
+## 2026-06-17 -- Render Workspace Agent Outputs
 
 ### Change
 - Files touched:
@@ -1234,16 +1234,16 @@
 
 ### Reasoning
 - Why this approach was chosen:
-  - SO-23 B is a UI rendering task for the agent workspace contract already provided by the agent route, so the app should consume the structured response instead of adding new agent or SDK behavior.
+  - The app-side workspace task is to consume the agent workspace contract already provided by the route, so the app should render the structured response instead of adding new agent or SDK behavior.
   - The copy keeps Linow's boundary clear: the agent proposes and prepares output hashes, but a human still has to approve/sign before the chain proves anything.
 
 ### Tech Debt
 - Known shortcuts:
-  - AgentAction signing/logging is still not wired from this approval queue; it remains a prepared-only UI until SO-25.
-  - Memory fallback/proof UX is only surfaced from the returned status fields; SO-24/24a still need their dedicated UI flow.
+  - AgentAction signing/logging is still not wired from this approval queue; it remains a prepared-only UI until the approval logging feature.
+  - Memory fallback/proof UX is only surfaced from the returned status fields; the dedicated memory proof flow still needs to be wired into the workspace.
 - Follow-up needed:
   - Add explicit approve/log controls once the AgentAction proof return is hardened.
-  - Add a clearer memory fallback panel when SO-24/24a moves into the workspace.
+  - Add a clearer memory fallback panel when the memory proof flow moves into the workspace.
 
 ## 2026-06-17 -- Fix Workspace Agent Profile
 
@@ -1280,7 +1280,7 @@
 
 ### Reasoning
 - Why this approach was chosen:
-  - SO-24/SO-24a need a demo-visible save/reload proof path without changing agent logic.
+  - The memory proof flow needs a demo-visible save/reload path without changing agent logic.
   - The SDK already had encrypted Walrus read helpers, so the app only needed a server-side route to protect the memory key and a small workspace proof surface.
 
 ### Tech Debt
@@ -1288,7 +1288,7 @@
   - The reload button proves direct Walrus fallback artifacts, while MemWal semantic recall remains represented by the existing orchestration recall status.
   - The route returns counts and identifiers only; a richer memory inspector can be added later if reviewers need per-artifact drilldown.
 - Follow-up needed:
-  - Connect this memory reload result into the larger SO-28 proof dashboard/export surface.
+  - Connect this memory reload result into the larger proof dashboard/export surface.
 
 ## 2026-06-19 -- Wire AgentAction Approval Logging
 
@@ -1305,13 +1305,92 @@
 
 ### Reasoning
 - Why this approach was chosen:
-  - SO-25 belongs at the human approval boundary: the agent prepares hash-only candidates, then the connected user explicitly signs the on-chain AgentAction event.
+  - AgentAction logging belongs at the human approval boundary: the agent prepares hash-only candidates, then the connected user explicitly signs the on-chain event.
   - The UI preserves Linow's boundary by logging only approved output hashes and event metadata, never private agent text.
 
 ### Tech Debt
 - Known shortcuts:
-  - The workspace currently shows the latest logged AgentAction in the chain panel; SO-28 can turn the log list into a fuller proof dashboard.
-  - Role separation is still light-touch until SO-26 formalizes the company/auditor two-wallet flow.
+  - The workspace currently shows the latest logged AgentAction in the chain panel; the proof dashboard can turn the log list into a fuller evidence trail.
+  - Role separation is still light-touch until the company/auditor two-wallet flow is formalized.
 - Follow-up needed:
   - Rehearse with a live wallet after a fresh agent run to confirm the emitted event shape from testnet matches the displayed summary.
+
+## 2026-06-19 -- Add Shared Demo Engagement Persistence
+
+### Change
+- Files touched:
+  - `app/src/lib/demo-store.ts`
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/supabase_shared_demo_schema.sql`
+  - `.env.example`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added optional Supabase REST/Storage helpers for shared web PoC engagements without adding a new package dependency.
+  - Added a Supabase schema for demo engagements, evidence files, attestations, and AgentAction proof metadata.
+  - Added Settings controls to create/load a shared engagement, assign company/auditor wallets, and open the same engagement across browsers.
+  - Synced synthetic demo evidence files to Supabase Storage and proof metadata to Supabase tables after registration, attestation, and AgentAction logging.
+  - Added light role guardrails so company wallet actions and auditor wallet actions are visibly separated in the shared demo flow.
+
+### Reasoning
+- Why this approach was chosen:
+  - The shared reviewer demo needs a two-browser/two-wallet flow, which session-local state cannot support.
+  - Supabase is scoped as web PoC persistence for synthetic demo files and proof metadata; the production direction remains desktop/local-first.
+
+### Tech Debt
+- Known shortcuts:
+  - The Supabase policies in `docs/supabase_shared_demo_schema.sql` are permissive PoC policies for synthetic demo data only.
+  - The workspace rehydrates enough file/evidence state for the demo, not a full production engagement model.
+- Follow-up needed:
+  - Use the export and proof-dashboard work to make the loaded engagement surfaces more complete and judge-facing.
+
+## 2026-06-19 -- Add Verifier Export Rail
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a dedicated workspace rail for verifier export instead of burying the flow inside the proof panel.
+  - Generated a portable JSON proof summary with engagement wallets, AuditPack/package refs, evidence commitments, Walrus blob refs, attestation summaries, memory artifact refs, AgentAction logs, and current verification status.
+  - Added copy/download actions plus an explicit limitations panel so the export does not imply document truth or audit sufficiency.
+  - Kept raw evidence bytes out of the export.
+
+### Reasoning
+- Why this approach was chosen:
+  - A separate verifier/export rail makes the judge and third-party review story easier to demo without changing the core evidence workspace.
+  - JSON is the smallest useful compliance-export shape for the web PoC because it can travel outside the app while preserving chain and storage references.
+
+### Tech Debt
+- Known shortcuts:
+  - The export is generated client-side from the current loaded workspace state.
+  - The export is not yet cryptographically signed as a report artifact.
+- Follow-up needed:
+  - Add a verifier import/check path and consider storing signed export manifests as durable artifacts once the proof dashboard stabilizes.
+
+## 2026-06-19 -- Add Judge-Facing Proof Dashboard
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a Proof Dashboard view inside the verifier/export rail.
+  - Displayed chain anchors, AuditPack refs, EvidenceRecord IDs, commitments, Walrus blob IDs, attestation refs, AgentAction tx/event refs, and memory artifact refs in a readable inspector surface.
+  - Added explicit per-evidence labels for commitment match, mismatch, or not checked in this browser session.
+  - Added dashboard copy that preserves Linow's limits: integrity and lifecycle proof, not document truth or audit sufficiency.
+
+### Reasoning
+- Why this approach was chosen:
+  - Judges and external reviewers need a quick proof surface before inspecting the raw JSON export.
+  - The dashboard uses existing workspace state only, so it does not change the SDK, agent, or on-chain behavior.
+
+### Tech Debt
+- Known shortcuts:
+  - Verification status is based on the latest browser-session verification result, not a persisted per-record verification history.
+  - The dashboard is read-only and generated from loaded workspace state.
+- Follow-up needed:
+  - Add persisted verification history if the shared reviewer flow needs a durable record of every local hash check.
 

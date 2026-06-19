@@ -2053,6 +2053,153 @@ input, textarea, select {
   padding-top: 0.15rem;
 }
 
+.export-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.export-summary-grid div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.54);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.export-summary-grid span {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.export-summary-grid strong {
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+}
+
+.export-limitations {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.export-limitations p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.export-json-preview {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.proof-dashboard-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.proof-dashboard-item {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.54);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.proof-dashboard-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.proof-dashboard-item-header div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.proof-dashboard-item-header strong {
+  color: var(--text-high);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proof-dashboard-item-header span {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
+.proof-status-pill {
+  flex-shrink: 0;
+  border: 1px solid rgba(9, 13, 22, 0.12);
+  border-radius: 999px;
+  padding: 0.22rem 0.6rem;
+  background: rgba(9, 13, 22, 0.04);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.proof-status-pill.success {
+  border-color: rgba(13, 148, 136, 0.24);
+  background: rgba(13, 148, 136, 0.08);
+  color: #0f766e;
+}
+
+.proof-status-pill.error {
+  border-color: rgba(220, 38, 38, 0.22);
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+}
+
+.proof-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.proof-dashboard-grid.compact {
+  margin-top: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.proof-dashboard-grid div {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.proof-dashboard-grid span {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proof-dashboard-grid code {
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ide-record-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.82fr);
@@ -2427,6 +2574,67 @@ input, textarea, select {
   gap: 0.75rem;
 }
 
+.demo-engagement-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.demo-engagement-status {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.demo-engagement-status.ready {
+  border-color: rgba(13, 148, 136, 0.2);
+  background: rgba(13, 148, 136, 0.05);
+}
+
+.demo-engagement-status.error {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: rgba(220, 38, 38, 0.05);
+}
+
+.demo-engagement-status strong {
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.demo-engagement-status span,
+.demo-wallet-grid span {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.demo-wallet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.demo-wallet-grid div {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.demo-wallet-grid code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
 .ide-role-option {
   display: grid;
   gap: 0.3rem;
@@ -2511,7 +2719,13 @@ input, textarea, select {
   }
 
   .ide-record-grid,
-  .ide-role-grid {
+  .ide-role-grid,
+  .export-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .proof-dashboard-grid,
+  .proof-dashboard-grid.compact {
     grid-template-columns: 1fr;
   }
 
