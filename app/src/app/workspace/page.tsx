@@ -3554,6 +3554,68 @@ export default function WorkspacePage() {
         </div>
 
         <div className="card">
+          <div className="card-section-title">Privacy &amp; Access</div>
+          <div className="privacy-status-list">
+            <div className="privacy-status-row active">
+              <span className="privacy-status-icon">✅</span>
+              <div>
+                <strong>Evidence encrypted before Walrus upload</strong>
+                <span>AES-256-GCM · random IV per file · ciphertext stored on Walrus</span>
+              </div>
+            </div>
+            <div className="privacy-status-row active">
+              <span className="privacy-status-icon">✅</span>
+              <div>
+                <strong>Agent memory encrypted by default</strong>
+                <span>MemWal uses Seal for memory encryption · agent reasoning is private</span>
+              </div>
+            </div>
+            <div className="privacy-status-row active">
+              <span className="privacy-status-icon">✅</span>
+              <div>
+                <strong>No plaintext on-chain</strong>
+                <span>Sui stores commitments and output hashes only · raw evidence never touches the chain</span>
+              </div>
+            </div>
+            <div className="privacy-status-row roadmap">
+              <span className="privacy-status-icon">⏳</span>
+              <div>
+                <strong>Access-gated decryption via Seal policy</strong>
+                <span>Roadmap · Move seal_approve policy will grant decrypt to pack.owner or pack.auditor · currently owner holds AES key</span>
+              </div>
+            </div>
+          </div>
+          <p className="ide-muted" style={{ marginTop: '0.65rem' }}>
+            Seal is Sui&apos;s on-chain access-gated decryption layer. Full integration is deferred pending SDK stabilization and key server configuration maturity. Current demo uses AES-encrypted Walrus blobs and MemWal/Seal-encrypted agent memory. This decision is documented and intentional.
+          </p>
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Walrus Storage &amp; Retention</div>
+          <div className="proof-grid">
+            <div className="proof-row">
+              <span className="proof-label">Network</span>
+              <span className="proof-value">Walrus Testnet</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Retention</span>
+              <span className="proof-value">Epoch-based (testnet)</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Evidence Blobs</span>
+              <span className="proof-value">{registry.filter((r) => r.blobId).length}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Memory Artifacts</span>
+              <span className="proof-value">{[agentReview.persistence.manifestBlobId, agentReview.persistence.artifactBlobId].filter(Boolean).length}</span>
+            </div>
+          </div>
+          <p className="ide-muted" style={{ marginTop: '0.65rem' }}>
+            Walrus testnet blobs use epoch-based retention that is not guaranteed for production. Stored data may be pruned after the testnet retention window. Production deployments should use certified Walrus storage with explicit retention periods.
+          </p>
+        </div>
+
+        <div className="card">
           <div className="card-section-title">Proof Limits</div>
           <div className="export-limitations">
             <p>Hash match means the checked file bytes matched the registered commitment in this browser session.</p>

@@ -1394,3 +1394,52 @@
 - Follow-up needed:
   - Add persisted verification history if the shared reviewer flow needs a durable record of every local hash check.
 
+## 2026-06-19 -- Surface Seal Privacy Decision (SO-29)
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a "Privacy & Access" card to the proof dashboard showing live privacy status and the Seal access-gating roadmap.
+  - Shows three active protections (AES-256-GCM evidence encryption, MemWal/Seal agent memory encryption, no plaintext on-chain) and one roadmap item (Seal `seal_approve` policy for owner/auditor access-gated decryption).
+  - Includes an explicit deferral note explaining why full Seal integration is not in the current demo: SDK maturity, key server config, package redeploy risk.
+  - Added CSS for `.privacy-status-list` and `.privacy-status-row` with active (turquoise tint) and roadmap (amber tint) visual states.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-29 says "Seal implemented or explicitly deferred." After assessing Seal's SDK maturity, key server requirements, and wallet session signing complexity, full integration was deferred.
+  - A visible privacy card in the proof dashboard makes the deferral explicit and judges can see what privacy protections are active vs planned.
+  - The card does not overclaim: it clearly labels AES as the current mechanism and Seal as roadmap.
+  - This avoids half-integrating Seal and accidentally breaking the demo path 2 days before the deadline.
+
+### Tech Debt
+- Known shortcuts:
+  - The privacy card is static display; it does not query Seal status dynamically because Seal is not integrated.
+- Follow-up needed:
+  - When Seal SDK stabilizes, replace the roadmap row with a live Seal status indicator and add the Move `seal_approve_audit_pack` policy.
+
+## 2026-06-19 -- Add Walrus Retention Status Display (SO-30)
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a "Walrus Storage & Retention" card to the proof dashboard.
+  - Shows network (Walrus Testnet), retention model (epoch-based), evidence blob count, and memory artifact count.
+  - Includes a clear testnet retention disclaimer: epoch-based retention is not guaranteed for production.
+
+### Reasoning
+- Why this approach was chosen:
+  - SO-30 says "retention awareness visible but not overbuilt." The card shows just enough for judges to understand the storage model without adding API calls or complex retention tracking.
+  - Blob counts are derived from existing workspace state (registry and agent persistence refs), so no new data fetching is needed.
+  - The testnet disclaimer is important per AGENTS.md: do not overclaim.
+
+### Tech Debt
+- Known shortcuts:
+  - Retention metadata is static ("epoch-based") rather than queried from Walrus. Testnet does not expose per-blob expiry timestamps.
+- Follow-up needed:
+  - When Walrus production provides retention metadata APIs, replace static labels with live blob retention/expiry data.
