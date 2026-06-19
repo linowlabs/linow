@@ -35,7 +35,7 @@ import {
 import { useWalletBridge } from "@/lib/wallet-context";
 
 type WorkspaceRole = "company" | "auditor" | "verifier";
-type RailPanel = "explorer" | "settings";
+type RailPanel = "explorer" | "export" | "settings";
 type BottomTab = "details" | "chain" | "memory" | "agent" | "privacy" | "raw";
 type OperationType = "register" | "batch" | "verify" | "attest" | "agent";
 type RecordStatus = "Registered" | "Superseded";
@@ -334,6 +334,60 @@ interface DemoEngagementState {
   auditorWallet?: string;
   status: "disabled" | "idle" | "loading" | "ready" | "error";
   message: string;
+}
+
+interface VerifierExport {
+  schema: "linow_demo_verifier_export";
+  version: "1.0.0";
+  generatedAt: string;
+  engagement: {
+    id?: string;
+    companyWallet?: string;
+    auditorWallet?: string;
+  };
+  chain: {
+    packageId: string;
+    auditPackId?: string;
+  };
+  evidence: Array<{
+    evidenceId: string;
+    fileName?: string;
+    documentType: string;
+    source: string;
+    commitment: string;
+    walrusBlobId: string;
+    auditPackId?: string;
+    assertions: string[];
+    status: string;
+    latestAttestation?: AttestationSummary;
+    demoStoragePath?: string;
+  }>;
+  memory: {
+    memwalStatus?: string;
+    walrusStatus?: string;
+    namespace?: string;
+    manifestBlobId?: string;
+    artifactBlobId?: string;
+    reloadStatus: WalrusMemoryReloadState["status"];
+  };
+  agentActions: Array<{
+    packId: string;
+    evidenceId?: string;
+    actionType: string;
+    outputHash: string;
+    txDigest?: string;
+    eventType?: string;
+    eventSeq?: string;
+    signer: string;
+    loggedAt: string;
+  }>;
+  verification: {
+    latestStatus: "idle" | "success" | "tampered";
+    checkedFileLabel?: string;
+    computedHash?: string;
+    expectedHash?: string;
+  };
+  limitations: string[];
 }
 
 const ISA_ASSERTIONS = [
@@ -811,6 +865,7 @@ export default function WorkspacePage() {
   const [agentActionLog, setAgentActionLog] = useState<AgentActionLogState>(DEFAULT_AGENT_ACTION_LOG_STATE);
   const [demoEngagement, setDemoEngagement] = useState<DemoEngagementState>(DEFAULT_DEMO_ENGAGEMENT_STATE);
   const [engagementInput, setEngagementInput] = useState("");
+  const [exportMessage, setExportMessage] = useState("Generate or copy a verifier export after evidence and proof actions exist.");
 
   const signerAddress = wallet.address ?? "";
   const signTransaction = wallet.signTransaction;
@@ -875,6 +930,84 @@ export default function WorkspacePage() {
 
   const companyWalletMatches = !demoEngagement.companyWallet || signerAddress === demoEngagement.companyWallet;
   const auditorWalletMatches = !demoEngagement.auditorWallet || signerAddress === demoEngagement.auditorWallet;
+
+  const verifierExport = useMemo<VerifierExport>(() => ({
+    schema: "linow_demo_verifier_export",
+    version: "1.0.0",
+    generatedAt: new Date().toISOString(),
+    engagement: {
+      id: demoEngagement.id,
+      companyWallet: demoEngagement.companyWallet,
+      auditorWallet: demoEngagement.auditorWallet,
+    },
+    chain: {
+      packageId: PACKAGE_ID,
+      auditPackId: auditPack.id ?? proofSnapshot?.auditPackId,
+    },
+    evidence: registry.map((record) => ({
+      evidenceId: record.id,
+      fileName: record.fileName,
+      documentType: record.type,
+      source: record.source,
+      commitment: record.commitment,
+      walrusBlobId: record.blobId,
+      auditPackId: record.auditPackId,
+      assertions: record.assertions,
+      status: record.latestAttestation ? "attested" : record.status.toLowerCase(),
+      latestAttestation: record.latestAttestation,
+      demoStoragePath: record.demoStoragePath,
+    })),
+    memory: {
+      memwalStatus: agentReview.persistence.memwalStatus,
+      walrusStatus: agentReview.persistence.walrusStatus,
+      namespace: agentReview.persistence.memoryNamespace,
+      manifestBlobId: agentReview.persistence.manifestBlobId,
+      artifactBlobId: agentReview.persistence.artifactBlobId,
+      reloadStatus: memoryReload.status,
+    },
+    agentActions: agentActionLog.logs.map((log) => ({
+      packId: log.packId,
+      evidenceId: log.evidenceId,
+      actionType: log.actionType,
+      outputHash: log.outputHash,
+      txDigest: log.txDigest,
+      eventType: log.event?.type,
+      eventSeq: log.event?.id?.eventSeq,
+      signer: log.signer,
+      loggedAt: log.loggedAt,
+    })),
+    verification: {
+      latestStatus: verificationResult.status,
+      checkedFileLabel: verificationResult.checkedFileLabel,
+      computedHash: verificationResult.computedHash,
+      expectedHash: verificationResult.expectedHash,
+    },
+    limitations: [
+      "This export proves commitments, lifecycle events, and reviewer attestations visible to this workspace.",
+      "It does not prove document truth, source authenticity, business-event validity, or audit sufficiency.",
+      "Source confidence is claimed or derived unless a connector-verified source is explicitly shown.",
+      "Synthetic demo files may be stored in shared web PoC storage for cross-browser review.",
+      "Raw evidence bytes are not included in this export.",
+    ],
+  }), [
+    agentActionLog.logs,
+    agentReview.persistence.artifactBlobId,
+    agentReview.persistence.manifestBlobId,
+    agentReview.persistence.memwalStatus,
+    agentReview.persistence.memoryNamespace,
+    agentReview.persistence.walrusStatus,
+    auditPack.id,
+    demoEngagement.auditorWallet,
+    demoEngagement.companyWallet,
+    demoEngagement.id,
+    memoryReload.status,
+    proofSnapshot?.auditPackId,
+    registry,
+    verificationResult.checkedFileLabel,
+    verificationResult.computedHash,
+    verificationResult.expectedHash,
+    verificationResult.status,
+  ]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 1100px)");
@@ -1229,6 +1362,28 @@ export default function WorkspacePage() {
         message: getErrorMessage(error, "Could not assign wallet in shared demo engagement."),
       }));
     }
+  };
+
+  const getVerifierExportJson = () => JSON.stringify(verifierExport, null, 2);
+
+  const handleCopyVerifierExport = async () => {
+    try {
+      await navigator.clipboard.writeText(getVerifierExportJson());
+      setExportMessage("Verifier export copied to clipboard.");
+    } catch (error) {
+      setExportMessage(getErrorMessage(error, "Could not copy verifier export."));
+    }
+  };
+
+  const handleDownloadVerifierExport = () => {
+    const blob = new Blob([getVerifierExportJson()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `linow-verifier-export-${demoEngagement.id ?? "local"}-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setExportMessage("Verifier export downloaded as JSON.");
   };
 
   const prepareLocalDocument = (document: LocalDocument) => {
@@ -2550,6 +2705,10 @@ export default function WorkspacePage() {
   );
 
   const renderMainContent = () => {
+    if (activeRailPanel === "export" || activeItemId === "export") {
+      return renderExportPanel();
+    }
+
     if (activeRailPanel === "settings" || activeItemId === "settings") {
       return renderSettingsPanel();
     }
@@ -3157,6 +3316,84 @@ export default function WorkspacePage() {
     </div>
   );
 
+  const renderExportPanel = () => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Verifier Export</span>
+          <h1 className="workspace-title">Portable Proof Summary</h1>
+          <p className="workspace-desc">
+            Export the engagement proof state as JSON for a verifier or judge. The export includes commitments, blob IDs, tx/event references, and limitations, not raw evidence bytes.
+          </p>
+        </div>
+        <div className="ide-panel-actions">
+          <button className="btn-secondary" type="button" onClick={handleCopyVerifierExport}>
+            Copy JSON
+          </button>
+          <button className="btn-primary" type="button" onClick={handleDownloadVerifierExport}>
+            Download JSON
+          </button>
+        </div>
+      </div>
+
+      <div className="export-summary-grid">
+        <div>
+          <span>Evidence</span>
+          <strong>{verifierExport.evidence.length}</strong>
+        </div>
+        <div>
+          <span>Attestations</span>
+          <strong>{verifierExport.evidence.filter((record) => record.latestAttestation).length}</strong>
+        </div>
+        <div>
+          <span>AgentActions</span>
+          <strong>{verifierExport.agentActions.length}</strong>
+        </div>
+        <div>
+          <span>Memory Artifacts</span>
+          <strong>{verifierExport.memory.manifestBlobId && verifierExport.memory.artifactBlobId ? "ready" : "pending"}</strong>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-section-title">Export Status</div>
+        <div className="proof-grid">
+          <div className="proof-row">
+            <span className="proof-label">Engagement</span>
+            <span className="proof-value">{verifierExport.engagement.id ? truncateValue(verifierExport.engagement.id, 36) : "local workspace"}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">AuditPack</span>
+            <span className="proof-value">{verifierExport.chain.auditPackId ? truncateValue(verifierExport.chain.auditPackId, 36) : "pending"}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">Package</span>
+            <span className="proof-value">{truncateValue(verifierExport.chain.packageId, 36)}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">Latest Verification</span>
+            <span className="proof-value">{verifierExport.verification.latestStatus}</span>
+          </div>
+        </div>
+        <p className="ide-section-note">{exportMessage}</p>
+      </div>
+
+      <div className="card">
+        <div className="card-section-title">Export Limitations</div>
+        <div className="export-limitations">
+          {verifierExport.limitations.map((limitation) => (
+            <p key={limitation}>{limitation}</p>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-section-title">JSON Preview</div>
+        <pre className="ide-raw export-json-preview">{getVerifierExportJson()}</pre>
+      </div>
+    </div>
+  );
+
   const renderSettingsPanel = () => (
     <div className="ide-main-stack">
       <div className="ide-panel-header">
@@ -3714,6 +3951,23 @@ export default function WorkspacePage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.3.2.6.5.6 1h1a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" />
             </svg>
           </button>
+          <button
+            type="button"
+            className={activeRailPanel === "export" ? "active" : ""}
+            title="Export"
+            aria-label="Export"
+            onClick={() => {
+              setActiveRailPanel("export");
+              setActiveItemId("export");
+              setIsSidebarOpen(true);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 10l5 5 5-5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 21h14" />
+            </svg>
+          </button>
         </nav>
 
         <aside className="workspace-sidebar">
@@ -3800,6 +4054,23 @@ export default function WorkspacePage() {
                 </div>
               </div>
             </>
+          ) : activeRailPanel === "export" ? (
+            <div className="sidebar-section">
+              <div className="sidebar-section-label">Verifier Export</div>
+              <button className="tree-item active" type="button" onClick={() => setActiveItemId("export")}>
+                <span>JSON Summary</span>
+                <small>{verifierExport.evidence.length}</small>
+              </button>
+              <div className="guardrails-block">
+                <div className="guardrails-title">Included</div>
+                <ul className="guardrails-list">
+                  <li>Evidence IDs and commitments.</li>
+                  <li>Walrus blob and memory refs.</li>
+                  <li>Attestation and AgentAction proofs.</li>
+                  <li>No raw evidence bytes.</li>
+                </ul>
+              </div>
+            </div>
           ) : (
             <div className="sidebar-section">
               <div className="sidebar-section-label">Settings</div>

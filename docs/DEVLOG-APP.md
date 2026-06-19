@@ -1344,3 +1344,28 @@
 - Follow-up needed:
   - Use the export and proof-dashboard work to make the loaded engagement surfaces more complete and judge-facing.
 
+## 2026-06-19 -- Add Verifier Export Rail
+
+### Change
+- Files touched:
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/globals.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added a dedicated workspace rail for verifier export instead of burying the flow inside the proof panel.
+  - Generated a portable JSON proof summary with engagement wallets, AuditPack/package refs, evidence commitments, Walrus blob refs, attestation summaries, memory artifact refs, AgentAction logs, and current verification status.
+  - Added copy/download actions plus an explicit limitations panel so the export does not imply document truth or audit sufficiency.
+  - Kept raw evidence bytes out of the export.
+
+### Reasoning
+- Why this approach was chosen:
+  - A separate verifier/export rail makes the judge and third-party review story easier to demo without changing the core evidence workspace.
+  - JSON is the smallest useful compliance-export shape for the web PoC because it can travel outside the app while preserving chain and storage references.
+
+### Tech Debt
+- Known shortcuts:
+  - The export is generated client-side from the current loaded workspace state.
+  - The export is not yet cryptographically signed as a report artifact.
+- Follow-up needed:
+  - Add a verifier import/check path and consider storing signed export manifests as durable artifacts once the proof dashboard stabilizes.
+

@@ -2053,6 +2053,54 @@ input, textarea, select {
   padding-top: 0.15rem;
 }
 
+.export-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.export-summary-grid div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.54);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.export-summary-grid span {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.export-summary-grid strong {
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+}
+
+.export-limitations {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.export-limitations p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.export-json-preview {
+  max-height: 420px;
+  overflow: auto;
+}
+
 .ide-record-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.82fr);
@@ -2572,7 +2620,8 @@ input, textarea, select {
   }
 
   .ide-record-grid,
-  .ide-role-grid {
+  .ide-role-grid,
+  .export-summary-grid {
     grid-template-columns: 1fr;
   }
 
