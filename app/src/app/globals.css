@@ -2427,6 +2427,67 @@ input, textarea, select {
   gap: 0.75rem;
 }
 
+.demo-engagement-panel {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.demo-engagement-status {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.demo-engagement-status.ready {
+  border-color: rgba(13, 148, 136, 0.2);
+  background: rgba(13, 148, 136, 0.05);
+}
+
+.demo-engagement-status.error {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: rgba(220, 38, 38, 0.05);
+}
+
+.demo-engagement-status strong {
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.demo-engagement-status span,
+.demo-wallet-grid span {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.demo-wallet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.demo-wallet-grid div {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.demo-wallet-grid code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-high);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
 .ide-role-option {
   display: grid;
   gap: 0.3rem;

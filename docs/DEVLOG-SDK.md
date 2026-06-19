@@ -666,7 +666,7 @@ Appended matching entry will also be added to DEVLOG-APP if relevant, but this i
   - Register can now attach evidence to an existing AuditPack, but the workspace UI still needs a first-class pack creation/batch registration flow.
   - MemWal still falls back to dummy credentials when env is absent; direct Walrus memory fallback remains a later integration step.
 - Follow-up needed:
-  - Wire `auditPackId` from the pack workspace once SO-21/SO-22 land.
+  - Wire `auditPackId` from the pack workspace once the AuditPack workspace and batch registration flows land.
   - Add parser smoke tests for `Option<ID>`, `Option<address>`, and `Option<String>` Sui JSON shapes.
 
 ## 2026-06-13 — Complete MemWal Runtime Setup
@@ -683,7 +683,7 @@ Appended matching entry will also be added to DEVLOG-APP if relevant, but this i
 
 ### Reasoning
 - Why this approach was chosen:
-  - Waiting for remember jobs makes SO-13b stronger than a fire-and-forget submission and better supports the SO-13c recall demo.
+  - Waiting for remember jobs makes memory storage stronger than a fire-and-forget submission and better supports the recall demo.
   - Keeping relayer URL configurable lets local/Vercel deployments switch between hosted production, staging, or self-hosted MemWal without code changes.
 
 ### Tech Debt
@@ -730,7 +730,7 @@ Appended matching entry will also be added to DEVLOG-APP if relevant, but this i
 
 ### Reasoning
 - Why this approach was chosen:
-  - SO-25 needs the app to show tx/event details after human approval, and the SDK was already requesting `showEvents` and `showObjectChanges`.
+  - The approval logging feature needs the app to show tx/event details after human approval, and the SDK was already requesting `showEvents` and `showObjectChanges`.
   - Returning a small parsed proof shape keeps the app from reaching into raw Sui/Tatum response internals.
 
 ### Tech Debt
