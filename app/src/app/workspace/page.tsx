@@ -192,6 +192,44 @@ interface AgentWorkspaceReview {
   };
 }
 
+interface WalrusMemoryReloadResult {
+  status: "reloaded";
+  encrypted: true;
+  network: string;
+  manifestBlobId: string;
+  artifactBlobId: string;
+  manifest: {
+    schemaName?: string;
+    schemaVersion?: string;
+    packId?: string;
+    createdAt?: string;
+    evidenceRefCount: number;
+    agentOutputHashCount: number;
+    findingHashCount: number;
+    owner?: string;
+    auditor?: string;
+  };
+  artifact: {
+    schemaName?: string;
+    schemaVersion?: string;
+    packId?: string;
+    createdAt?: string;
+    documentCount: number;
+    outputHashCount: number;
+    artifactCount: number;
+    findingCount: number;
+    recalledCount: number;
+    recallNoteCount: number;
+    recallItemCount: number;
+  };
+}
+
+interface WalrusMemoryReloadState {
+  status: "idle" | "loading" | "success" | "error";
+  message: string;
+  result?: WalrusMemoryReloadResult;
+}
+
 interface AgentRunState {
   status: "idle" | "running" | "success" | "error";
   message: string;
@@ -276,6 +314,11 @@ const DEFAULT_AGENT_STATE: AgentRunState = {
   message: "Select evidence or a folder, then run analysis when the pack has readable text evidence.",
   findings: [],
   actionCandidates: [],
+};
+
+const DEFAULT_MEMORY_RELOAD_STATE: WalrusMemoryReloadState = {
+  status: "idle",
+  message: "Run agent analysis with Walrus fallback configured, then reload the encrypted memory artifact.",
 };
 
 async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
@@ -617,6 +660,7 @@ export default function WorkspacePage() {
   const [proofSnapshot, setProofSnapshot] = useState<ProofArtifactsSnapshot | null>(null);
   const [agentRun, setAgentRun] = useState<AgentRunState>(DEFAULT_AGENT_STATE);
   const [agentInstruction, setAgentInstruction] = useState("");
+  const [memoryReload, setMemoryReload] = useState<WalrusMemoryReloadState>(DEFAULT_MEMORY_RELOAD_STATE);
 
   const signerAddress = wallet.address ?? "";
   const signTransaction = wallet.signTransaction;
@@ -1704,6 +1748,58 @@ export default function WorkspacePage() {
     }
   };
 
+  const handleReloadWalrusMemory = async () => {
+    const manifestBlobId = agentReview.persistence.manifestBlobId;
+    const artifactBlobId = agentReview.persistence.artifactBlobId;
+
+    if (!manifestBlobId || !artifactBlobId) {
+      setMemoryReload({
+        status: "error",
+        message: "No direct Walrus memory artifact is available yet. Run agent analysis with LINOW_AGENT_MEMORY_ENCRYPTION_KEY configured.",
+      });
+      setBottomTab("memory");
+      return;
+    }
+
+    setMemoryReload({
+      status: "loading",
+      message: "Reloading encrypted Walrus memory manifest and agent artifact.",
+    });
+
+    try {
+      const result = await postJson<WalrusMemoryReloadResult>("/api/walrus/memory/reload", {
+        manifestBlobId,
+        artifactBlobId,
+      });
+
+      setMemoryReload({
+        status: "success",
+        message: "Encrypted Walrus memory artifact reloaded and decrypted server-side.",
+        result,
+      });
+      setProofSnapshot((prev) => ({
+        auditPackId: auditPack.id ?? result.manifest.packId ?? prev?.auditPackId,
+        evidenceId: prev?.evidenceId,
+        txDigest: prev?.txDigest,
+        packageId: PACKAGE_ID,
+        commitment: prev?.commitment,
+        blobReference: result.artifactBlobId,
+        attestationId: prev?.attestationId,
+        verificationStatus: prev?.verificationStatus,
+        checkedFileLabel: prev?.checkedFileLabel,
+        memoryStatus: `Walrus memory reloaded (${result.network})`,
+        updatedAt: nowLabel(),
+      }));
+      setBottomTab("memory");
+    } catch (error) {
+      setMemoryReload({
+        status: "error",
+        message: getErrorMessage(error, "Walrus memory reload failed."),
+      });
+      setBottomTab("memory");
+    }
+  };
+
   const renderSteps = (type: OperationType) => {
     if (!operationProgress || operationProgress.type !== type) return null;
 
@@ -2532,6 +2628,7 @@ export default function WorkspacePage() {
       batchSummary,
       verificationResult,
       attestResult,
+      memoryReload,
       agentRun: agentRun.raw ?? {
         status: agentRun.status,
         message: agentRun.message,
@@ -2573,11 +2670,63 @@ export default function WorkspacePage() {
             </div>
           )}
           {bottomTab === "memory" && (
-            <div className="ide-status-line">
-              <span>{agentRun.memoryStatus ?? "No memory write has been observed in this workspace session."}</span>
-              <span>Namespace: {agentReview.persistence.memoryNamespace ?? "pending"}</span>
-              <span>Manifest: {agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 18) : "pending"}</span>
-              <span>Artifact: {agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 18) : "pending"}</span>
+            <div className="ide-memory-panel">
+              <div className="ide-status-line">
+                <span>{agentRun.memoryStatus ?? "No memory write has been observed in this workspace session."}</span>
+                <span>Namespace: {agentReview.persistence.memoryNamespace ?? "pending"}</span>
+                <span>MemWal: {agentReview.persistence.memwalStatus ?? "pending"}</span>
+                <span>Walrus: {agentReview.persistence.walrusStatus ?? "pending"}</span>
+                <span>Manifest: {agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 18) : "pending"}</span>
+                <span>Artifact: {agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 18) : "pending"}</span>
+              </div>
+              <div className="ide-memory-actions">
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  disabled={
+                    memoryReload.status === "loading" ||
+                    !agentReview.persistence.manifestBlobId ||
+                    !agentReview.persistence.artifactBlobId
+                  }
+                  onClick={handleReloadWalrusMemory}
+                >
+                  {memoryReload.status === "loading" ? "Reloading..." : "Reload Walrus memory"}
+                </button>
+                <span>
+                  {agentReview.persistence.manifestBlobId && agentReview.persistence.artifactBlobId
+                    ? "Reads encrypted direct Walrus fallback artifacts and returns a safe summary."
+                    : "Direct Walrus reload needs stored manifest and artifact blob IDs."}
+                </span>
+              </div>
+              <div className={`ide-memory-result ${memoryReload.status}`}>
+                <strong>
+                  {memoryReload.status === "success"
+                    ? "Memory reload proof"
+                    : memoryReload.status === "error"
+                      ? "Memory reload blocked"
+                      : "Memory reload"}
+                </strong>
+                <p>{memoryReload.message}</p>
+                {memoryReload.result && (
+                  <div className="ide-memory-grid">
+                    <span>Pack</span>
+                    <code>{truncateValue(memoryReload.result.manifest.packId ?? "pending", 20)}</code>
+                    <span>Network</span>
+                    <code>{memoryReload.result.network}</code>
+                    <span>Evidence refs</span>
+                    <code>{memoryReload.result.manifest.evidenceRefCount}</code>
+                    <span>Output hashes</span>
+                    <code>{memoryReload.result.manifest.agentOutputHashCount}</code>
+                    <span>Finding hashes</span>
+                    <code>{memoryReload.result.manifest.findingHashCount}</code>
+                    <span>Bundle docs/findings</span>
+                    <code>{memoryReload.result.artifact.documentCount}/{memoryReload.result.artifact.findingCount}</code>
+                  </div>
+                )}
+              </div>
+              <p className="ide-section-note">
+                This reload proves encrypted Walrus artifact availability and decryptability. It does not prove document truth or replace reviewer judgment.
+              </p>
             </div>
           )}
           {bottomTab === "agent" && (
