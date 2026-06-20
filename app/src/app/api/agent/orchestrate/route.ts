@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { logAgentProgress, resolveAgentOrchestrationInput, runAgentOrchestration } from "@/lib/agent/orchestrate";
+import {
+  appendAgentProgressTrace,
+  resolveAgentOrchestrationInput,
+  runAgentOrchestration,
+} from "@/lib/agent/orchestrate";
 import { parseJsonObjectRequest, toAgentErrorResponse } from "@/lib/agent/http";
 import { buildOrchestrateApiResponse, resolveOrchestrateResponseMode } from "@/lib/agent/orchestrate-response";
 import { persistAgentOutputsForWeb3 } from "@/lib/agent/web3-persistence";
@@ -13,13 +17,13 @@ export async function POST(request: Request) {
       skipFindingDrafting: responseMode === "compact_p2" || responseMode === "memory",
     });
     const persistenceStartedAt = Date.now();
-    logAgentProgress("Persisting/preparing web3 outputs", {
+    appendAgentProgressTrace(result.progress_trace, "Persisting/preparing web3 outputs", {
       pack_id: result.pack_id,
       response_mode: responseMode,
       hashes: result.hashes.length,
     });
     const persistence_result = await persistAgentOutputsForWeb3(result);
-    logAgentProgress("Web3 persistence preparation complete", {
+    appendAgentProgressTrace(result.progress_trace, "Web3 persistence preparation complete", {
       pack_id: result.pack_id,
       duration_ms: Date.now() - persistenceStartedAt,
       memwal_status: persistence_result.memwal.status,
@@ -28,7 +32,7 @@ export async function POST(request: Request) {
     });
 
     const responseStartedAt = Date.now();
-    logAgentProgress("Building orchestrate API response", {
+    appendAgentProgressTrace(result.progress_trace, "Building orchestrate API response", {
       pack_id: result.pack_id,
       response_mode: responseMode,
     });
@@ -37,7 +41,7 @@ export async function POST(request: Request) {
       result,
       persistenceResult: persistence_result,
     });
-    logAgentProgress("Orchestrate API response ready", {
+    appendAgentProgressTrace(result.progress_trace, "Orchestrate API response ready", {
       pack_id: result.pack_id,
       duration_ms: Date.now() - responseStartedAt,
       response_mode: responseMode,
