@@ -1,0 +1,217 @@
+[
+  {
+    "file_path": "agent_test_scripts/agent_system_test_prompt.txt",
+    "sha256": "d1bc749bf9225fec26d7d712daee8fd48b0e37e3f6a17464343771a2b205a05d",
+    "bytes": 397
+  },
+  {
+    "file_path": "agent_test_scripts/upload_sequence.md",
+    "sha256": "e34bc3afd23fcd1d108b4da64cd8d66d53f72cef2290c64ecc746c72b4d58895",
+    "bytes": 1148
+  },
+  {
+    "file_path": "audit_docs/00_engagement_brief_linow_isa500_q2_revenue.pdf",
+    "sha256": "1f24c4519bb760d37e61f39ba157c8ae039446f5bc75799ebeb963197755ddcb",
+    "bytes": 3387
+  },
+  {
+    "file_path": "audit_docs/01_README_case_overview.md",
+    "sha256": "04c8d1723be94fef31bca04a9165bff8a356b9e8c3cf391aad7907dbea99a23a",
+    "bytes": 1892
+  },
+  {
+    "file_path": "audit_docs/02_document_request_list.md",
+    "sha256": "5ebb6c2d7229f847758228a6e445ca1778f69858b2649e443a5f7f4618cbe479",
+    "bytes": 874
+  },
+  {
+    "file_path": "audit_docs/03_audit_pack_manifest.json",
+    "sha256": "b880991bf8e7b4313fc53550919a0c860d38c4405e522d34d34ae67e46e93fdc",
+    "bytes": 1809
+  },
+  {
+    "file_path": "audit_docs/04_evidence_index_expected_mapping.csv",
+    "sha256": "d4decd85417f9b48ed18ead9378dcb05419beb4dde26e46b5c1c2a36944a3bcb",
+    "bytes": 5512
+  },
+  {
+    "file_path": "audit_docs/05_hash_manifest_all_files.json",
+    "sha256": "6ee384b09b701734ca2c15f7f7a857e7e95975169f2e47884a27e32a17cf1cc0",
+    "bytes": 7755
+  },
+  {
+    "file_path": "evidence_initial/01_financial_reports/01_q2_2026_financial_reporting_pack.xlsx",
+    "sha256": "3e83c90069b45328a9351805d1e779894bc63fe8e0d5ac7fcb7cdf4bbcd59501",
+    "bytes": 11671
+  },
+  {
+    "file_path": "evidence_initial/01_financial_reports/07_ar_aging_q2_2026.csv",
+    "sha256": "b59c882850fad2874258548293ba6a22379731e85d1af20f766584ea32812a0e",
+    "bytes": 437
+  },
+  {
+    "file_path": "evidence_initial/01_financial_reports/08_management_report_april_2026.pdf",
+    "sha256": "3ef144943a843a26f0e1b299d390d67b342046ecc36f3638ea231a518f33e84e",
+    "bytes": 3025
+  },
+  {
+    "file_path": "evidence_initial/01_financial_reports/08_management_report_june_2026.pdf",
+    "sha256": "58f0b37ea0965b8a13b3d0fed8fdefaea0dccbb663829f6c1e45e722e72a0aff",
+    "bytes": 3024
+  },
+  {
+    "file_path": "evidence_initial/01_financial_reports/08_management_report_may_2026.pdf",
+    "sha256": "4ed788ffa22dd254a59690fbc7664c68525b714a4182c5f806616f8f9fa25980",
+    "bytes": 3024
+  },
+  {
+    "file_path": "evidence_initial/02_contracts_invoices/09_customer_contract_orion_C-ORION-2026-019.pdf",
+    "sha256": "fc545f3f53f10f87d42a9bc6b3e0ed06cb1df4c4b5ce3808e649f34439c9b200",
+    "bytes": 2909
+  },
+  {
+    "file_path": "evidence_initial/02_contracts_invoices/10_invoice_INV-2026-0411.pdf",
+    "sha256": "96e68d1e87a3c7230f968421c0a24ff3226adb290e0140f54898266904816ec7",
+    "bytes": 2608
+  },
+  {
+    "file_path": "evidence_initial/02_contracts_invoices/10_invoice_INV-2026-0517.pdf",
+    "sha256": "96e43a8f6ab756b84556939e3257ce2fa0bc5c4116df4695d3ee66e7cfd95dcf",
+    "bytes": 2587
+  },
+  {
+    "file_path": "evidence_initial/02_contracts_invoices/10_invoice_INV-2026-0630.pdf",
+    "sha256": "71355e2900ab90e77a065085a9f1b4b35b6fef4d01ee63180c36ed2b1ad869cb",
+    "bytes": 2605
+  },
+  {
+    "file_path": "evidence_initial/02_contracts_invoices/11_invoice_INV-2026-0528_megalogis.pdf",
+    "sha256": "395b284322d17e22dc02c545da6362db591556e0e3a6841e7c15ee6949d05423",
+    "bytes": 2544
+  },
+  {
+    "file_path": "evidence_initial/03_delivery_cutoff/05_service_delivery_cutoff_log.csv",
+    "sha256": "bba58be3f0b152bae2f97980b8a0808265b61ea293e445d986ba9e9909e2e1bb",
+    "bytes": 744
+  },
+  {
+    "file_path": "evidence_initial/03_delivery_cutoff/12_service_acceptance_orion_uat_2026_06_25.pdf",
+    "sha256": "56c1158c97f06d9b70ae02fd07ba1ee02ea3ef7d91e6cca1ba1db383dd7c45f6",
+    "bytes": 2834
+  },
+  {
+    "file_path": "evidence_initial/04_bank_cash_receipts/03_bank_transactions_apr_jul_2026.csv",
+    "sha256": "60a2654b28323c0d835b2547654247419faa95bce72106b8c77de38ae4d57bf6",
+    "bytes": 1621
+  },
+  {
+    "file_path": "evidence_initial/04_bank_cash_receipts/13_bank_statement_april_2026.pdf",
+    "sha256": "e57b497a2971d786d1f504571552609f12b74fc72f31b7861a2c2487bd3a77c9",
+    "bytes": 2729
+  },
+  {
+    "file_path": "evidence_initial/04_bank_cash_receipts/13_bank_statement_june_2026.pdf",
+    "sha256": "5f08572f962f983bb3934f0c4548c50fce1dd2785baf69c9c6adabf53825d280",
+    "bytes": 2730
+  },
+  {
+    "file_path": "evidence_initial/04_bank_cash_receipts/13_bank_statement_may_2026.pdf",
+    "sha256": "ae87b60251636f109d562da884a85fc0ffe89bd2b8ff76e2e4b88cc514c79316",
+    "bytes": 2733
+  },
+  {
+    "file_path": "evidence_initial/05_gl_exports_and_policies/02_sales_register_q2_2026.csv",
+    "sha256": "6c40a93e0e6618d5c55a56cc64bb6f49dee2ea7192ac9f3cdaf40d3eaee6ed0a",
+    "bytes": 1921
+  },
+  {
+    "file_path": "evidence_initial/05_gl_exports_and_policies/04_gl_ledger_revenue_q2_2026.csv",
+    "sha256": "909a3f41801854169f84d817928f99451538b43037ab125131903520f0667b83",
+    "bytes": 1208
+  },
+  {
+    "file_path": "evidence_initial/05_gl_exports_and_policies/06_deferred_revenue_rollforward_q2_2026.csv",
+    "sha256": "6ab8be4289f6b23bb1a8dec9de6a0c78ac8765e3a14e1e1f3bd43f0525f9008c",
+    "bytes": 488
+  },
+  {
+    "file_path": "evidence_initial/05_gl_exports_and_policies/14_revenue_recognition_policy_rev_2026.txt",
+    "sha256": "99f0f32bc703fe38bb413c2ce6f221d4377b104b6421ccd04beb00275adfd6cd",
+    "bytes": 1031
+  },
+  {
+    "file_path": "evidence_initial/05_gl_exports_and_policies/15_manual_adjustment_note_JRN-2026-06-117.txt",
+    "sha256": "6a3a6fb328bf66005cd5a2ae1da6db7c9e0e40bf041fc99626b9916594e32fb5",
+    "bytes": 475
+  },
+  {
+    "file_path": "evidence_initial/05_gl_exports_and_policies/16_finance_email_thread_revenue_close.txt",
+    "sha256": "cf373963462a32d59650b8cb5078aa18a70027407ab5353a3904e5991c764361",
+    "bytes": 723
+  },
+  {
+    "file_path": "evidence_remediation/R01_commercial_committee_minutes_orion_contract.pdf",
+    "sha256": "d49df9ac0a4ba668352f9f0e4cccef47388191e04ed47d0e989d61e4875e6141",
+    "bytes": 2735
+  },
+  {
+    "file_path": "evidence_remediation/R02_cfo_approval_JRN-2026-06-117.pdf",
+    "sha256": "1f3812ac42dfddc94c31756cfc6fa5546dda6dc80dce234817fdd81262fccd58",
+    "bytes": 2542
+  },
+  {
+    "file_path": "expected_outputs/evaluation_rubric.md",
+    "sha256": "1c61188da55876197fca2fdfba7fd1756f352f43ac071dfd8d1bc20bec578667",
+    "bytes": 914
+  },
+  {
+    "file_path": "expected_outputs/expected_agent_memory_events.json",
+    "sha256": "5e30caadebf85d6888d9d5fd3233fd37ce54b505cba4ba036f528eafab739d9a",
+    "bytes": 1088
+  },
+  {
+    "file_path": "expected_outputs/expected_ccer_findings.json",
+    "sha256": "93cdb1ae5a17fd0843d7b7f5a9cff3c38fa14b9b554fb80c2ca57907781eb62f",
+    "bytes": 3476
+  },
+  {
+    "file_path": "expected_outputs/expected_classification_summary.csv",
+    "sha256": "d4decd85417f9b48ed18ead9378dcb05419beb4dde26e46b5c1c2a36944a3bcb",
+    "bytes": 5512
+  },
+  {
+    "file_path": "expected_outputs/expected_gap_analysis_after_remediation.json",
+    "sha256": "28818ef7e84eb511a19c6d6aee950a95f142f12bf464400f0eebdc7e5b08341b",
+    "bytes": 929
+  },
+  {
+    "file_path": "expected_outputs/expected_gap_analysis_before_remediation.json",
+    "sha256": "61a615aed937a928f92cfe8064352d353e987000beb2b85d4d3f0c7ea48bb1f2",
+    "bytes": 2413
+  },
+  {
+    "file_path": "expected_outputs/expected_source_confidence.json",
+    "sha256": "2cebc4b782d15b6fcb0883ceee72dba8afee1961efb3a498a5f13ced4ab8583f",
+    "bytes": 580
+  },
+  {
+    "file_path": "expected_outputs/expected_test_cases.csv",
+    "sha256": "3f8ab30f70d72995c6bfebfcccf9ab5933c05c676e1903ffac41661fc3c79cfc",
+    "bytes": 1180
+  },
+  {
+    "file_path": "negative_cases/N01_tampered_bank_statement_june_2026.pdf",
+    "sha256": "365258c7e77acd2121611c2663d0fffc269a5ff164a3f4051490f5bad7cdce08",
+    "bytes": 2402
+  },
+  {
+    "file_path": "negative_cases/N02_wrong_document_marketing_brochure.txt",
+    "sha256": "6d4050d922e17a842f875ab1c378e0d48844ad43e2b10a8981aa2f1ca0080cc6",
+    "bytes": 419
+  },
+  {
+    "file_path": "negative_cases/N03_tampered_sales_register_q2_2026.csv",
+    "sha256": "778cb3c4f7414096360f7e146200048e0271d0b1eaf8b897b4b6a502f4984af0",
+    "bytes": 1921
+  }
+]

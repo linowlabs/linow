@@ -1,0 +1,5 @@
+event_id,event_date,customer,related_invoice,event_type,system_timestamp,evidence_ref,cutoff_note
+EVT-ORION-UAT-01,2026-06-25,PT Orion Mart Tbk,INV-2026-0630,UAT sign-off,2026-06-25T16:32:10+07:00,service_acceptance_orion.pdf,Supports occurrence before quarter end
+EVT-ORION-GOLIVE,2026-07-02,PT Orion Mart Tbk,INV-2026-0630,Production go-live,2026-07-02T10:15:22+07:00,service_delivery_log_jun.csv,Potential cut-off conflict
+EVT-BALI-JUN,2026-06-28,PT Bali Fresh Market,INV-2026-0620,Monthly usage close,2026-06-28T20:00:00+07:00,usage_report_jun.csv,Supports June subscription
+EVT-SENTRA-JUN,2026-06-29,PT Sentra Farma Nusantara,INV-2026-0624,Monthly usage close,2026-06-29T20:10:00+07:00,usage_report_jun.csv,Supports June subscription

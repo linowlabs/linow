@@ -1,0 +1,50 @@
+{
+  "case_id": "LINOW-ISA500-Q2REV-2026-ACC",
+  "company": "PT Arunika Cloud Commerce",
+  "period": "2026-04-01 to 2026-06-30",
+  "audit_area": "Revenue recognition and cash receipts",
+  "framework": "ISA 500 evidence readiness",
+  "currency": "IDR",
+  "primary_customer": "PT Orion Mart Tbk",
+  "primary_contract": "C-ORION-2026-019",
+  "material_transaction_value": 855000000,
+  "intentional_gaps": [
+    {
+      "gap_id": "GAP-01",
+      "missing_document": "Commercial Committee minutes for Orion contract",
+      "affected_assertions": [
+        "Rights & Obligations",
+        "Occurrence"
+      ],
+      "expected_recommendation": "Upload board minutes or approval log."
+    },
+    {
+      "gap_id": "GAP-02",
+      "missing_document": "CFO approval for JRN-2026-06-117",
+      "affected_assertions": [
+        "Classification",
+        "Accuracy",
+        "Rights & Obligations"
+      ],
+      "expected_recommendation": "Upload CFO approval evidence."
+    },
+    {
+      "gap_id": "GAP-03",
+      "issue": "Production go-live date after quarter-end conflicts with revenue recognized on 2026-06-30",
+      "affected_assertions": [
+        "Cut-off",
+        "Occurrence"
+      ],
+      "expected_recommendation": "Review acceptance evidence and consider deferral or additional support."
+    }
+  ],
+  "upload_sequence": [
+    "Upload all files in evidence_initial/",
+    "Run classification, extraction, assertion mapping, source confidence, and gap analysis.",
+    "Expected result: GAP-01 and GAP-02 open, GAP-03 flagged as cut-off risk.",
+    "Upload evidence_remediation/R01 and R02.",
+    "Run recall + updated gap analysis.",
+    "Expected result: GAP-01 and GAP-02 resolved; GAP-03 remains review item.",
+    "Run negative cases to test tamper detection and irrelevant document rejection."
+  ]
+}

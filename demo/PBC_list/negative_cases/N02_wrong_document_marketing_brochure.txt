@@ -1,0 +1,5 @@
+Arunika Cloud Commerce - Marketing Brochure
+
+This brochure describes the company's retail analytics product, AI merchandising features, customer stories, and pricing packages.
+
+It is intentionally included as a wrong-document negative case. The agent should not classify this as audit evidence for revenue recognition, should not map it to strong ISA assertions, and should flag it as irrelevant or low evidence value.

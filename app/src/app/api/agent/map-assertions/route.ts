@@ -8,22 +8,26 @@ import {
 } from "@/lib/agent/map-assertions";
 import { AGENT_CONFIG } from "@/lib/agent/config";
 import { buildIngestionSummary } from "@/lib/agent/common";
-import { runGroqJsonCompletion } from "@/lib/agent/groq";
+import { buildGeminiEvidenceAttachments } from "@/lib/agent/evidence-attachments";
+import { resolveAgentProvider, runAgentJsonCompletion } from "@/lib/agent/provider";
 import { parseJsonObjectRequest, toAgentErrorResponse } from "@/lib/agent/http";
 
 export async function POST(request: Request) {
   try {
     const body = await parseJsonObjectRequest(request);
+    const provider = resolveAgentProvider(body.provider);
     const input = await resolveAssertionMappingToolInput(body);
-    const result = await runGroqJsonCompletion({
+    const result = await runAgentJsonCompletion({
+      provider,
       schemaName: AGENT_CONFIG.schemaNames.assertionMappingBundle,
       schema: groqAssertionMappingBundleSchema,
       messages: buildAssertionMappingMessages(input),
       validate: isAssertionMappingBundle,
+      attachments: provider === "gemini" ? await buildGeminiEvidenceAttachments(input) : undefined,
     });
 
     return NextResponse.json({
-      provider: "groq",
+      provider: result.provider,
       model: result.model,
       ...normalizeAssertionMappingBundle(input, result.result),
       ingestion: buildIngestionSummary(input.ingested_file),

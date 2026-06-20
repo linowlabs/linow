@@ -1,6 +1,7 @@
 import type { AgentArtifactHashRecord } from "@/lib/agent/artifacts";
 import type { AgentOrchestrationProfile } from "@/lib/agent/config";
 import type { AssertionMappingBundle } from "@/lib/agent/map-assertions";
+import type { AgentProviderName, AgentUsageStats } from "@/lib/agent/provider-types";
 import type {
   AgentSchemaName,
   AuditPackSummaryOutput,
@@ -9,12 +10,6 @@ import type {
   GapAnalysisOutput,
   MetadataExtractionOutput,
 } from "@/lib/agent/schemas";
-
-export interface GroqUsageStats {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-}
 
 export interface AgentDocumentProofReference {
   evidence_id?: string;
@@ -39,10 +34,10 @@ export interface DocumentAnalysisResult {
     source_confidence: AgentArtifactHashRecord;
   };
   usage: {
-    classification: GroqUsageStats | null;
-    metadata: GroqUsageStats | null;
-    assertion_mapping: GroqUsageStats | null;
-    document_analysis_bundle?: GroqUsageStats | null;
+    classification: AgentUsageStats | null;
+    metadata: AgentUsageStats | null;
+    assertion_mapping: AgentUsageStats | null;
+    document_analysis_bundle?: AgentUsageStats | null;
   };
 }
 
@@ -140,7 +135,7 @@ export interface OrchestrationFlowStep {
 }
 
 export interface AgentOrchestrationResult {
-  provider: "groq";
+  provider: AgentProviderName;
   model: string;
   profile: AgentOrchestrationProfile;
   pack_id: string;
@@ -163,7 +158,7 @@ export interface AgentOrchestrationResult {
   flow: OrchestrationFlowStep[];
   recalled_prior_memory_count: number;
   cached_document_count: number;
-  usage: GroqUsageStats;
+  usage: AgentUsageStats;
 }
 
 interface CreateArtifactCatalogEntryInput {
