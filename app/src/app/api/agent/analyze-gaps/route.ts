@@ -7,13 +7,14 @@ import {
   parseGapAnalysisToolInput,
 } from "@/lib/agent/analyze-gaps";
 import { AGENT_CONFIG } from "@/lib/agent/config";
-import { runGroqJsonCompletion } from "@/lib/agent/groq";
+import { resolveAgentProvider, runAgentJsonCompletion } from "@/lib/agent/provider";
 import { parseJsonObjectRequest, toAgentErrorResponse } from "@/lib/agent/http";
 import { recallPriorAuditMemory } from "@linow/sdk/memwal";
 
 export async function POST(request: Request) {
   try {
     const body = await parseJsonObjectRequest(request);
+    const provider = resolveAgentProvider(body.provider);
     const input = parseGapAnalysisToolInput(body);
 
     // B side: recall prior audit memory (evidence/finding etc.) persisted in MemWal
@@ -26,7 +27,8 @@ export async function POST(request: Request) {
     if (!input.pack_notes) input.pack_notes = [];
     input.pack_notes.push(...priorNotes);
 
-    const result = await runGroqJsonCompletion({
+    const result = await runAgentJsonCompletion({
+      provider,
       schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
       schema: groqGapAnalysisSchema,
       messages: buildGapAnalysisMessages(input),
@@ -35,7 +37,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      provider: "groq",
+      provider: result.provider,
       model: result.model,
       gap_analysis: normalizeGapAnalysisResult(input, result.result),
       usage: result.usage ?? null,

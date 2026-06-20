@@ -19,6 +19,7 @@ export interface IngestedEvidenceFile {
     | "pdf"
     | "spreadsheet"
     | "docx"
+    | "image"
     | "unsupported";
   text: string;
   byteLength: number;
@@ -68,12 +69,11 @@ export async function ingestEvidenceFile(filePath: string): Promise<IngestedEvid
     format = "docx";
     ({ text, warnings } = await extractDocxText(fileBuffer));
   } else if (IMAGE_EXTENSIONS.has(extension)) {
-    format = "unsupported";
+    format = "image";
     warnings = [
-      "Image OCR is not enabled in the current cheap-mode ingestion path.",
-      "Provide extracted text or convert the image content into PDF/TXT if the agent must analyze it now.",
+      "Image text is not extracted locally. Gemini provider can analyze this file as an inline image attachment.",
     ];
-    text = `Unsupported image evidence file: ${filename}. OCR is not enabled in the current ingestion pipeline.`;
+    text = `Image evidence file: ${filename}. Use the attached image content for OCR and visual evidence analysis when available.`;
   } else {
     format = "unsupported";
     warnings = [

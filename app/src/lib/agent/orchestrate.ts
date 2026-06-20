@@ -1,5 +1,11 @@
 import { AGENT_CONFIG, type AgentOrchestrationProfile } from "@/lib/agent/config";
-import { classifyDocumentWithGroq, runGroqJsonCompletion } from "@/lib/agent/groq";
+import {
+  classifyDocumentWithAgent,
+  resolveAgentProvider,
+  runAgentJsonCompletion,
+  shouldUseDocumentAnalysisBundle,
+} from "@/lib/agent/provider";
+import { buildGeminiEvidenceAttachments } from "@/lib/agent/evidence-attachments";
 import {
   readCachedDocumentAnalysis,
   writeCachedDocumentAnalysis,
@@ -28,8 +34,8 @@ import {
   type AgentDocumentProofReference,
   type AgentOrchestrationResult,
   type DocumentAnalysisResult,
-  type GroqUsageStats,
 } from "@/lib/agent/orchestration-contract";
+import type { AgentProviderName, AgentUsageStats } from "@/lib/agent/provider-types";
 import {
   AgentInputError,
   isRecord,
@@ -76,6 +82,7 @@ export interface OrchestrationDocumentInput extends AgentDocumentInput {
 }
 
 export interface AgentOrchestrationInput {
+  provider: AgentProviderName;
   profile: AgentOrchestrationProfile;
   pack_id: string;
   engagement_name: string;
@@ -108,8 +115,10 @@ export async function resolveAgentOrchestrationInput(value: unknown): Promise<Ag
 
   const profile = resolveOrchestrationProfile(value.profile);
   const profileConfig = AGENT_CONFIG.orchestrationProfiles[profile];
+  const provider = resolveAgentProvider(value.provider);
 
   return {
+    provider,
     profile,
     pack_id: readRequiredString(value.pack_id, "pack_id"),
     engagement_name: readRequiredString(value.engagement_name, "engagement_name"),
@@ -130,21 +139,35 @@ export async function runAgentOrchestration(
   input: AgentOrchestrationInput,
   options: AgentOrchestrationRunOptions = {},
 ): Promise<AgentOrchestrationResult> {
+  const progress = createAgentProgressLogger();
+  progress("Starting orchestration", {
+    provider: input.provider,
+    profile: input.profile,
+    pack_id: input.pack_id,
+    documents: input.documents.length,
+    skip_finding_drafting: Boolean(options.skipFindingDrafting),
+  });
   const documents: DocumentAnalysisResult[] = [];
   const artifacts = createArtifactCollector(input.pack_id);
   const documentNotesById = createDocumentNotesLookup(input.documents);
   const usage = createUsageAccumulator();
   const profileConfig = AGENT_CONFIG.orchestrationProfiles[input.profile];
-  const useDocumentAnalysisBundle = profileConfig.combineDocumentPasses && AGENT_CONFIG.groq.enableDocumentAnalysisBundle;
+  const useDocumentAnalysisBundle = shouldUseDocumentAnalysisBundle(input.provider, profileConfig.combineDocumentPasses);
   const recalledMemories = profileConfig.recallPriorMemory ? await recallPriorAuditMemory(input.pack_id) : [];
   const recallSummary = buildAgentRecallSummary(input.pack_id, recalledMemories, profileConfig.maxPriorMemoryNotes);
   const effectivePackNotes = mergePackNotes(input.pack_notes, recallSummary.notes);
   let cachedDocumentCount = 0;
-  let model: string = AGENT_CONFIG.groq.defaultModel;
+  let model: string =
+    input.provider === "gemini" ? AGENT_CONFIG.gemini.defaultModel : AGENT_CONFIG.groq.defaultModel;
 
   for (const document of input.documents) {
     const analysisMode = useDocumentAnalysisBundle ? "compact" : "multi_pass";
-    const analysis = await resolveDocumentAnalysis(document, analysisMode);
+    progress("Analyzing evidence", {
+      document_id: document.documentId,
+      filename: document.documentName,
+      mode: analysisMode,
+    });
+    const analysis = await resolveDocumentAnalysis(input.provider, document, analysisMode);
 
     if (analysis.analysisSource === "live") {
       model = analysis.model;
@@ -218,10 +241,22 @@ export async function runAgentOrchestration(
         document_analysis_bundle: analysis.usageBreakdown.document_analysis_bundle ?? null,
       },
     });
+    progress("Evidence analysis complete", {
+      document_id: document.documentId,
+      document_type: analysis.classification.document_type,
+      source_confidence: analysis.classification.source_confidence,
+      source: analysis.analysisSource,
+      hash_count: artifacts.hashes.length,
+    });
   }
 
+  progress("Running pack gap analysis", {
+    pack_id: input.pack_id,
+    analyzed_documents: documents.length,
+  });
   const gapInput = buildGapInput(input, documents, effectivePackNotes);
-  const gapCompletion = await runGroqJsonCompletion({
+  const gapCompletion = await runAgentJsonCompletion({
+    provider: input.provider,
     schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
     schema: groqGapAnalysisSchema,
     messages: buildGapAnalysisMessages(gapInput),
@@ -237,11 +272,20 @@ export async function runAgentOrchestration(
     targetKind: "pack",
     targetId: input.pack_id,
   });
+  progress("Gap analysis complete", {
+    readiness_score: gapAnalysis.readiness_score,
+    gaps: gapAnalysis.gaps.length,
+    hash_count: artifacts.hashes.length,
+  });
 
   const findings: CcerFindingOutput[] = [];
   const maxFindings = Math.min(profileConfig.maxFindingsPerPack, AGENT_CONFIG.limits.maxFindingsPerPack);
   if (!options.skipFindingDrafting) {
     for (const [index, gap] of gapAnalysis.gaps.slice(0, maxFindings).entries()) {
+      progress("Drafting finding", {
+        finding_index: index + 1,
+        title: gap.title,
+      });
       const findingInput: CcerFindingToolInput = {
         pack_id: input.pack_id,
         engagement_name: input.engagement_name,
@@ -264,7 +308,8 @@ export async function runAgentOrchestration(
         pack_notes: effectivePackNotes,
       };
 
-      const findingCompletion = await runGroqJsonCompletion({
+      const findingCompletion = await runAgentJsonCompletion({
+        provider: input.provider,
         schemaName: AGENT_CONFIG.schemaNames.ccerFinding,
         schema: groqCcerFindingSchema,
         messages: buildCcerFindingMessages(findingInput),
@@ -281,9 +326,17 @@ export async function runAgentOrchestration(
         targetId: finding.finding_id,
         findingId: finding.finding_id,
       });
+      progress("Finding draft complete", {
+        finding_id: finding.finding_id,
+        severity: finding.severity,
+        hash_count: artifacts.hashes.length,
+      });
     }
   }
 
+  progress("Building audit pack summary and hashes", {
+    pack_id: input.pack_id,
+  });
   const auditPackSummary = buildAuditPackSummary(input, documents, gapAnalysis, findings);
   const summaryHash = hashAgentArtifact(auditPackSummary, `audit_pack_summary:${auditPackSummary.pack_id}`);
   artifacts.add({
@@ -292,7 +345,14 @@ export async function runAgentOrchestration(
     targetKind: "pack",
     targetId: input.pack_id,
   });
+  progress("Audit pack summary/hash complete", {
+    summary_hash_bytes: summaryHash.byte_length,
+    hash_count: artifacts.hashes.length,
+  });
 
+  progress("Building review and persistence plan", {
+    pack_id: input.pack_id,
+  });
   const reviewBundle = buildAgentReviewBundle(input.pack_id, artifacts.hashes);
   const persistence = buildAgentPersistencePlan({
     packId: input.pack_id,
@@ -324,7 +384,7 @@ export async function runAgentOrchestration(
   ] satisfies AgentOrchestrationResult["flow"];
 
   const baseResult = {
-    provider: "groq" as const,
+    provider: input.provider,
     model,
     profile: input.profile,
     pack_id: input.pack_id,
@@ -350,6 +410,12 @@ export async function runAgentOrchestration(
   } satisfies Omit<AgentOrchestrationResult, "agent_memory_payload">;
 
   const agentMemoryPayload = buildAgentMemoryPayload(baseResult);
+  progress("Orchestration complete", {
+    documents: documents.length,
+    gaps: gapAnalysis.gaps.length,
+    findings: findings.length,
+    hashes: artifacts.hashes.length,
+  });
 
   return {
     ...baseResult,
@@ -366,7 +432,22 @@ async function parseOrchestrationDocumentInput(
     throw new AgentInputError(`documents[${index}] must be an object.`);
   }
 
+  const startedAt = Date.now();
+  logAgentProgress(`Reading evidence ${index + 1}`, {
+    file:
+      readOptionalString(value.filePath, `documents[${index}].filePath`) ??
+      readOptionalString(value.documentName, `documents[${index}].documentName`) ??
+      "inline_document",
+  });
   const parsedBase = await resolveAgentDocumentInput(value, maxDocumentChars);
+  logAgentProgress(`Evidence ${index + 1} ready`, {
+    document_id: parsedBase.documentId,
+    filename: parsedBase.documentName,
+    chars: parsedBase.documentText.length,
+    format: parsedBase.ingested_file?.format ?? "inline_text",
+    warnings: parsedBase.ingested_file?.warnings.length ?? 0,
+    duration_ms: Date.now() - startedAt,
+  });
 
   return {
     ...parsedBase,
@@ -514,12 +595,14 @@ function createDocumentNotesLookup(
   );
 }
 
-async function runCompactDocumentAnalysis(document: OrchestrationDocumentInput) {
-  const completion = await runGroqJsonCompletion({
+async function runCompactDocumentAnalysis(provider: AgentProviderName, document: OrchestrationDocumentInput) {
+  const completion = await runAgentJsonCompletion({
+    provider,
     schemaName: AGENT_CONFIG.schemaNames.documentAnalysisBundle,
     schema: groqDocumentAnalysisBundleSchema,
     messages: buildDocumentAnalysisMessages(document),
     validate: isGroqDocumentAnalysisBundle,
+    attachments: provider === "gemini" ? await buildGeminiEvidenceAttachments(document) : undefined,
   });
   const normalized = normalizeDocumentAnalysisBundle(
     {
@@ -544,9 +627,11 @@ async function runCompactDocumentAnalysis(document: OrchestrationDocumentInput) 
   };
 }
 
-async function runMultiPassDocumentAnalysis(document: OrchestrationDocumentInput) {
-  const classificationResult = await classifyDocumentWithGroq(document);
-  const metadataCompletion = await runGroqJsonCompletion({
+async function runMultiPassDocumentAnalysis(provider: AgentProviderName, document: OrchestrationDocumentInput) {
+  const attachments = provider === "gemini" ? await buildGeminiEvidenceAttachments(document) : undefined;
+  const classificationResult = await classifyDocumentWithAgent(document, provider);
+  const metadataCompletion = await runAgentJsonCompletion({
+    provider,
     schemaName: AGENT_CONFIG.schemaNames.metadataExtraction,
     schema: groqMetadataExtractionSchema,
     messages: buildMetadataExtractionMessages({
@@ -554,9 +639,11 @@ async function runMultiPassDocumentAnalysis(document: OrchestrationDocumentInput
       classificationSummary: buildClassificationSummary(classificationResult.result),
     }),
     validate: isAgentMetadataExtractionResult,
+    attachments,
   });
   const metadata = normalizeMetadataExtractionResult(document, metadataCompletion.result);
-  const assertionMappingCompletion = await runGroqJsonCompletion({
+  const assertionMappingCompletion = await runAgentJsonCompletion({
+    provider,
     schemaName: AGENT_CONFIG.schemaNames.assertionMappingBundle,
     schema: groqAssertionMappingBundleSchema,
     messages: buildAssertionMappingMessages({
@@ -566,6 +653,7 @@ async function runMultiPassDocumentAnalysis(document: OrchestrationDocumentInput
       metadataSummary: buildMetadataSummary(metadata),
     }),
     validate: isAssertionMappingBundle,
+    attachments,
   });
   const assertionBundle = normalizeAssertionMappingBundle(
     {
@@ -593,10 +681,11 @@ async function runMultiPassDocumentAnalysis(document: OrchestrationDocumentInput
 }
 
 async function resolveDocumentAnalysis(
+  provider: AgentProviderName,
   document: OrchestrationDocumentInput,
   mode: "compact" | "multi_pass",
 ) {
-  const cached = await readCachedDocumentAnalysis({ document, mode });
+  const cached = await readCachedDocumentAnalysis({ provider, document, mode });
 
   if (cached) {
     return {
@@ -616,9 +705,10 @@ async function resolveDocumentAnalysis(
     };
   }
 
-  const analysis = await runPreferredDocumentAnalysis(document, mode);
+  const analysis = await runPreferredDocumentAnalysis(provider, document, mode);
 
   const cacheKey = await writeCachedDocumentAnalysis({
+    provider,
     document,
     mode,
     classification: analysis.classification,
@@ -634,21 +724,22 @@ async function resolveDocumentAnalysis(
 }
 
 async function runPreferredDocumentAnalysis(
+  provider: AgentProviderName,
   document: OrchestrationDocumentInput,
   mode: "compact" | "multi_pass",
 ) {
   if (mode === "multi_pass") {
-    return runMultiPassDocumentAnalysis(document);
+    return runMultiPassDocumentAnalysis(provider, document);
   }
 
   try {
-    return await runCompactDocumentAnalysis(document);
+    return await runCompactDocumentAnalysis(provider, document);
   } catch (error) {
     if (!isRecoverableCompactAnalysisError(error)) {
       throw error;
     }
 
-    return runMultiPassDocumentAnalysis(document);
+    return runMultiPassDocumentAnalysis(provider, document);
   }
 }
 
@@ -669,7 +760,7 @@ function resolveOrchestrationProfile(value: unknown): AgentOrchestrationProfile 
   throw new AgentInputError("profile must be one of: cheap, balanced, full.");
 }
 
-function sumUsage(...usageItems: Array<GroqUsageStats | undefined>): GroqUsageStats {
+function sumUsage(...usageItems: Array<AgentUsageStats | undefined>): AgentUsageStats {
   const total = createUsageAccumulator();
 
   for (const usage of usageItems) {
@@ -679,7 +770,7 @@ function sumUsage(...usageItems: Array<GroqUsageStats | undefined>): GroqUsageSt
   return total;
 }
 
-function createUsageAccumulator(): GroqUsageStats {
+function createUsageAccumulator(): AgentUsageStats {
   return {
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -687,7 +778,7 @@ function createUsageAccumulator(): GroqUsageStats {
   };
 }
 
-function addUsage(accumulator: GroqUsageStats, usage?: GroqUsageStats) {
+function addUsage(accumulator: AgentUsageStats, usage?: AgentUsageStats) {
   if (!usage) {
     return;
   }
@@ -714,4 +805,34 @@ function isRecoverableCompactAnalysisError(error: unknown): boolean {
       error.message.includes("Failed to validate JSON")
     )
   );
+}
+
+export function logAgentProgress(message: string, details: Record<string, unknown> = {}) {
+  if (process.env.AGENT_PROGRESS_LOGS === "off") {
+    return;
+  }
+
+  const payload = {
+    at: new Date().toISOString(),
+    ...details,
+  };
+  const suffix = Object.keys(payload).length > 0 ? ` ${JSON.stringify(payload)}` : "";
+  console.log(`[linow-agent] ${message}${suffix}`);
+}
+
+function createAgentProgressLogger() {
+  const startedAt = Date.now();
+  let previousAt = startedAt;
+
+  return (message: string, details: Record<string, unknown> = {}) => {
+    const now = Date.now();
+    const stepMs = now - previousAt;
+    previousAt = now;
+
+    logAgentProgress(message, {
+      ...details,
+      step_ms: stepMs,
+      total_ms: now - startedAt,
+    });
+  };
 }

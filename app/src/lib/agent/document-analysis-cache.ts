@@ -15,12 +15,14 @@ import {
   isMetadataExtractionOutput,
 } from "@/lib/agent/schemas";
 import { isAssertionMappingBundle } from "@/lib/agent/map-assertions";
+import type { AgentProviderName } from "@/lib/agent/provider-types";
 
 interface CachedDocumentAnalysisRecord {
   cache_version: string;
   schema_version: string;
   stored_at: string;
   cache_key: string;
+  provider: AgentProviderName;
   mode: "compact" | "multi_pass";
   classification: EvidenceClassificationOutput;
   metadata: MetadataExtractionOutput;
@@ -35,6 +37,7 @@ export interface CachedDocumentAnalysisBundle {
 }
 
 export async function readCachedDocumentAnalysis(input: {
+  provider: AgentProviderName;
   document: OrchestrationDocumentInput;
   mode: "compact" | "multi_pass";
 }): Promise<CachedDocumentAnalysisBundle | null> {
@@ -69,6 +72,7 @@ export async function readCachedDocumentAnalysis(input: {
 }
 
 export async function writeCachedDocumentAnalysis(input: {
+  provider: AgentProviderName;
   document: OrchestrationDocumentInput;
   mode: "compact" | "multi_pass";
   classification: EvidenceClassificationOutput;
@@ -87,6 +91,7 @@ export async function writeCachedDocumentAnalysis(input: {
     schema_version: AGENT_SCHEMA_VERSION,
     stored_at: new Date().toISOString(),
     cache_key: cacheKey,
+    provider: input.provider,
     mode: input.mode,
     classification: input.classification,
     metadata: input.metadata,
@@ -100,12 +105,14 @@ export async function writeCachedDocumentAnalysis(input: {
 }
 
 function buildDocumentAnalysisCacheKey(input: {
+  provider: AgentProviderName;
   document: OrchestrationDocumentInput;
   mode: "compact" | "multi_pass";
 }): string {
   const fingerprint = stableStringify({
     cache_version: AGENT_CONFIG.cache.documentAnalysisVersion,
     schema_version: AGENT_SCHEMA_VERSION,
+    provider: input.provider,
     mode: input.mode,
     document_id: input.document.documentId,
     document_name: input.document.documentName,
@@ -135,6 +142,7 @@ function isCachedDocumentAnalysisRecord(
     candidate.cache_version === AGENT_CONFIG.cache.documentAnalysisVersion &&
     candidate.schema_version === AGENT_SCHEMA_VERSION &&
     candidate.cache_key === expectedCacheKey &&
+    (candidate.provider === "groq" || candidate.provider === "gemini") &&
     candidate.mode === expectedMode &&
     isEvidenceClassificationOutput(candidate.classification) &&
     isMetadataExtractionOutput(candidate.metadata) &&

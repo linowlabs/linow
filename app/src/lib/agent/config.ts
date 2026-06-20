@@ -13,6 +13,23 @@ export const AGENT_CONFIG = {
     completionReserveTokens: 220,
     enableDocumentAnalysisBundle: false,
   },
+  gemini: {
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    defaultModel: "gemini-3.5-flash",
+    defaultTemperature: 0.1,
+    requestTimeoutMs: 120_000,
+    maxAttemptsPerRequest: 2,
+    maxRetryAfterMs: 10_000,
+    tpmLimit: 1_000_000,
+    tpmWindowMs: 60_000,
+    tpmSafetyBuffer: 2_000,
+    estimatedCharsPerToken: 3.5,
+    completionReserveTokens: 1_200,
+    enableDocumentAnalysisBundle: true,
+    pdfMode: "auto",
+    minPdfTextCharsForTextOnly: 600,
+    maxInlineAttachmentBytes: 20 * 1024 * 1024,
+  },
   limits: {
     maxDocumentChars: 12_000,
     maxPackDocuments: 64,
@@ -31,7 +48,7 @@ export const AGENT_CONFIG = {
   cache: {
     enableDocumentAnalysisReuse: true,
     documentAnalysisDir: ".cache/agent/document-analysis",
-    documentAnalysisVersion: "2026-06-14-v3",
+    documentAnalysisVersion: "2026-06-20-v4",
   },
   retrieval: {
     chunkTargetChars: 900,
