@@ -139,6 +139,9 @@ export default function LandingPage() {
   // Agent loop delay state
   const [isPending, setIsPending] = useState(true);
 
+  // Mock workspace-demo browser mockup state
+  const [browserStep, setBrowserStep] = useState(0);
+
   const chatViewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -146,6 +149,14 @@ export default function LandingPage() {
     
     // Initial run to lay out elements correctly
     handleScroll();
+  }, []);
+
+  // Interval loop to cycle the workspace-demo mock animation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBrowserStep((prev) => (prev + 1) % 3);
+    }, 3800);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -396,73 +407,154 @@ export default function LandingPage() {
             </div>
             
             <div className="browser-viewport-content">
-              {/* Left sidebar mock */}
-              <div className="mock-sidebar">
-                <div className="mock-sidebar-brand">
-                  <div className="mock-logo"></div>
-                  <div className="mock-text-short"></div>
+              {/* Left sidebar rail - Matches /workspace-demo nav rail */}
+              <div className="mock-nav-rail">
+                <div className="mock-rail-logo">
+                  <span className="mock-logo-dot"></span>
                 </div>
-                <div className="mock-nav-item active"></div>
-                <div className="mock-nav-item"></div>
-                <div className="mock-nav-item"></div>
-                <div className="mock-sidebar-spacer"></div>
-                <div className="mock-sidebar-footer"></div>
+                <div className="mock-rail-item active">
+                  <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+                  </svg>
+                </div>
+                <div className="mock-rail-item">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                  </svg>
+                </div>
+                <div className="mock-rail-item">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.599-3.75A11.902 11.902 0 0112 5.715z"/>
+                  </svg>
+                </div>
+                <div className="mock-rail-spacer"></div>
+                <div className="mock-rail-profile"></div>
               </div>
               
-              {/* Workspace contents mock */}
-              <div className="mock-workspace-main">
-                <div className="mock-workspace-header">
-                  <div className="mock-workspace-title">
-                    <div className="mock-text-long"></div>
-                    <div className="mock-text-medium" style={{ opacity: 0.5 }}></div>
-                  </div>
-                  <div className="mock-wallet-badge"></div>
+              {/* Pane 1: File Directory / PBC Checklist - Matches /workspace-demo */}
+              <div className="mock-pane mock-pane-pbc">
+                <div className="mock-pane-header">
+                  <span className="mock-pane-title">File Directory</span>
+                  <span className="mock-pane-badge">{browserStep === 2 ? "2/3" : "1/3"} Files</span>
                 </div>
                 
-                <div className="mock-workspace-grid">
-                  {/* Left Column: evidence uploads */}
-                  <div className="mock-card">
-                    <div className="mock-card-header"></div>
-                    <div className="mock-file-list">
-                      <div className="mock-file-item">
-                        <div className="mock-file-icon"></div>
-                        <div className="mock-file-info">
-                          <div className="mock-text-medium"></div>
-                          <div className="mock-text-small"></div>
+                <div className="mock-pbc-folder">
+                  <div className="mock-folder-header">
+                    <span className="mock-folder-arrow">▼</span>
+                    <span className="mock-folder-name">contracts_invoices</span>
+                  </div>
+                  
+                  <div className="mock-file-list">
+                    {/* Item 1: Orion Contract */}
+                    <div className={`mock-file-item ${browserStep >= 0 ? "selected" : ""}`}>
+                      <span className="mock-file-icon">📄</span>
+                      <span className="mock-file-name">09_orion_contract.pdf</span>
+                      <span className={`mock-status-dot ${browserStep === 2 ? "registered" : browserStep === 1 ? "analyzing" : "idle"}`}></span>
+                    </div>
+
+                    {/* Item 2: June Bank Statement */}
+                    <div className="mock-file-item">
+                      <span className="mock-file-icon">📄</span>
+                      <span className="mock-file-name">13_bank_statement.pdf</span>
+                      <span className="mock-status-dot idle"></span>
+                    </div>
+
+                    {/* Item 3: April Invoice */}
+                    <div className="mock-file-item">
+                      <span className="mock-file-icon">📄</span>
+                      <span className="mock-file-name">10_invoice_0411.pdf</span>
+                      <span className="mock-status-dot idle"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pane 2: Document Preview - Matches /workspace-demo */}
+              <div className="mock-pane mock-pane-preview">
+                <div className="mock-pane-header">
+                  <span className="mock-pane-title">Document Preview</span>
+                  <span className="mock-pane-subtitle">09_orion_contract.pdf</span>
+                </div>
+                
+                <div className="mock-preview-container">
+                  <div className="mock-preview-doc">
+                    <div className="mock-doc-title">CUSTOMER CONTRACT — ORION</div>
+                    <div className="mock-doc-divider"></div>
+                    
+                    <div className="mock-doc-line">
+                      <span>Contract Ref:</span> <strong>C-ORION-2026-019</strong>
+                    </div>
+                    <div className="mock-doc-line">
+                      <span>Effective Date:</span> <span>2026-03-28</span>
+                    </div>
+                    
+                    {/* Animate highlights */}
+                    <div className={`mock-doc-paragraph ${browserStep >= 1 ? "highlight-yellow" : ""}`}>
+                      <strong>Milestone 1:</strong> 50% implementation fee payable upon user acceptance testing (UAT) sign-off.
+                    </div>
+                    
+                    <div className={`mock-doc-paragraph ${browserStep >= 1 ? "highlight-blue" : ""}`}>
+                      <strong>Approval limit:</strong> Contracts above IDR 750,000,000 require Commercial Committee approval.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pane 3: Agent activity sandbox - Matches /workspace-demo */}
+              <div className="mock-pane mock-pane-agent">
+                <div className="mock-pane-header">
+                  <span className="mock-pane-title">Agent Activities</span>
+                  <span className="mock-pane-status active">active</span>
+                </div>
+                
+                <div className="mock-agent-container">
+                  <div className="mock-agent-activity">
+                    <span className="mock-agent-header">classification & assertions</span>
+                    
+                    <div className="mock-log-box">
+                      {browserStep >= 0 && (
+                        <div className="mock-log-item success">
+                          <span className="mock-log-check">✔</span> Read file target successfully
                         </div>
-                        <div className="mock-file-status verified"></div>
-                      </div>
-                      <div className="mock-file-item">
-                        <div className="mock-file-icon"></div>
-                        <div className="mock-file-info">
-                          <div className="mock-text-medium"></div>
-                          <div className="mock-text-small"></div>
+                      )}
+                      
+                      {browserStep >= 1 ? (
+                        <>
+                          <div className="mock-log-item success">
+                            <span className="mock-log-check">✔</span> Classified: customer_contract
+                          </div>
+                          <div className={`mock-log-item ${browserStep === 1 ? "running" : "success"}`}>
+                            <span className="mock-log-check">{browserStep === 1 ? "⎔" : "✔"}</span> Mapping assertions: Occurrence, Accuracy
+                          </div>
+                        </>
+                      ) : (
+                        <div className="mock-log-item running">
+                          <span className="mock-log-check">⎔</span> Awaiting document scan...
                         </div>
-                        <div className="mock-file-status verified"></div>
-                      </div>
+                      )}
+
+                      {browserStep === 2 && (
+                        <>
+                          <div className="mock-log-item success">
+                            <span className="mock-log-check">✔</span> Registered hash on Sui Ledger
+                          </div>
+                          <div className="mock-log-item success">
+                            <span className="mock-log-check">✔</span> Synced blob to Supabase Demo
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  {/* Right Column: agent classification feed */}
-                  <div className="mock-card">
-                    <div className="mock-card-header agent"></div>
-                    <div className="mock-agent-timeline">
-                      <div className="mock-timeline-item">
-                        <div className="mock-timeline-icon"></div>
-                        <div className="mock-timeline-desc">
-                          <div className="mock-text-medium"></div>
-                          <div className="mock-text-small"></div>
-                        </div>
-                      </div>
-                      <div className="mock-timeline-item">
-                        <div className="mock-timeline-icon"></div>
-                        <div className="mock-timeline-desc">
-                          <div className="mock-text-medium"></div>
-                          <div className="mock-text-small"></div>
-                        </div>
+                  {browserStep === 2 && (
+                    <div className="mock-receipt-pop">
+                      <span className="mock-receipt-header">SUI REGISTRY RECEIPT</span>
+                      <div className="mock-receipt-details">
+                        <div><span>ID:</span> <code>0x92f...a12c</code></div>
+                        <div><span>Tx:</span> <code>0x7a2c...8f2b</code></div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -652,7 +744,7 @@ export default function LandingPage() {
                   <span className="control-dot minimize"></span>
                   <span className="control-dot expand"></span>
                 </div>
-                <div className="mac-title">Linow Co-Auditor</div>
+                <div className="mac-title">Linow Agent Sandbox</div>
                 <div className="mac-status-badge">
                   <span className="status-dot"></span>
                   <span className="status-text">
@@ -661,45 +753,50 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              {/* Chat Viewport */}
+              {/* Feed: Agent Activities logs - Matches /workspace-demo activity logs */}
+              <div className="sim-agent-activity-feed">
+                <div className="sim-activity-card">
+                  <div className="sim-activity-left">
+                    <span className={`sim-activity-dot ${simPhase === 0 ? "running" : "done"}`} />
+                    <span className="sim-activity-name">Coverage Check</span>
+                    <span className="sim-activity-desc">
+                      {simPhase === 0 ? "scanning PBC files..." : "4 of 7 required docs found"}
+                    </span>
+                  </div>
+                  <span className={`sim-activity-badge ${simPhase === 0 ? "running" : "done"}`}>
+                    {simPhase === 0 ? "Running" : "Done"}
+                  </span>
+                </div>
+
+                <div className="sim-activity-card">
+                  <div className="sim-activity-left">
+                    <span className={`sim-activity-dot ${simPhase === 0 ? "queued" : simPhase === 1 ? "running" : "done"}`} />
+                    <span className="sim-activity-name">Classify Contract</span>
+                    <span className="sim-activity-desc">
+                      {simPhase === 0 ? "queued" : simPhase === 1 ? "analyzing clauses..." : "Occurrence & Accuracy mapped"}
+                    </span>
+                  </div>
+                  <span className={`sim-activity-badge ${simPhase === 0 ? "queued" : simPhase === 1 ? "running" : "done"}`}>
+                    {simPhase === 0 ? "Queued" : simPhase === 1 ? "Running" : "Done"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Chat Viewport (Scrollable container for chat bubbles and permission popup) */}
               <div className="sim-chat-viewport" ref={chatViewportRef}>
                 
-                {/* Agent Initial Message (Active in all phases) */}
-                <div className="sim-chat-msg sim-agent-msg">
-                  <div className="sim-msg-author">Co-Auditor</div>
-                  <div className="sim-msg-content">
-                    I am scanning the active workspace engagement files for compliance gaps.
-                  </div>
+                {/* Bubble 1: Welcome Message */}
+                <div className="sim-chat-bubble agent">
+                  <span className="sim-bubble-prefix">::</span>
+                  <div>Welcome to Linow Agent Sandbox. I am scanning the active workspace engagement files for compliance gaps.</div>
                 </div>
 
-                {/* System Logs Message (Active in all phases) */}
-                <div className="sim-chat-msg sim-system-msg">
-                  <div className="sim-msg-author">system</div>
-                  <div className="sim-msg-content">
-                    <div className="log-line">
-                      <span className="log-check">✔</span> Scan workspace engagement files
-                    </div>
-                    <div className="log-line">
-                      <span className="log-check">✔</span> Read file: <code>bank_recon_december.pdf</code>
-                    </div>
-                    <div className={`log-line ${simPhase === 0 ? "running" : "success"}`}>
-                      <span className="log-check">
-                        {simPhase === 0 ? "⎔" : "✔"}
-                      </span>
-                      <span>
-                        {simPhase === 0 ? "Mapping assertions..." : "Map assertions: existence, completeness"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Phase 1+: Analysis Report */}
+                {/* Bubble 2: Scanning result */}
                 {simPhase >= 1 && (
-                  <div className="sim-chat-msg sim-agent-msg animate-fade-in">
-                    <div className="sim-msg-author">Co-Auditor</div>
-                    <div className="sim-msg-content">
-                      <p>Compliance run complete. I have mapped the document to Required ISA Assertions:</p>
-                      
+                  <div className="sim-chat-bubble agent animate-fade-in">
+                    <span className="sim-bubble-prefix">::</span>
+                    <div>
+                      Compliance run complete. I have mapped the document to Required ISA Assertions:
                       <div className="sim-msg-report-table">
                         <div className="sim-table-row">
                           <span>Existence Coverage</span>
@@ -707,45 +804,76 @@ export default function LandingPage() {
                         </div>
                         <div className="sim-table-row">
                           <span>Completeness Gap</span>
-                          <strong className="text-warning">external confirmation missing</strong>
+                          <strong style={{ color: '#d97706' }}>external confirmation missing</strong>
                         </div>
                         <div className="sim-table-row">
                           <span>Readiness Score</span>
-                          <strong className="text-success">75 / 100</strong>
+                          <strong style={{ color: '#0d9488' }}>75 / 100</strong>
                         </div>
                       </div>
-
                     </div>
                   </div>
                 )}
 
-                {/* Phase 2+: Commit Action */}
+                {/* Command approval popup - Matches /workspace-demo popup sheet */}
+                {simPhase === 1 && (
+                  <div className="sim-permission-popup-sheet animate-fade-in">
+                    <div className="sim-permission-header">
+                      <span className="sim-terminal-icon">$_</span>
+                      <span>Allow running this command?</span>
+                    </div>
+                    <div className="sim-permission-command-box">
+                      <code>
+                        sui_execute_transaction --module evidence --action register --file bank_recon_december.pdf --assertions ["Existence", "Completeness"]
+                      </code>
+                    </div>
+                    <div className="sim-permission-options">
+                      <div className="sim-permission-option-row active">
+                        <span>1. Yes, allow this time</span>
+                        <span className="sim-option-desc">Allow single execution</span>
+                      </div>
+                      <div className="sim-permission-option-row">
+                        <span>2. No (cancel transaction)</span>
+                        <span className="sim-option-desc">Deny execution request</span>
+                      </div>
+                    </div>
+                    <div className="sim-permission-actions">
+                      <button className="sim-btn-skip">Skip</button>
+                      <button className="sim-btn-submit flashing-btn">Submit ↵</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Bubble 3: Staged / Sign request */}
                 {simPhase >= 2 && (
-                  <div className="sim-chat-msg sim-agent-msg animate-fade-in">
-                    <div className="sim-msg-author">Co-Auditor</div>
-                    <div className="sim-msg-content">
-                      <p>Rationales and file hashes are staged. Please sign the attestation commitment to anchor to the Sui ledger.</p>
-                      
-                      {simPhase === 2 ? (
-                        <div className="sim-chat-action-btn flashing">
-                          <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24" style={{ marginRight: '6px' }}>
-                            <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
-                          </svg>
-                          <span>Sign Review Attestation</span>
-                        </div>
-                      ) : (
-                        <div className="sim-chat-attestation-success">
-                          <span className="success-icon">✔</span> registered on Sui ledger (RegisterEvidence)
-                        </div>
-                      )}
+                  <>
+                    <div className="sim-chat-bubble user animate-fade-in">
+                      <div>Submit Command Resolved: Approved</div>
                     </div>
-                  </div>
+                    <div className="sim-chat-bubble agent animate-fade-in">
+                      <span className="sim-bubble-prefix">::</span>
+                      <div>
+                        Rationales and file hashes are staged. Please sign the attestation commitment to anchor to the Sui ledger.
+                        {simPhase === 2 ? (
+                          <div className="sim-chat-action-btn flashing">
+                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24" style={{ marginRight: '6px' }}>
+                              <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                            </svg>
+                            <span>Sign Review Attestation</span>
+                          </div>
+                        ) : (
+                          <div className="sim-chat-attestation-success">
+                            <span className="success-icon">✔</span> registered on Sui ledger (RegisterEvidence)
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
                 )}
-
               </div>
 
-              {/* Sticking Output Panel (only active on Phase 3 / Syncing) */}
-              {simPhase === 3 && (
+              {/* Sticking Output Panel (Active in all phases) */}
+              {simPhase === 3 ? (
                 isPending ? (
                   <div className="sim-broadcasting-bar animate-fade-in">
                     <span className="sim-spinner"></span>
@@ -770,6 +898,15 @@ export default function LandingPage() {
                     </div>
                   </div>
                 )
+              ) : (
+                <div className="sim-broadcasting-bar animate-fade-in">
+                  <span className="sim-spinner"></span>
+                  <span>
+                    {simPhase === 0 && "Broadcasting agent status: scanning local files..."}
+                    {simPhase === 1 && "Broadcasting agent status: mapping ISA 500 assertions..."}
+                    {simPhase === 2 && "Broadcasting agent status: awaiting reviewer signature..."}
+                  </span>
+                </div>
               )}
 
               {/* Chat Input Field (Minimalist, borderless top) */}
