@@ -134,6 +134,14 @@ export interface OrchestrationFlowStep {
   schema_names: AgentSchemaName[];
 }
 
+export interface AgentProgressTraceEntry {
+  message: string;
+  details: Record<string, unknown>;
+  logged_at: string;
+  step_ms: number;
+  total_ms: number;
+}
+
 export interface AgentOrchestrationResult {
   provider: AgentProviderName;
   model: string;
@@ -156,6 +164,7 @@ export interface AgentOrchestrationResult {
   persistence: AgentPersistencePlan;
   proposed_action: AgentReviewBundle;
   flow: OrchestrationFlowStep[];
+  progress_trace: AgentProgressTraceEntry[];
   recalled_prior_memory_count: number;
   cached_document_count: number;
   usage: AgentUsageStats;

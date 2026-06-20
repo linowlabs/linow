@@ -31,6 +31,7 @@ import {
   buildAgentPersistencePlan,
   buildAgentReviewBundle,
   createArtifactCollector,
+  type AgentProgressTraceEntry,
   type AgentDocumentProofReference,
   type AgentOrchestrationResult,
   type DocumentAnalysisResult,
@@ -140,7 +141,7 @@ export async function runAgentOrchestration(
   options: AgentOrchestrationRunOptions = {},
 ): Promise<AgentOrchestrationResult> {
   const progress = createAgentProgressLogger();
-  progress("Starting orchestration", {
+  progress.log("Starting orchestration", {
     provider: input.provider,
     profile: input.profile,
     pack_id: input.pack_id,
@@ -162,7 +163,7 @@ export async function runAgentOrchestration(
 
   for (const document of input.documents) {
     const analysisMode = useDocumentAnalysisBundle ? "compact" : "multi_pass";
-    progress("Analyzing evidence", {
+    progress.log("Analyzing evidence", {
       document_id: document.documentId,
       filename: document.documentName,
       mode: analysisMode,
@@ -241,7 +242,7 @@ export async function runAgentOrchestration(
         document_analysis_bundle: analysis.usageBreakdown.document_analysis_bundle ?? null,
       },
     });
-    progress("Evidence analysis complete", {
+    progress.log("Evidence analysis complete", {
       document_id: document.documentId,
       document_type: analysis.classification.document_type,
       source_confidence: analysis.classification.source_confidence,
@@ -250,7 +251,7 @@ export async function runAgentOrchestration(
     });
   }
 
-  progress("Running pack gap analysis", {
+  progress.log("Running pack gap analysis", {
     pack_id: input.pack_id,
     analyzed_documents: documents.length,
   });
@@ -272,7 +273,7 @@ export async function runAgentOrchestration(
     targetKind: "pack",
     targetId: input.pack_id,
   });
-  progress("Gap analysis complete", {
+  progress.log("Gap analysis complete", {
     readiness_score: gapAnalysis.readiness_score,
     gaps: gapAnalysis.gaps.length,
     hash_count: artifacts.hashes.length,
@@ -282,7 +283,7 @@ export async function runAgentOrchestration(
   const maxFindings = Math.min(profileConfig.maxFindingsPerPack, AGENT_CONFIG.limits.maxFindingsPerPack);
   if (!options.skipFindingDrafting) {
     for (const [index, gap] of gapAnalysis.gaps.slice(0, maxFindings).entries()) {
-      progress("Drafting finding", {
+      progress.log("Drafting finding", {
         finding_index: index + 1,
         title: gap.title,
       });
@@ -326,7 +327,7 @@ export async function runAgentOrchestration(
         targetId: finding.finding_id,
         findingId: finding.finding_id,
       });
-      progress("Finding draft complete", {
+      progress.log("Finding draft complete", {
         finding_id: finding.finding_id,
         severity: finding.severity,
         hash_count: artifacts.hashes.length,
@@ -334,7 +335,7 @@ export async function runAgentOrchestration(
     }
   }
 
-  progress("Building audit pack summary and hashes", {
+  progress.log("Building audit pack summary and hashes", {
     pack_id: input.pack_id,
   });
   const auditPackSummary = buildAuditPackSummary(input, documents, gapAnalysis, findings);
@@ -345,12 +346,12 @@ export async function runAgentOrchestration(
     targetKind: "pack",
     targetId: input.pack_id,
   });
-  progress("Audit pack summary/hash complete", {
+  progress.log("Audit pack summary/hash complete", {
     summary_hash_bytes: summaryHash.byte_length,
     hash_count: artifacts.hashes.length,
   });
 
-  progress("Building review and persistence plan", {
+  progress.log("Building review and persistence plan", {
     pack_id: input.pack_id,
   });
   const reviewBundle = buildAgentReviewBundle(input.pack_id, artifacts.hashes);
@@ -404,13 +405,14 @@ export async function runAgentOrchestration(
     persistence,
     proposed_action: reviewBundle,
     flow,
+    progress_trace: progress.entries,
     recalled_prior_memory_count: recallSummary.recalled_count,
     cached_document_count: cachedDocumentCount,
     usage,
   } satisfies Omit<AgentOrchestrationResult, "agent_memory_payload">;
 
   const agentMemoryPayload = buildAgentMemoryPayload(baseResult);
-  progress("Orchestration complete", {
+  progress.log("Orchestration complete", {
     documents: documents.length,
     gaps: gapAnalysis.gaps.length,
     findings: findings.length,
@@ -820,19 +822,57 @@ export function logAgentProgress(message: string, details: Record<string, unknow
   console.log(`[linow-agent] ${message}${suffix}`);
 }
 
+export function appendAgentProgressTrace(
+  entries: AgentProgressTraceEntry[],
+  message: string,
+  details: Record<string, unknown> = {},
+) {
+  const now = Date.now();
+  const previousEntry = entries.at(-1);
+  const previousLoggedAt = previousEntry ? Date.parse(previousEntry.logged_at) : now;
+  const previousTotalMs = previousEntry?.total_ms ?? 0;
+  const stepMs = Math.max(0, now - previousLoggedAt);
+  const totalMs = previousEntry ? previousTotalMs + stepMs : 0;
+  const entry: AgentProgressTraceEntry = {
+    message,
+    details,
+    logged_at: new Date(now).toISOString(),
+    step_ms: stepMs,
+    total_ms: totalMs,
+  };
+  entries.push(entry);
+  logAgentProgress(message, {
+    ...details,
+    step_ms: entry.step_ms,
+    total_ms: entry.total_ms,
+  });
+  return entry;
+}
+
 function createAgentProgressLogger() {
   const startedAt = Date.now();
   let previousAt = startedAt;
+  const entries: AgentProgressTraceEntry[] = [];
 
-  return (message: string, details: Record<string, unknown> = {}) => {
-    const now = Date.now();
-    const stepMs = now - previousAt;
-    previousAt = now;
-
-    logAgentProgress(message, {
-      ...details,
-      step_ms: stepMs,
-      total_ms: now - startedAt,
-    });
+  return {
+    entries,
+    log(message: string, details: Record<string, unknown> = {}) {
+      const now = Date.now();
+      const stepMs = now - previousAt;
+      previousAt = now;
+      const entry: AgentProgressTraceEntry = {
+        message,
+        details,
+        logged_at: new Date(now).toISOString(),
+        step_ms: stepMs,
+        total_ms: now - startedAt,
+      };
+      entries.push(entry);
+      logAgentProgress(message, {
+        ...details,
+        step_ms: entry.step_ms,
+        total_ms: entry.total_ms,
+      });
+    },
   };
 }
