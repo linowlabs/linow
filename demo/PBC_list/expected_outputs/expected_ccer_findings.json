@@ -1,0 +1,53 @@
+[
+  {
+    "finding_id": "FND-001",
+    "severity": "HIGH",
+    "title": "Missing Commercial Committee approval for material Orion contract",
+    "condition": "The evidence pack includes contract C-ORION-2026-019 with total value IDR 855,000,000, but does not include Commercial Committee minutes or approval log in the initial pack.",
+    "criteria": "Company revenue policy requires contracts above IDR 750,000,000 to be approved by the Commercial Committee before revenue recognition. ISA 500-style evidence readiness requires sufficient appropriate evidence supporting relevant assertions.",
+    "cause": "The approval document was not uploaded with the initial evidence pack.",
+    "effect": "Rights & Obligations and Occurrence coverage for the Orion contract remains incomplete. Auditor may request additional documentation before relying on the revenue evidence.",
+    "recommendation": "Upload Commercial Committee minutes or signed approval log for C-ORION-2026-019.",
+    "citations_expected": [
+      "09_customer_contract_orion_C-ORION-2026-019.pdf",
+      "14_revenue_recognition_policy_rev_2026.txt",
+      "16_finance_email_thread_revenue_close.txt"
+    ],
+    "status_before_remediation": "OPEN",
+    "status_after_remediation": "RESOLVED_BY_R01"
+  },
+  {
+    "finding_id": "FND-002",
+    "severity": "HIGH",
+    "title": "Missing CFO approval for manual revenue adjustment",
+    "condition": "JRN-2026-06-117 records a manual revenue acceleration adjustment of IDR 72,000,000, but the initial pack shows approved_by as MISSING.",
+    "criteria": "Company revenue policy requires CFO approval for manual revenue journal entries above IDR 50,000,000.",
+    "cause": "CFO approval evidence was prepared separately and omitted from the initial evidence pack.",
+    "effect": "Classification, Accuracy, and Rights & Obligations assertions are not fully supported for the manual adjustment.",
+    "recommendation": "Upload CFO approval evidence for JRN-2026-06-117.",
+    "citations_expected": [
+      "04_gl_ledger_revenue_q2_2026.csv",
+      "15_manual_adjustment_note_JRN-2026-06-117.txt",
+      "14_revenue_recognition_policy_rev_2026.txt"
+    ],
+    "status_before_remediation": "OPEN",
+    "status_after_remediation": "RESOLVED_BY_R02"
+  },
+  {
+    "finding_id": "FND-003",
+    "severity": "MEDIUM",
+    "title": "Potential cut-off issue for Orion implementation milestone 2",
+    "condition": "Invoice INV-2026-0630 was issued and recognized on 2026-06-30, while service delivery log shows production go-live on 2026-07-02.",
+    "criteria": "Revenue close policy requires invoices in the last five business days of a period to be supported by acceptance evidence, usage report, or delivery log. ISA-style cut-off testing evaluates whether transactions are recorded in the correct period.",
+    "cause": "Management relied on UAT sign-off before quarter-end, while production go-live occurred after quarter-end.",
+    "effect": "Cut-off and Occurrence assertions for the June Orion implementation revenue require further auditor review.",
+    "recommendation": "Obtain additional production readiness evidence dated on or before 2026-06-30 or consider deferring the milestone revenue.",
+    "citations_expected": [
+      "10_invoice_INV-2026-0630.pdf",
+      "12_service_acceptance_orion_uat_2026_06_25.pdf",
+      "05_service_delivery_cutoff_log.csv"
+    ],
+    "status_before_remediation": "OPEN_REVIEW",
+    "status_after_remediation": "OPEN_REVIEW"
+  }
+]

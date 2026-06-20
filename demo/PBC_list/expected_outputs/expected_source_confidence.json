@@ -1,0 +1,18 @@
+{
+  "default_initial_evidence": {
+    "level": "L2",
+    "reason": "Company-uploaded and labeled. No independent connector verification."
+  },
+  "after_auditor_attestation": {
+    "level": "L3",
+    "reason": "Reviewer wallet attests evidence or pack."
+  },
+  "not_available_in_demo": {
+    "L4": "Connector source proof is not in SO-05 scope.",
+    "L5": "Continuous system proof is not in SO-05 scope."
+  },
+  "negative_cases": {
+    "tampered_files": "Should fail registered commitment verification.",
+    "wrong_document": "Should be irrelevant or unsupported evidence."
+  }
+}

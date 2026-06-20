@@ -1,0 +1,11 @@
+Manual Adjustment Note
+JE ID: JRN-2026-06-117
+Date: 2026-06-30
+Prepared by: Finance Controller
+Amount: IDR 72,000,000
+Debit: Contract Asset
+Credit: Revenue
+Customer: PT Orion Mart Tbk
+Reason: Management concluded that Orion production readiness was substantially achieved before quarter end based on UAT sign-off dated 2026-06-25.
+Approval status in note: CFO approval to be attached separately.
+Reviewer note: CFO approval file is not included in the initial evidence pack.

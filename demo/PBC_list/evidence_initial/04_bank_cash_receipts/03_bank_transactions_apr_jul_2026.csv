@@ -1,0 +1,11 @@
+transaction_id,bank_date,description,debit_idr,credit_idr,running_balance_idr,matched_invoice,counterparty,source_file
+BANK-2026-0402-OPEN,2026-04-02,Opening balance adjustment,0,0,1920000000,,Bank Mandiri,bank_statement_apr
+BANK-2026-0505-BALI,2026-05-05,Transfer from PT Bali Fresh Market INV-2026-0426,0,22200000,2032700000,INV-2026-0426,PT Bali Fresh Market,bank_statement_may
+BANK-2026-0507-ORION,2026-05-07,Transfer from PT Orion Mart Tbk INV-2026-0411,0,189810000,2222510000,INV-2026-0411,PT Orion Mart Tbk,bank_statement_may
+BANK-2026-0512-SENTRA,2026-05-12,Transfer from PT Sentra Farma Nusantara INV-2026-0434,0,16650000,2239160000,INV-2026-0434,PT Sentra Farma Nusantara,bank_statement_may
+BANK-2026-0605-ORION,2026-06-05,Transfer from PT Orion Mart Tbk INV-2026-0517,0,47452500,2195202500,INV-2026-0517,PT Orion Mart Tbk,bank_statement_jun
+BANK-2026-0610-MEGA,2026-06-10,Transfer from PT MegaLogis Indonesia INV-2026-0528,0,66600000,2261802500,INV-2026-0528,PT MegaLogis Indonesia,bank_statement_jun
+BANK-2026-0614-KARYA,2026-06-14,Transfer from PT Karya Moda Retail INV-2026-0539,0,8880000,2270682500,INV-2026-0539,PT Karya Moda Retail,bank_statement_jun
+BANK-2026-0702-SENTRA,2026-07-02,Post-period receipt INV-2026-0624,0,16650000,2110000000,INV-2026-0624,PT Sentra Farma Nusantara,post_period_bank
+BANK-2026-0703-BALI,2026-07-03,Post-period receipt INV-2026-0620,0,22200000,2132200000,INV-2026-0620,PT Bali Fresh Market,post_period_bank
+BANK-2026-0708-ORION,2026-07-08,Post-period receipt INV-2026-0630 net of credit note,0,158175000,2290375000,INV-2026-0630,PT Orion Mart Tbk,post_period_bank
