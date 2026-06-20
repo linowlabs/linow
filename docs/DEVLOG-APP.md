@@ -1465,3 +1465,31 @@
   - The chat panel still uses inline style objects in the new UI blocks.
 - Follow-up needed:
   - Move the chat panel styling into `globals.css` when polishing the workspace layout.
+
+## 2026-06-20 — Build Rebuilt Workspace for Demo (workspace-demo)
+
+### Change
+- Files touched:
+  - `app/src/app/workspace-demo/page.tsx`
+  - `app/src/app/workspace-demo/demo.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Rebuilt the workspace demo layout under the new isolated path `/workspace-demo`.
+  - Implemented a cream iOS liquid glass theme with off-white canvas and translucent high-blur panels.
+  - Implemented Login selection for role gating (Company vs. Auditor) with SUI Connect Wallet.
+  - Built the Company Agent Workspace with a 3-column modular design (PBC List, Document Preview with highlights, and Agent Activity sandbox) and slide-down chevron trigger.
+  - Built the Auditor findings review (ISA 500) and attestation pane.
+  - Wired the active Web3 & SDK pipelines (Sui registration, attestation, and AgentAction logs) and Supabase demo-store sync.
+
+### Reasoning
+- Why this approach was chosen:
+  - The existing layout was not MVP-ready. Rebuilding it in an isolated directory avoids code pollution and demo path breaks.
+  - Mocking the AI Agent's 2-way live responses handles the incomplete agent client library, while the active SUI and Walrus SDK pipelines ensure the product stays on-chain.
+  - A clean light-cream theme captures the visual style from the user references.
+
+### Tech Debt
+- Known shortcuts:
+  - Document parser upload triggers are mock-handled in this demo page.
+- Follow-up needed:
+  - Refine document upload form to allow feeding custom files into the mock list if needed.
+
