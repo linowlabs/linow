@@ -286,7 +286,18 @@ interface AgentRunState {
   findings: AgentFindingSummary[];
   actionCandidates: AgentActionCandidate[];
   memoryStatus?: string;
+  trace: AgentTraceEntry[];
   raw?: unknown;
+}
+
+interface AgentTraceEntry {
+  id: string;
+  title: string;
+  detail: string;
+  tone: "info" | "success" | "warning";
+  fileName?: string;
+  stepMs?: number;
+  totalMs?: number;
 }
 
 interface RegisterDraftOverride {
@@ -405,6 +416,11 @@ const PACKAGE_ID =
   process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID ??
   "0x8460a046d70e0e0940d556d9526c48ee683ca8672390ff6480e937dc9a69d6aa";
 
+const WORKSPACE_AGENT_PROVIDER =
+  process.env.NEXT_PUBLIC_AGENT_PROVIDER === "groq" || process.env.NEXT_PUBLIC_AGENT_PROVIDER === "gemini"
+    ? process.env.NEXT_PUBLIC_AGENT_PROVIDER
+    : "gemini";
+
 const TEXT_AGENT_EXTENSIONS = new Set([
   "csv",
   "json",
@@ -418,11 +434,30 @@ const TEXT_AGENT_EXTENSIONS = new Set([
   "yml",
 ]);
 
+const STAGED_AGENT_EXTENSIONS = new Set([
+  ...TEXT_AGENT_EXTENSIONS,
+  "pdf",
+  "xlsx",
+  "xls",
+  "xlsm",
+  "xlsb",
+  "docx",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "tif",
+  "tiff",
+]);
+
 const DEFAULT_AGENT_STATE: AgentRunState = {
   status: "idle",
-  message: "Select evidence or a folder, then run analysis when the pack has readable text evidence.",
+  message: "Select evidence or a folder, then run analysis when the pack has supported evidence files.",
   findings: [],
   actionCandidates: [],
+  trace: [],
 };
 
 const DEFAULT_MEMORY_RELOAD_STATE: WalrusMemoryReloadState = {
@@ -459,6 +494,25 @@ async function postJson<TResponse>(url: string, body: unknown): Promise<TRespons
       payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
         ? payload.error
         : `Request failed with HTTP ${response.status}.`,
+    );
+  }
+
+  return payload as TResponse;
+}
+
+async function postFormData<TResponse>(url: string, body: FormData): Promise<TResponse> {
+  const response = await fetch(url, {
+    method: "POST",
+    body,
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : "Request failed.",
     );
   }
 
@@ -635,6 +689,10 @@ function getFileExtension(fileName: string): string {
   return fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
 }
 
+function isAgentProcessableFile(file: File): boolean {
+  return file.type.startsWith("text/") || STAGED_AGENT_EXTENSIONS.has(getFileExtension(file.name));
+}
+
 function isSuiObjectId(value: string | undefined): value is string {
   return Boolean(value && /^0x[0-9a-fA-F]{2,}$/.test(value));
 }
@@ -645,8 +703,7 @@ async function readAgentText(file: File): Promise<{ text?: string; warning?: str
 
   if (!isTextLike) {
     return {
-      warning:
-        "Browser workspace can analyze text-like files now. PDF, DOCX, and XLSX need upload ingestion wiring before agent analysis can read their contents.",
+      warning: "This file needs server-side staging before the agent can analyze its contents.",
     };
   }
 
@@ -656,6 +713,220 @@ async function readAgentText(file: File): Promise<{ text?: string; warning?: str
   }
 
   return { text };
+}
+
+interface StagedAgentFileResponse {
+  filePath: string;
+  ingestion?: {
+    filename?: string;
+    format?: string;
+    warnings?: string[];
+  };
+  extracted_characters?: number;
+  warnings?: string[];
+}
+
+async function stageAgentFile(file: File): Promise<StagedAgentFileResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return postFormData<StagedAgentFileResponse>("/api/agent/stage-file", formData);
+}
+
+function buildAgentTraceFromResult(root: Record<string, unknown>, warnings: string[]): AgentTraceEntry[] {
+  const progressTrace = readArray(root.progress_trace).flatMap((entry, index) => {
+    const row = isRecord(entry) ? entry : {};
+    const details = isRecord(row.details) ? row.details : {};
+    const message = readString(row.message) ?? `Server step ${index + 1}`;
+    const stepMs = readNumber(row.step_ms);
+    const totalMs = readNumber(row.total_ms);
+    const fileName =
+      readString(details.filename) ??
+      readString(details.file) ??
+      readString(details.document_id) ??
+      undefined;
+
+    return [
+      {
+        id: `trace-progress-${index}`,
+        title: message,
+        detail: formatAgentProgressDetail(message, details),
+        tone: inferAgentTraceTone(message, details),
+        fileName,
+        stepMs,
+        totalMs,
+      },
+    ];
+  });
+
+  const documents = readArray(root.documents);
+  const gap = isRecord(root.gap_analysis) ? root.gap_analysis : {};
+  const findings = readArray(root.findings);
+  const persistence = isRecord(root.persistence_result) ? root.persistence_result : {};
+  const memwal = isRecord(persistence.memwal) ? persistence.memwal : {};
+  const walrus = isRecord(persistence.walrus) ? persistence.walrus : {};
+
+  const reasoningTrace: AgentTraceEntry[] = documents.flatMap((document, index) => {
+    const row = isRecord(document) ? document : {};
+    const classification = isRecord(row.classification) ? row.classification : {};
+    const sourceConfidence = isRecord(row.source_confidence) ? row.source_confidence : {};
+    const metadata = isRecord(row.metadata) ? row.metadata : {};
+
+    const filename = readString(row.filename) ?? `Document ${index + 1}`;
+    const documentType = readString(classification.document_type) ?? "unclassified evidence";
+    const rationale = readString(classification.rationale) ?? "Classification rationale not returned.";
+    const sourceLevel = readString(sourceConfidence.source_confidence) ?? readString(classification.source_confidence) ?? "unknown";
+    const sourceReason = readString(sourceConfidence.source_confidence_reason) ?? readString(classification.source_confidence_reason);
+    const metadataSummary = buildMetadataSummary(metadata).slice(0, 2).join(" · ");
+
+    return [
+      {
+        id: `trace-open-${index}`,
+        title: `Opened ${filename}`,
+        detail: `Prepared ${documentType} evidence for audit analysis.`,
+        tone: "info",
+        fileName: filename,
+      },
+      {
+        id: `trace-classify-${index}`,
+        title: `Classified ${filename}`,
+        detail: `${documentType}: ${rationale}`,
+        tone: "success",
+        fileName: filename,
+      },
+      {
+        id: `trace-source-${index}`,
+        title: `Assessed source confidence`,
+        detail: `${filename} was kept at ${sourceLevel}${sourceReason ? ` because ${sourceReason}` : "."}${metadataSummary ? ` Metadata noticed: ${metadataSummary}.` : ""}`,
+        tone: "info",
+        fileName: filename,
+      },
+    ];
+  });
+
+  if (readNumber(gap.readiness_score) !== undefined) {
+    reasoningTrace.push({
+      id: "trace-gap-summary",
+      title: "Reviewed pack readiness",
+      detail: `Readiness score ${readNumber(gap.readiness_score)}/100 with ${readArray(gap.gaps).length} flagged gap(s).`,
+      tone: readArray(gap.gaps).length > 0 ? "warning" : "success",
+    });
+  }
+
+  findings.slice(0, 3).forEach((finding, index) => {
+    const row = isRecord(finding) ? finding : {};
+    reasoningTrace.push({
+      id: `trace-finding-${index}`,
+      title: `Drafted finding insight`,
+      detail: `${readString(row.title) ?? `Finding ${index + 1}`}${readString(row.severity) ? ` (${readString(row.severity)})` : ""}`,
+      tone: "warning",
+    });
+  });
+
+  if (warnings.length > 0) {
+    reasoningTrace.push({
+      id: "trace-browser-warnings",
+      title: "Browser ingest limitations noticed",
+      detail: warnings.slice(0, 2).join(" "),
+      tone: "warning",
+    });
+  }
+
+  reasoningTrace.push({
+    id: "trace-persistence",
+    title: "Prepared proof persistence",
+    detail: `MemWal ${readString(memwal.status) ?? "not run"} · Walrus ${readString(walrus.status) ?? "not run"}`,
+    tone: "info",
+  });
+
+  return [...progressTrace, ...reasoningTrace];
+}
+
+function inferAgentTraceTone(message: string, details: Record<string, unknown>): AgentTraceEntry["tone"] {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("gap analysis complete")) {
+    return (readNumber(details.gaps) ?? 0) > 0 ? "warning" : "success";
+  }
+  if (normalized.includes("complete") || normalized.includes("ready")) {
+    return "success";
+  }
+  if (normalized.includes("warning") || normalized.includes("gap")) {
+    return "warning";
+  }
+  return "info";
+}
+
+function formatAgentProgressDetail(message: string, details: Record<string, unknown>): string {
+  const normalized = message.toLowerCase();
+
+  if (normalized.startsWith("reading evidence")) {
+    return `Opening ${readString(details.file) ?? "evidence file"} for ingestion.`;
+  }
+
+  if (normalized.includes("evidence") && normalized.includes("ready")) {
+    return `${readString(details.filename) ?? "Document"} extracted ${readNumber(details.chars) ?? 0} characters as ${readString(details.format) ?? "text"} evidence.`;
+  }
+
+  if (normalized.includes("analyzing evidence")) {
+    return `${readString(details.filename) ?? "Document"} is being reviewed in ${readString(details.mode) ?? "analysis"} mode.`;
+  }
+
+  if (normalized.includes("evidence analysis complete")) {
+    return `${readString(details.document_type) ?? "Document"} finished with ${readString(details.source_confidence) ?? "unknown"} confidence from ${readString(details.source) ?? "analysis"}.`;
+  }
+
+  if (normalized.includes("running pack gap analysis")) {
+    return `Cross-checking ${readNumber(details.analyzed_documents) ?? 0} analyzed documents against pack-level assertions.`;
+  }
+
+  if (normalized.includes("gap analysis complete")) {
+    return `Pack readiness is ${readNumber(details.readiness_score) ?? "n/a"}/100 with ${readNumber(details.gaps) ?? 0} flagged gap(s).`;
+  }
+
+  if (normalized.includes("drafting finding")) {
+    return `Drafting a reviewer-facing summary for ${readString(details.title) ?? "the current gap"}.`;
+  }
+
+  if (normalized.includes("finding draft complete")) {
+    return `${readString(details.finding_id) ?? "Finding"} drafted with ${readString(details.severity) ?? "unrated"} severity.`;
+  }
+
+  if (normalized.includes("building audit pack summary")) {
+    return `Compiling the pack summary and output hashes for human review.`;
+  }
+
+  if (normalized.includes("audit pack summary/hash complete")) {
+    return `Summary hash set prepared across ${readNumber(details.hash_count) ?? 0} artifacts.`;
+  }
+
+  if (normalized.includes("building review and persistence plan")) {
+    return "Preparing human-approval controls and storage instructions.";
+  }
+
+  if (normalized.includes("persisting/preparing web3 outputs")) {
+    return `Preparing ${readNumber(details.hashes) ?? 0} hashes for memory storage and optional chain approval.`;
+  }
+
+  if (normalized.includes("web3 persistence preparation complete")) {
+    return `MemWal ${readString(details.memwal_status) ?? "unknown"} · Walrus ${readString(details.walrus_status) ?? "unknown"} · ${readNumber(details.action_candidates) ?? 0} chain action candidates.`;
+  }
+
+  if (normalized.includes("building orchestrate api response")) {
+    return "Shaping the workspace response for the browser.";
+  }
+
+  if (normalized.includes("orchestrate api response ready")) {
+    return `Workspace payload finished in ${readNumber(details.duration_ms) ?? 0}ms for ${readString(details.response_mode) ?? "response"} mode.`;
+  }
+
+  if (normalized.includes("orchestration complete")) {
+    return `${readNumber(details.documents) ?? 0} documents, ${readNumber(details.gaps) ?? 0} gaps, and ${readNumber(details.findings) ?? 0} findings were prepared.`;
+  }
+
+  return Object.entries(details)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(" · ") || "Agent step completed.";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -901,7 +1172,7 @@ export default function WorkspacePage() {
       [
         ...visibleLocalDocuments.map((item) => item.file),
         ...registry.map((item) => item.sourceFile).filter((file): file is File => Boolean(file)),
-      ].filter((file) => file.type.startsWith("text/") || TEXT_AGENT_EXTENSIONS.has(getFileExtension(file.name))).length,
+      ].filter((file) => isAgentProcessableFile(file)).length,
     [registry, visibleLocalDocuments],
   );
 
@@ -2216,14 +2487,28 @@ export default function WorkspacePage() {
     if (agentRun.status === "running") return;
 
     const packId = auditPack.id ?? "local-demo-pack";
+    const traceSeed: AgentTraceEntry[] = [];
+    const appendTrace = (entry: AgentTraceEntry) => {
+      traceSeed.push(entry);
+      setAgentRun((prev) => ({
+        ...prev,
+        trace: [...traceSeed],
+      }));
+    };
     setAgentRun({
       ...DEFAULT_AGENT_STATE,
       status: "running",
-      message: "Reading text-like local evidence and calling the agent orchestration route.",
+      message: "Preparing local evidence and calling the agent orchestration route.",
+    });
+    appendTrace({
+      id: "trace-start",
+      title: "Starting agent run",
+      detail: "Preparing selected evidence for backend audit analysis.",
+      tone: "info",
     });
 
     const steps: ProgressStep[] = [
-      { label: "Preparing document text", status: "pending" },
+      { label: "Preparing evidence files", status: "pending" },
       { label: "Running agent orchestration", status: "pending" },
       { label: "Persisting memory when configured", status: "pending" },
     ];
@@ -2253,16 +2538,75 @@ export default function WorkspacePage() {
         })),
       ];
 
-      for (const item of sourceDocuments) {
+      for (const [index, item] of sourceDocuments.entries()) {
         if (!item.file) continue;
-        const { text, warning } = await readAgentText(item.file);
-        if (warning) warnings.push(`${item.fileName}: ${warning}`);
-        if (!text) continue;
+        steps[0].detail = `${index + 1}/${sourceDocuments.length} ${item.fileName}`;
+        setOperationProgress({ type: "agent", steps: [...steps] });
+        appendTrace({
+          id: `trace-prepare-${item.id}`,
+          title: `Opening ${item.fileName}`,
+          detail: `Preparing ${item.file.type || getFileExtension(item.file.name) || "file"} for agent ingestion.`,
+          tone: "info",
+          fileName: item.fileName,
+        });
 
+        const extension = getFileExtension(item.file.name);
+        const isTextLike = item.file.type.startsWith("text/") || TEXT_AGENT_EXTENSIONS.has(extension);
+
+        if (isTextLike) {
+          const { text, warning } = await readAgentText(item.file);
+          if (warning) warnings.push(`${item.fileName}: ${warning}`);
+          if (!text) continue;
+
+          documents.push({
+            documentId: item.id,
+            documentName: item.fileName,
+            documentText: text,
+            notes: item.evidenceRef
+              ? [`Registered evidence ${item.evidenceRef.id}`, `Source confidence ${item.source}`]
+              : [`Local session file. ${item.source}`],
+            context: {
+              engagementName: "Q2 2026 Audit Readiness",
+              documentTypeHint: item.documentType,
+              uploaderLabel: item.source,
+              auditArea: "Audit readiness",
+            },
+            evidence_ref: item.evidenceRef
+              ? {
+                evidence_id: item.evidenceRef.id,
+                walrus_blob_id: item.evidenceRef.blobId,
+                commitment: item.evidenceRef.commitment,
+              }
+              : undefined,
+          });
+          appendTrace({
+            id: `trace-text-ready-${item.id}`,
+            title: `Prepared inline text for ${item.fileName}`,
+            detail: `${text.length} characters are ready for orchestration.`,
+            tone: "success",
+            fileName: item.fileName,
+          });
+          continue;
+        }
+
+        if (!isAgentProcessableFile(item.file)) {
+          warnings.push(`${item.fileName}: Unsupported file format for workspace agent analysis.`);
+          appendTrace({
+            id: `trace-unsupported-${item.id}`,
+            title: `Skipped ${item.fileName}`,
+            detail: "This file type is not currently supported by the workspace agent uploader.",
+            tone: "warning",
+            fileName: item.fileName,
+          });
+          continue;
+        }
+
+        const staged = await stageAgentFile(item.file);
+        warnings.push(...(staged.warnings ?? []).map((warning) => `${item.fileName}: ${warning}`));
         documents.push({
           documentId: item.id,
           documentName: item.fileName,
-          documentText: text,
+          filePath: staged.filePath,
           notes: item.evidenceRef
             ? [`Registered evidence ${item.evidenceRef.id}`, `Source confidence ${item.source}`]
             : [`Local session file. ${item.source}`],
@@ -2271,27 +2615,41 @@ export default function WorkspacePage() {
             documentTypeHint: item.documentType,
             uploaderLabel: item.source,
             auditArea: "Audit readiness",
+            filePath: staged.filePath,
           },
           evidence_ref: item.evidenceRef
             ? {
-              evidence_id: item.evidenceRef.id,
-              walrus_blob_id: item.evidenceRef.blobId,
-              commitment: item.evidenceRef.commitment,
-            }
+                evidence_id: item.evidenceRef.id,
+                walrus_blob_id: item.evidenceRef.blobId,
+                commitment: item.evidenceRef.commitment,
+              }
             : undefined,
+        });
+        appendTrace({
+          id: `trace-stage-${item.id}`,
+          title: `Staged ${item.fileName} on the server`,
+          detail: `${staged.ingestion?.format ?? "binary"} evidence uploaded for backend extraction${typeof staged.extracted_characters === "number" ? ` (${staged.extracted_characters} chars extracted).` : "."}`,
+          tone: "success",
+          fileName: item.fileName,
         });
       }
 
       if (documents.length === 0) {
         throw new Error(
           warnings[0] ??
-          "No readable text-like local evidence is available. Add a CSV, TXT, JSON, MD, or TSV file for the web agent panel.",
+          "No supported local evidence is available. Add CSV, TXT, JSON, MD, TSV, PDF, DOCX, XLSX, or image evidence for the web agent panel.",
         );
       }
 
       steps[0] = { ...steps[0], status: "done", detail: `${documents.length} readable` };
       steps[1].status = "running";
       setOperationProgress({ type: "agent", steps: [...steps] });
+      appendTrace({
+        id: "trace-orchestrate-start",
+        title: "Submitting evidence pack to the agent",
+        detail: `${documents.length} document(s) prepared for orchestration.`,
+        tone: "info",
+      });
 
       const packNotes = [
         auditPack.id
@@ -2303,6 +2661,7 @@ export default function WorkspacePage() {
       ].filter((note): note is string => Boolean(note));
 
       const result = await postJson<unknown>("/api/agent/orchestrate", {
+        provider: WORKSPACE_AGENT_PROVIDER,
         response_mode: "workspace",
         profile: "balanced",
         pack_id: packId,
@@ -2376,11 +2735,13 @@ export default function WorkspacePage() {
         findings,
         actionCandidates,
         memoryStatus,
+        trace: [...traceSeed, ...buildAgentTraceFromResult(root, warnings)],
         raw: {
           documents: root.documents,
           gap_analysis: root.gap_analysis,
           findings: root.findings,
           audit_pack_summary: root.audit_pack_summary,
+          progress_trace: root.progress_trace,
           approval_controls: root.approval_controls,
           review_bundle: reviewBundle,
           persistence_result: root.persistence_result,
@@ -3933,6 +4294,51 @@ export default function WorkspacePage() {
     </div>
   );
 
+  const renderAgentTraceEntries = (entries: AgentTraceEntry[], emptyMessage: string) => {
+    if (entries.length === 0) {
+      return <p className="ide-section-note">{emptyMessage}</p>;
+    }
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+        {entries.map((entry) => (
+          <div
+            key={entry.id}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.18rem",
+              padding: "0.55rem 0.65rem",
+              borderRadius: "0.55rem",
+              border: "1px solid rgba(148, 163, 184, 0.22)",
+              background:
+                entry.tone === "warning"
+                  ? "rgba(245, 158, 11, 0.08)"
+                  : entry.tone === "success"
+                    ? "rgba(16, 185, 129, 0.07)"
+                    : "rgba(59, 130, 246, 0.05)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
+              <strong style={{ fontSize: "0.75rem", color: "var(--text-high)" }}>{entry.title}</strong>
+              {(entry.stepMs !== undefined || entry.totalMs !== undefined) && (
+                <code style={{ fontSize: "0.64rem", color: "var(--text-secondary)" }}>
+                  {entry.stepMs !== undefined ? `+${entry.stepMs}ms` : ""}
+                  {entry.stepMs !== undefined && entry.totalMs !== undefined ? " · " : ""}
+                  {entry.totalMs !== undefined ? `${entry.totalMs}ms total` : ""}
+                </code>
+              )}
+            </div>
+            <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--text-secondary)" }}>{entry.detail}</p>
+            {entry.fileName && (
+              <small style={{ fontSize: "0.64rem", color: "var(--text-muted)" }}>{entry.fileName}</small>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const renderBottomPanel = () => {
     const rawPayload = {
       auditPack,
@@ -4079,13 +4485,19 @@ export default function WorkspacePage() {
             </div>
           )}
           {bottomTab === "agent" && (
-            <div className="ide-status-line">
-              <span>{agentRun.message}</span>
-              <span>Readable docs: {readableEvidenceCount}</span>
-              <span>Reviewed docs: {agentReview.documents.length}</span>
-              <span>Findings: {agentReview.findings.length}</span>
-              <span>Action candidates: {agentRun.actionCandidates.length}</span>
-              <span>Chain write: {agentReview.approval.chainWriteReady ? "ready after approval" : "not submitted"}</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <div className="ide-status-line">
+                <span>{agentRun.message}</span>
+                <span>Supported docs: {readableEvidenceCount}</span>
+                <span>Reviewed docs: {agentReview.documents.length}</span>
+                <span>Findings: {agentReview.findings.length}</span>
+                <span>Action candidates: {agentRun.actionCandidates.length}</span>
+                <span>Chain write: {agentReview.approval.chainWriteReady ? "ready after approval" : "not submitted"}</span>
+              </div>
+              {renderAgentTraceEntries(
+                agentRun.trace,
+                "Run the co-auditor to populate a reasoning trace of what evidence was opened, how it was classified, and what the pack-level review concluded.",
+              )}
             </div>
           )}
           {bottomTab === "privacy" && (
@@ -4120,8 +4532,8 @@ export default function WorkspacePage() {
             <span>AI Co-Auditor</span>
           </div>
           <div className="chat-bubble assistant">
-            <p>Hello! I am your AI compliance co-auditor. I can scan your uploaded documents to match them against required ISA assertions, evaluate classification readiness, and flag compliance gaps.</p>
-            <p style={{ marginTop: '0.4rem' }}>Upload text or CSV evidence documents, select them in the Explorer, and click the send icon below to start analysis.</p>
+            <p>Hello! I am your AI compliance co-auditor. I can scan uploaded PDFs, spreadsheets, DOCX files, images, and text evidence to match them against ISA assertions, evaluate readiness, and flag pack-level gaps.</p>
+            <p style={{ marginTop: '0.4rem' }}>Select evidence in the Explorer, then click the send icon below. I will show a safe reasoning trace of what I opened, what I classified, and which review steps are still waiting for human approval.</p>
           </div>
         </div>
 
@@ -4153,6 +4565,23 @@ export default function WorkspacePage() {
                   {step.detail && <code style={{ marginLeft: 'auto', fontSize: '0.64rem', color: 'var(--accent)' }}>{step.detail}</code>}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {agentRun.trace.length > 0 && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>Reasoning Trace</span>
+            </div>
+            <div className="chat-bubble system" style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', textAlign: 'left', alignItems: 'stretch' }}>
+              <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                This is a reviewer-safe execution trace, not hidden chain-of-thought. It shows the files opened, analysis steps completed, and why the pack moved to the next stage.
+              </p>
+              {renderAgentTraceEntries(
+                agentRun.status === "running" ? agentRun.trace.slice(-6) : agentRun.trace.slice(-10),
+                "The trace will appear here once the run starts.",
+              )}
             </div>
           </div>
         )}
