@@ -1465,3 +1465,48 @@
   - The chat panel still uses inline style objects in the new UI blocks.
 - Follow-up needed:
   - Move the chat panel styling into `globals.css` when polishing the workspace layout.
+
+## 2026-06-20 — Landing Page Copywriting Polish
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Polished landing page copywriting to align with professional auditing standards (ISA 500), the Company vs. Auditor dual-role workflow, and cryptographic evidence registry concepts.
+  - Replaced marketing buzzwords and AI-slop terminology with precise technical terms.
+  - Updated the main Hero title to a focused one-liner: "AI Audit Agent with Verifiable Walrus Memory".
+
+### Reasoning
+- Why this approach was chosen:
+  - Aligning copywriting with real-world auditor vocabulary ensures domain credibility and trust for professional users.
+  - Setting expectations for the Company/Auditor split views directly on the landing page matches the workspace's functional changes.
+
+### Tech Debt
+- Known shortcuts:
+  - None. Text replacements are direct JSX content updates.
+- Follow-up needed:
+  - Implement role-based workspace login controls and styling polish for the landing page next.
+
+## 2026-06-20 — Landing Page Visual Redesign & Modernization
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+- Summary:
+  - Redesigned the landing page with morning-dew style glassmorphism (15px blur, 15-20% white overlay, 1px rgba border, soft shadows) applied to CTA cards, header, and key navigation buttons.
+  - Replaced the hero background color gradient and added a footer background gradient to enhance visual depth.
+  - Modernized the overall layout, including the interactive benefits network card, and simplified the main agent simulation view using a minimalist macOS window theme with custom message bubbles.
+
+### Reasoning
+- Why this approach was chosen:
+  - Visual excellence and premium glassmorphism styling are essential to provide a professional, modern look that builds user confidence.
+  - Incorporating a dual-role benefit network switcher visually communicates the distinct value of the evidence workflow for companies versus auditors.
+
+### Tech Debt
+- Known shortcuts:
+  - Static mockup elements are used for the chatbot interactive simulation.
+- Follow-up needed:
+  - Implement full interactivity in the co-auditor question-answering console mockup.
+
