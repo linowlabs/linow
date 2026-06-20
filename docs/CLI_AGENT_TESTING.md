@@ -24,8 +24,32 @@ The ingestion layer currently supports:
 - `.xlsm`
 - `.xlsb`
 - `.docx`
+- common image files (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp`, `.tif`, `.tiff`) when the Gemini provider is used
 
-Image files are detected, but OCR is not enabled yet in the current cheap-mode ingestion path.
+PDF, spreadsheet, DOCX, and text-like files still use local extraction first. When `AGENT_PROVIDER=gemini`, scanned PDFs or image evidence can be sent to Gemini as inline attachments for OCR/visual understanding. XLSX/XLS files are intentionally converted locally into sheet text/tables before model analysis.
+
+## Gemini demo mode
+
+For the Sui Overflow demo path, use Gemini as the full agent provider:
+
+```bash
+export AGENT_PROVIDER=gemini
+export GEMINI_API_KEY=your_key_here
+export GEMINI_MODEL=gemini-3.5-flash
+```
+
+Optional PDF behavior:
+
+```bash
+export GEMINI_PDF_MODE=auto
+```
+
+Modes:
+- `auto` = attach PDFs only when local extraction is weak or image-like.
+- `always` = attach every PDF for Gemini native document understanding.
+- `off` = text-only processing.
+
+Groq remains available by setting `AGENT_PROVIDER=groq` or by sending `"provider":"groq"` in a request body.
 
 ## 1. Start the app server
 
@@ -129,6 +153,8 @@ The orchestration route now supports a `profile` field:
 - `balanced` = keeps the compact pass but allows larger inputs and more findings.
 - `full` = restores the older multi-pass per-document flow for higher-budget runs.
 
+With `AGENT_PROVIDER=gemini`, the compact document-analysis pass is enabled by default so one model call can classify, extract metadata, map assertions, and assign source confidence for each evidence item.
+
 ### Full orchestration from real file paths
 
 ```bash
@@ -151,6 +177,61 @@ This calls:
 - `POST /api/agent/orchestrate`
 
 and each document is ingested from `filePath` before the agent runs classification, extraction, mapping, gap analysis, and finding drafting.
+
+### Full ISA Q2 engagement smoke
+
+If `demo/isa_q2_engagement` contains evidence files, the smoke runner can auto-discover the pack:
+
+```bash
+npm run agent:smoke -- isa-q2-engagement
+```
+
+To point the same smoke at the richer PBC list pack:
+
+```bash
+ISA_Q2_PACK_ROOT=demo/PBC_list npm run agent:smoke -- isa-q2-engagement
+```
+
+By default, this scans:
+
+```txt
+demo/isa_q2_engagement/evidence_initial
+```
+
+and posts the discovered evidence files to `POST /api/agent/orchestrate` with:
+
+- `provider` from `AGENT_PROVIDER`, defaulting to `gemini`
+- `response_mode` from `ISA_Q2_RESPONSE_MODE`, defaulting to `workspace`
+- `profile` from `ISA_Q2_PROFILE`, defaulting to `cheap`
+- stable `pack_id` from `ISA_Q2_PACK_ID`, defaulting to `pack_linow_isa_q2_demo`
+
+Optional remediation-stage run:
+
+```bash
+npm run agent:smoke -- isa-q2-engagement after
+```
+
+This scans:
+
+```txt
+demo/isa_q2_engagement/evidence_remediation
+```
+
+Optional document cap:
+
+```bash
+ISA_Q2_MAX_DOCS=6 npm run agent:smoke -- isa-q2-engagement
+```
+
+The default cap is 24 documents so the full `demo/PBC_list/evidence_initial` story can run without dropping the bank, GL, policy, or manual-adjustment evidence.
+
+The smoke client waits up to 10 minutes by default. Override when running a heavier pack:
+
+```bash
+AGENT_SMOKE_TIMEOUT_MS=900000 ISA_Q2_PACK_ROOT=demo/PBC_list npm run agent:smoke -- isa-q2-engagement
+```
+
+The server logs progress with `[linow-agent]` messages while it reads evidence, analyzes each document, runs gap analysis, and builds summaries. Set `AGENT_PROGRESS_LOGS=off` to silence these logs.
 
 ### Ingest a real local file
 
@@ -195,6 +276,7 @@ curl -s -X POST http://127.0.0.1:3000/api/agent/ingest \
 curl -s -X POST http://127.0.0.1:3000/api/agent/classify \
   -H 'content-type: application/json' \
   -d '{
+    "provider":"gemini",
     "filePath":"demo/00_engagement_brief_linow_isa500_q2_revenue.pdf",
     "context":{
       "engagementName":"LINOW-ISA500-Q2REV-2026-ACC",
