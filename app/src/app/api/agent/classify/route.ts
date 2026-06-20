@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { buildIngestionSummary, resolveAgentDocumentInput } from "@/lib/agent/common";
-import { classifyDocumentWithGroq } from "@/lib/agent/groq";
+import { classifyDocumentWithAgent, resolveAgentProvider } from "@/lib/agent/provider";
 import { parseJsonObjectRequest, toAgentErrorResponse } from "@/lib/agent/http";
 
 export async function POST(request: Request) {
   try {
     const body = await parseJsonObjectRequest(request);
+    const provider = resolveAgentProvider(body.provider);
     const input = await resolveAgentDocumentInput(body);
-    const result = await classifyDocumentWithGroq(input);
+    const result = await classifyDocumentWithAgent(input, provider);
 
     return NextResponse.json({
       provider: result.provider,

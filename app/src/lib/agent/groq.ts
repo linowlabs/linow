@@ -5,6 +5,10 @@ import {
   recordGroqTokenUsage,
   waitForGroqTokenBudget,
 } from "@/lib/agent/groq-rate-budget";
+import type {
+  AgentJsonCompletionConfig,
+  AgentJsonCompletionResult,
+} from "@/lib/agent/provider-types";
 import {
   buildClassificationMessages,
   groqClassificationSchema,
@@ -25,15 +29,6 @@ interface GroqChatCompletionResponse {
     completion_tokens?: number;
     total_tokens?: number;
   };
-}
-
-interface GroqJsonCompletionConfig<T> {
-  model?: string;
-  schemaName: string;
-  schema: unknown;
-  messages: Array<{ role: "system" | "user"; content: string }>;
-  validate: (value: unknown) => value is T;
-  responseMode?: "json_schema" | "json_object";
 }
 
 let groqKeyCursor = 0;
@@ -59,15 +54,17 @@ export async function classifyDocumentWithGroq(input: ClassifyDocumentInput): Pr
   };
 }
 
-export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<T>): Promise<{
-  model: string;
-  result: T;
-  usage?: GroqChatCompletionResponse["usage"];
-}> {
+export async function runGroqJsonCompletion<T>(
+  config: AgentJsonCompletionConfig<T>,
+): Promise<AgentJsonCompletionResult<T>> {
   const apiKeys = getGroqApiKeys();
 
   if (apiKeys.length === 0) {
     throw new Error("GROQ_API_KEY or GROQ_API_KEYS is not configured on the server.");
+  }
+
+  if (config.attachments && config.attachments.length > 0) {
+    throw new Error("Groq provider does not support inline evidence attachments in this agent path.");
   }
 
   const model = config.model || getServerEnv("GROQ_MODEL") || AGENT_CONFIG.groq.defaultModel;
@@ -126,6 +123,7 @@ export async function runGroqJsonCompletion<T>(config: GroqJsonCompletionConfig<
         recordGroqTokenUsage(payload.usage?.total_tokens, estimatedTokens);
 
         return {
+          provider: "groq",
           model,
           result: parsed,
           usage: payload.usage,

@@ -1,0 +1,27 @@
+file_path,document_type,source_confidence_initial,primary_assertions,expected_agent_behavior,intentional_note
+evidence_initial/01_financial_reports/01_q2_2026_financial_reporting_pack.xlsx,financial_reporting_workbook,L2,Completeness; Valuation & Allocation; Classification; Accuracy,Classify as company-prepared financial report and cross-check to GL/schedules.,3-month report with multiple sheets.
+evidence_initial/01_financial_reports/08_management_report_april_2026.pdf,management_report,L2,Completeness; Valuation & Allocation; Classification,"Use as analytical support only, not independent proof.",Monthly report April.
+evidence_initial/01_financial_reports/08_management_report_may_2026.pdf,management_report,L2,Completeness; Valuation & Allocation; Classification,"Use as analytical support only, not independent proof.",Monthly report May.
+evidence_initial/01_financial_reports/08_management_report_june_2026.pdf,management_report,L2,Completeness; Valuation & Allocation; Classification,"Use as analytical support only, not independent proof.",Monthly report June.
+evidence_initial/05_gl_exports_and_policies/02_sales_register_q2_2026.csv,sales_register,L2,Completeness; Occurrence; Accuracy; Classification; Cut-off,Tie invoice population to revenue schedule and GL.,Company export.
+evidence_initial/02_contracts_invoices/09_customer_contract_orion_C-ORION-2026-019.pdf,customer_contract,L2,Existence; Rights & Obligations; Classification; Cut-off,Detect approval threshold requirement and missing committee minutes.,Material contract.
+evidence_initial/02_contracts_invoices/10_invoice_INV-2026-0411.pdf,invoice,L2,Existence; Occurrence; Accuracy; Classification; Cut-off,Match to contract and cash receipt.,Paid after invoice.
+evidence_initial/02_contracts_invoices/10_invoice_INV-2026-0517.pdf,invoice,L2,Existence; Occurrence; Accuracy; Classification; Cut-off,Match to contract and cash receipt.,Paid.
+evidence_initial/02_contracts_invoices/10_invoice_INV-2026-0630.pdf,invoice,L2,Existence; Occurrence; Accuracy; Classification; Cut-off,Flag cut-off risk due go-live after quarter-end.,Open at 2026-06-30.
+evidence_initial/03_delivery_cutoff/12_service_acceptance_orion_uat_2026_06_25.pdf,service_acceptance,L2,Occurrence; Cut-off; Existence,Supports UAT before quarter-end but note production go-live pending.,Partial support.
+evidence_initial/03_delivery_cutoff/05_service_delivery_cutoff_log.csv,cutoff_log,L2,Cut-off; Occurrence; Accuracy,Detect go-live 2026-07-02 conflict with 2026-06-30 revenue recognition.,Key exception.
+evidence_initial/04_bank_cash_receipts/03_bank_transactions_apr_jul_2026.csv,bank_transaction_export,L2,Existence; Completeness; Valuation & Allocation; Accuracy,Match paid invoices and post-period receipts.,Company-uploaded bank export.
+evidence_initial/04_bank_cash_receipts/13_bank_statement_april_2026.pdf,bank_statement,L2,Existence; Completeness; Valuation & Allocation; Accuracy,Support cash receipts and ending balance.,Monthly bank statement.
+evidence_initial/04_bank_cash_receipts/13_bank_statement_may_2026.pdf,bank_statement,L2,Existence; Completeness; Valuation & Allocation; Accuracy,Support cash receipts and ending balance.,Monthly bank statement.
+evidence_initial/04_bank_cash_receipts/13_bank_statement_june_2026.pdf,bank_statement,L2,Existence; Completeness; Valuation & Allocation; Accuracy,Support cash receipts and ending balance.,Monthly bank statement.
+evidence_initial/05_gl_exports_and_policies/04_gl_ledger_revenue_q2_2026.csv,gl_ledger,L2,Completeness; Classification; Accuracy; Valuation & Allocation,Detect manual JE without approval.,Company GL export.
+evidence_initial/05_gl_exports_and_policies/06_deferred_revenue_rollforward_q2_2026.csv,deferred_revenue_rollforward,L2,Valuation & Allocation; Completeness; Accuracy,Review deferred revenue impact and manual acceleration.,Rollforward.
+evidence_initial/01_financial_reports/07_ar_aging_q2_2026.csv,ar_aging,L2,Valuation & Allocation; Completeness; Accuracy,Support receivables and subsequent collection.,Open AR at quarter-end.
+evidence_initial/05_gl_exports_and_policies/14_revenue_recognition_policy_rev_2026.txt,policy_document,L2,Criteria; Classification,Use as criteria for approval thresholds and cut-off controls.,Defines gaps.
+evidence_initial/05_gl_exports_and_policies/15_manual_adjustment_note_JRN-2026-06-117.txt,manual_adjustment_note,L2,Classification; Accuracy; Valuation & Allocation,Flag missing CFO approval.,Gap trigger.
+evidence_initial/05_gl_exports_and_policies/16_finance_email_thread_revenue_close.txt,email_thread,L2,Criteria; Cut-off,Use as corroborating context only.,Not independent proof.
+evidence_remediation/R01_commercial_committee_minutes_orion_contract.pdf,board_minutes,L2,Rights & Obligations; Occurrence,Resolve GAP-01 after upload.,Remediation.
+evidence_remediation/R02_cfo_approval_JRN-2026-06-117.pdf,approval_document,L2,Rights & Obligations; Classification; Accuracy,Resolve GAP-02 after upload.,Remediation.
+negative_cases/N01_tampered_bank_statement_june_2026.pdf,tampered_bank_statement,N/A,,Should fail hash verification against original registered commitment.,Negative case.
+negative_cases/N02_wrong_document_marketing_brochure.txt,irrelevant_document,L2,,"Should classify as irrelevant or low evidence value, not audit evidence.",Negative case.
+negative_cases/N03_tampered_sales_register_q2_2026.csv,tampered_sales_register,N/A,,Should fail hash verification against original sales register.,Negative case.

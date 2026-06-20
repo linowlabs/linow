@@ -1,0 +1,9 @@
+test_id,name,input_folder,expected_result,pass_condition
+TC-01,Initial pack classification,evidence_initial,All files classified with document types and L2 source confidence,No material file left unclassified except irrelevant docs
+TC-02,Initial gap analysis,evidence_initial,"GAP-01, GAP-02, and GAP-03 detected",Agent names missing approval docs and cut-off issue
+TC-03,Remediation upload,evidence_remediation,GAP-01 and GAP-02 resolved,Agent keeps GAP-03 as review item
+TC-04,Tampered bank statement,negative_cases/N01,Hash mismatch or tampered status,Agent does not accept modified file as original
+TC-05,Wrong document,negative_cases/N02,Rejected or irrelevant classification,No strong ISA assertion mapping
+TC-06,Tampered sales register,negative_cases/N03,Hash mismatch against original registered sales register,Agent flags changed net amount for INV-2026-0630
+TC-07,Memory restore,evidence_initial + remediation,Recall previous classifications and gap status,Agent can summarize prior state without re-uploading all files
+TC-08,Overclaim guardrail,all evidence,Agent states limitations,"Agent does not say documents are true, bank-issued, or audit opinion ready"

@@ -1071,3 +1071,200 @@
   - The memory smoke now verifies the persistence-ready contract with zero drafted findings in this mode, so finding generation still needs to be validated through the full orchestration or point-1 flows.
 - Follow-up needed:
   - Re-run `npm run agent:smoke -- orchestrate-memory` and confirm the compact response returns the expected recall and memory payload fields.
+
+## 2026-06-20 — Add Gemini Demo Provider Path
+
+### Change
+- Files touched:
+  - `.env.example`
+  - `app/src/app/api/agent/classify/route.ts`
+  - `app/src/app/api/agent/extract-metadata/route.ts`
+  - `app/src/app/api/agent/map-assertions/route.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `app/src/app/api/agent/draft-finding/route.ts`
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/document-analysis-cache.ts`
+  - `app/src/lib/agent/evidence-attachments.ts`
+  - `app/src/lib/agent/gemini.ts`
+  - `app/src/lib/agent/gemini-rate-budget.ts`
+  - `app/src/lib/agent/groq.ts`
+  - `app/src/lib/agent/ingest.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/src/lib/agent/orchestration-contract.ts`
+  - `app/src/lib/agent/provider.ts`
+  - `app/src/lib/agent/provider-types.ts`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added a modular agent provider layer with `groq` and `gemini` as selectable providers via `AGENT_PROVIDER` or request-level `provider`.
+  - Added a Gemini REST JSON runner, Gemini token-budget pacing, and provider-neutral completion types while keeping the existing Groq path intact.
+  - Wired classification, metadata extraction, assertion mapping, gap analysis, draft finding, and full orchestration through the provider-neutral runner.
+  - Enabled Gemini compact document-analysis bundles by default so demo runs can classify, extract metadata, map assertions, and assign source confidence in one model call per evidence item.
+  - Added Gemini evidence attachments for scanned/weak-extraction PDFs and image evidence, while keeping XLSX/XLS local table extraction for deterministic spreadsheet handling.
+  - Made document-analysis cache keys provider-aware to avoid reusing Groq artifacts during Gemini demo runs.
+
+### Reasoning
+- Why this approach was chosen:
+  - The Groq implementation already contains useful prompts, validators, hashing, and human-review boundaries, so adding a provider abstraction preserves that work instead of replacing the agent stack.
+  - Gemini is the better demo provider for core evidence reasoning because the larger token budget and native PDF/image understanding reduce the current Groq free-tier TPM pain.
+  - Provider-level selection keeps latency predictable: a run uses Gemini or Groq, not both, unless a caller explicitly changes providers between requests.
+
+### Tech Debt
+- Known shortcuts:
+  - Gemini PDF file reuse currently uses inline attachments, not the Gemini Files API, so large repeated PDFs may still pay upload bandwidth per request.
+  - The Gemini structured-output request includes a fallback body shape, but real key/model validation still needs to be tested against the configured AI Studio project.
+  - Image OCR is available only through Gemini attachments; Groq remains text-only in this path.
+- Follow-up needed:
+  - Run `npm run agent:smoke -- orchestrate-files ...` with `AGENT_PROVIDER=gemini` and a real Gemini key.
+  - Consider adding Gemini Files API caching for larger PDF packs if repeated demo runs become slow.
+  - Add UI/provider status copy so demo users understand that Gemini mode sends plaintext synthetic evidence to Google for MVP purposes.
+
+## 2026-06-20 — Add ISA Q2 Engagement Smoke Mode
+
+### Change
+- Files touched:
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added `npm run agent:smoke -- isa-q2-engagement` to auto-discover supported evidence files under `demo/isa_q2_engagement/evidence_initial`.
+  - Added an optional `after` argument to scan `demo/isa_q2_engagement/evidence_remediation`.
+  - Added env controls for `ISA_Q2_PACK_ROOT`, `ISA_Q2_MAX_DOCS`, `ISA_Q2_PROFILE`, and `ISA_Q2_RESPONSE_MODE`.
+  - Set the default discovery cap to 24 documents so the richer `demo/PBC_list` pack can include the full initial evidence story.
+  - Kept `pack_id` stable across before/after remediation smoke runs, with optional override through `ISA_Q2_PACK_ID`, so recall/persistence can connect both stages.
+  - Kept the smoke path provider-aware, defaulting request-level provider to `AGENT_PROVIDER` or Gemini.
+
+### Reasoning
+- Why this approach was chosen:
+  - The demo pack should be easy to run without manually listing many evidence paths during judging prep.
+  - Auto-discovery keeps the smoke runner useful as the pack contents change, while the document cap protects free-tier demo runs from accidental oversized batches.
+  - The mode uses the existing orchestration route so it exercises the same agent boundary: agent proposes, human reviews, no autonomous chain write.
+
+### Tech Debt
+- Known shortcuts:
+  - Discovery is filename/extension based and does not yet read a formal engagement manifest.
+  - The current workspace checkout has the ISA Q2 folders but no discovered evidence files under `evidence_initial`, so the smoke currently exits before calling the server.
+- Follow-up needed:
+  - Add or restore the ISA Q2 evidence files, then run `npm run agent:smoke -- isa-q2-engagement` with the local app server running and `GEMINI_API_KEY` configured.
+
+## 2026-06-20 — Sanitize Gemini Response Schemas
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/gemini.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Updated Gemini schema normalization to strip OpenAI/Groq-oriented JSON Schema fields that Gemini rejects, including `additionalProperties`.
+  - Converted simple nullable union types such as `["string", "null"]` into Gemini-style `nullable: true` plus a single concrete type.
+  - Added conservative handling for multi-type fields by choosing a supported concrete type while keeping local runtime validators as the final contract gate.
+
+### Reasoning
+- Why this approach was chosen:
+  - The PBC smoke reached the app server but Gemini rejected the request before model execution because the response schema still included unsupported JSON Schema keywords.
+  - Keeping a sanitized Gemini schema preserves structured-output guidance while the existing validators continue protecting Linow artifact contracts.
+
+### Tech Debt
+- Known shortcuts:
+  - Gemini still receives a reduced subset of the full schema rather than every strict JSON Schema constraint used by Groq.
+  - End-to-end validation needs to be rerun from the user's active dev server with a real Gemini key.
+- Follow-up needed:
+  - Re-run `ISA_Q2_PACK_ROOT=demo/PBC_list ISA_Q2_MAX_DOCS=1 npm --prefix app run agent:smoke -- isa-q2-engagement` and inspect the next provider response.
+
+## 2026-06-20 — Relax Gemini Compact Bundle Draft Normalization
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/analyze-document.ts`
+  - `app/src/lib/agent/extract-metadata.ts`
+  - `app/src/lib/agent/map-assertions.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Relaxed compact document-analysis bundle validation so Gemini draft output can omit provider-fillable fields like `document_id` and `filename`.
+  - Hardened metadata normalization to fill canonical schema fields, default missing arrays, normalize citations to the current document, and coerce simple amount/confidence shapes.
+  - Hardened assertion/source-confidence normalization to canonicalize assertion IDs, labels, coverage, source confidence levels, and missing rationale/array fields.
+
+### Reasoning
+- Why this approach was chosen:
+  - The Gemini compact bundle request was accepted, but the returned JSON failed Linow's pre-normalization validator.
+  - Fields such as `document_id`, `filename`, and canonical schema metadata should be controlled by Linow, not trusted from the model, so accepting a looser draft and producing a strict normalized artifact is safer and more provider-portable.
+
+### Tech Debt
+- Known shortcuts:
+  - The compact bundle path now accepts looser provider drafts than the single-tool routes, relying on normalization plus downstream artifact validation.
+  - Some malformed optional model details are dropped rather than surfaced as warnings in the response.
+- Follow-up needed:
+  - Re-run the PBC smoke with `ISA_Q2_MAX_DOCS=3`; if another validator fails, add a targeted diagnostic or normalizer for that artifact type.
+
+## 2026-06-20 — Increase Gemini Request Timeout For PBC Evidence
+
+### Change
+- Files touched:
+  - `.env.example`
+  - `app/src/lib/agent/config.ts`
+  - `app/src/lib/agent/gemini.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Increased the default Gemini request timeout from 45 seconds to 120 seconds for heavier PDF/XLSX evidence analysis.
+  - Added `GEMINI_REQUEST_TIMEOUT_MS` so local demo runs can tune provider timeout without code changes.
+  - Wrapped Gemini fetch failures with schema/model context so future timeout errors identify the agent step more clearly.
+
+### Reasoning
+- Why this approach was chosen:
+  - The PBC smoke reached Gemini and then failed after roughly 88 seconds because sequential document analysis plus a 45-second provider timeout was too aggressive for the first XLSX/PDF-heavy batch.
+  - Longer provider timeouts are acceptable for local demo smoke runs because the bottleneck is model/document processing, not Next.js routing.
+
+### Tech Debt
+- Known shortcuts:
+  - Orchestration is still sequential, so a full 22-document PBC run can take several minutes even with a higher timeout.
+- Follow-up needed:
+  - Add bounded concurrency for per-document Gemini compact analysis once provider behavior is stable.
+
+## 2026-06-20 — Add Agent Progress Logs For Smoke Runs
+
+### Change
+- Files touched:
+  - `app/src/lib/agent/orchestrate.ts`
+  - `app/scripts/agent-cli-smoke.mjs`
+  - `docs/CLI_AGENT_TESTING.md`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added `[linow-agent]` progress logs while orchestration reads evidence, analyzes each document, runs gap analysis, drafts findings, and builds summaries.
+  - Added `AGENT_PROGRESS_LOGS=off` to silence server progress logs when needed.
+  - Added an explicit smoke client timeout with `AGENT_SMOKE_TIMEOUT_MS`, defaulting to 10 minutes for heavier Gemini document runs.
+  - Changed the ISA Q2/PBC smoke default `response_mode` to `compact_p2` so debugging skips finding drafting unless explicitly requested.
+
+### Reasoning
+- Why this approach was chosen:
+  - The PBC smoke can take minutes because document analysis is sequential and Gemini may spend significant time on XLSX/PDF evidence.
+  - Progress logs make long-running local demo runs observable without introducing SSE or a streaming API yet.
+  - Skipping finding drafting by default keeps early smoke tests focused on ingestion, document analysis, and gap analysis before the full workspace response is exercised.
+
+### Tech Debt
+- Known shortcuts:
+  - Progress logs are server-console logs, not streamed back to the CLI or UI.
+  - Per-document Gemini analysis is still sequential.
+- Follow-up needed:
+  - Add bounded concurrency for document analysis and a proper event stream if the UI needs live progress.
+
+## 2026-06-20 — Add Timed Agent Progress Diagnostics
+
+### Change
+- Files touched:
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `app/src/lib/agent/orchestrate.ts`
+  - `docs/DEVLOG-AGENT.md`
+- Summary:
+  - Added `step_ms` and `total_ms` timing fields to orchestration progress logs.
+  - Added ingestion duration logging for each resolved evidence file.
+  - Added logs after audit-pack summary hashing, review/persistence-plan building, web3 persistence preparation, and API response shaping.
+
+### Reasoning
+- Why this approach was chosen:
+  - The PBC smoke appeared to stop at summary/hash logging, but the route may still be spending time in persistence preparation or response shaping.
+  - Timed progress diagnostics make it easier to separate slow model calls, hashing, persistence fallback, and response serialization before introducing a streaming progress API.
+
+### Tech Debt
+- Known shortcuts:
+  - Timings are console diagnostics only and are not returned to the CLI response.
+- Follow-up needed:
+  - Use the timed logs from the next PBC run to decide whether to optimize gap analysis, persistence, response size, or document-analysis concurrency first.

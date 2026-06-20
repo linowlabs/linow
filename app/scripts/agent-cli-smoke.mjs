@@ -1,7 +1,43 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 const baseUrl = process.env.AGENT_BASE_URL || "http://127.0.0.1:3000";
+const agentSmokeTimeoutMs = readPositiveIntegerEnv("AGENT_SMOKE_TIMEOUT_MS") ?? 10 * 60 * 1000;
 const mode = process.argv[2] || "orchestrate";
 const fileArg = process.argv[3];
 const fileArgs = process.argv.slice(3);
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(scriptDir, "../..");
+const isaQ2PackRoot = process.env.ISA_Q2_PACK_ROOT || "demo/isa_q2_engagement";
+const supportedEvidenceExtensions = new Set([
+  ".txt",
+  ".md",
+  ".markdown",
+  ".csv",
+  ".tsv",
+  ".json",
+  ".log",
+  ".xml",
+  ".html",
+  ".htm",
+  ".yml",
+  ".yaml",
+  ".pdf",
+  ".xlsx",
+  ".xls",
+  ".xlsm",
+  ".xlsb",
+  ".docx",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".gif",
+  ".bmp",
+  ".tif",
+  ".tiff",
+]);
 
 const bankStatementDoc = {
   documentName: "13_bank_statement_june_2026.pdf",
@@ -85,6 +121,9 @@ async function main() {
       return;
     case "orchestrate-files":
       await runOrchestrateFiles();
+      return;
+    case "isa-q2-engagement":
+      await runIsaQ2Engagement();
       return;
     case "orchestrate-p2":
       await runOrchestratePointTwo();
@@ -404,13 +443,85 @@ async function runOrchestrateFiles() {
   print("orchestrate-files", result);
 }
 
+async function runIsaQ2Engagement() {
+  const stage = resolveIsaQ2Stage(fileArg);
+  const sourceRoot = stage === "after_remediation" ? "evidence_remediation" : "evidence_initial";
+  const rootPath = `${isaQ2PackRoot}/${sourceRoot}`;
+  const discoveredFiles = await discoverEvidenceFiles(rootPath);
+  const maxDocs = readPositiveIntegerEnv("ISA_Q2_MAX_DOCS") ?? 24;
+  const selectedFiles = discoveredFiles.slice(0, maxDocs);
+
+  if (selectedFiles.length === 0) {
+    throw new Error(
+      [
+        `No supported evidence files found under ${rootPath}.`,
+        "Add PDF/XLSX/DOCX/TXT/CSV/image evidence files to the pack, or use:",
+        "npm run agent:smoke -- orchestrate-files <path> [path...]",
+      ].join(" "),
+    );
+  }
+
+  const documents = selectedFiles.map((filePath) => ({
+    filePath,
+    notes: [`ISA Q2 engagement evidence source ${filePath}`],
+    context: {
+      engagementName: "LINOW-ISA500-Q2REV-2026-ACC",
+      uploaderLabel: "Company Upload (L2)",
+      auditArea: "Revenue recognition and cash receipts",
+      filePath,
+    },
+  }));
+
+  const payload = {
+    provider: process.env.AGENT_PROVIDER || "gemini",
+    response_mode: process.env.ISA_Q2_RESPONSE_MODE || "compact_p2",
+    profile: process.env.ISA_Q2_PROFILE || "cheap",
+    pack_id: process.env.ISA_Q2_PACK_ID || "pack_linow_isa_q2_demo",
+    engagement_name: "LINOW-ISA500-Q2REV-2026-ACC",
+    audit_area: "Revenue recognition and cash receipts",
+    stage,
+    pack_notes: [
+      `Auto-discovered ${selectedFiles.length} evidence file(s) from ${rootPath}.`,
+      "ISA Q2 smoke expects cut-off, approval, source-confidence, and revenue evidence coverage to be assessed conservatively.",
+      "Agent proposes analysis outputs only; human review is required before any chain write.",
+    ],
+    documents,
+  };
+
+  print("isa-q2-engagement.discovery", {
+    provider: payload.provider,
+    profile: payload.profile,
+    response_mode: payload.response_mode,
+    stage,
+    source_root: rootPath,
+    selected_file_count: selectedFiles.length,
+    total_discovered_file_count: discoveredFiles.length,
+    selected_files: selectedFiles,
+  });
+
+  const result = await postJson("/api/agent/orchestrate", payload);
+  print("isa-q2-engagement", result);
+}
+
 async function postJson(path, payload) {
-  const response = await fetch(`${baseUrl}${path}`, {
+  const url = `${baseUrl}${path}`;
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(agentSmokeTimeoutMs),
     method: "POST",
     headers: {
       "content-type": "application/json",
     },
     body: JSON.stringify(payload),
+  }).catch((error) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      [
+        `Could not reach agent API at ${url}: ${reason}.`,
+        `Current smoke timeout is ${agentSmokeTimeoutMs}ms.`,
+        "Start the app server with `cd app && npm run dev`,",
+        "or set AGENT_BASE_URL if Next.js is running on another port.",
+      ].join(" "),
+    );
   });
 
   const body = await response.json().catch(() => ({}));
@@ -452,6 +563,60 @@ function ensureFileArgs(currentMode) {
   if (fileArgs.length === 0) {
     throw new Error(`${currentMode} requires one or more file path arguments.`);
   }
+}
+
+async function discoverEvidenceFiles(rootPath) {
+  const absoluteRoot = path.resolve(repoRoot, rootPath);
+  const files = await walkFiles(absoluteRoot).catch((error) => {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  });
+
+  return files
+    .map((absolutePath) => path.relative(repoRoot, absolutePath))
+    .filter((relativePath) => supportedEvidenceExtensions.has(path.extname(relativePath).toLowerCase()))
+    .filter((relativePath) => !relativePath.includes(`${path.sep}expected_outputs${path.sep}`))
+    .filter((relativePath) => !relativePath.includes(`${path.sep}agent_test_scripts${path.sep}`))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+async function walkFiles(directory) {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const absolutePath = path.join(directory, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...await walkFiles(absolutePath));
+    } else if (entry.isFile()) {
+      files.push(absolutePath);
+    }
+  }
+
+  return files;
+}
+
+function resolveIsaQ2Stage(value) {
+  if (value === "after" || value === "after_remediation" || value === "remediation") {
+    return "after_remediation";
+  }
+
+  return "before_remediation";
+}
+
+function readPositiveIntegerEnv(name) {
+  const value = process.env[name];
+
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 main().catch((error) => {

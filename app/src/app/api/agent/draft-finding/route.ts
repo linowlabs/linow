@@ -7,14 +7,16 @@ import {
   parseCcerFindingToolInput,
 } from "@/lib/agent/draft-finding";
 import { AGENT_CONFIG } from "@/lib/agent/config";
-import { runGroqJsonCompletion } from "@/lib/agent/groq";
+import { resolveAgentProvider, runAgentJsonCompletion } from "@/lib/agent/provider";
 import { parseJsonObjectRequest, toAgentErrorResponse } from "@/lib/agent/http";
 
 export async function POST(request: Request) {
   try {
     const body = await parseJsonObjectRequest(request);
+    const provider = resolveAgentProvider(body.provider);
     const input = parseCcerFindingToolInput(body);
-    const result = await runGroqJsonCompletion({
+    const result = await runAgentJsonCompletion({
+      provider,
       schemaName: AGENT_CONFIG.schemaNames.ccerFinding,
       schema: groqCcerFindingSchema,
       messages: buildCcerFindingMessages(input),
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      provider: "groq",
+      provider: result.provider,
       model: result.model,
       finding: normalizeCcerFindingResult(input, result.result),
       usage: result.usage ?? null,

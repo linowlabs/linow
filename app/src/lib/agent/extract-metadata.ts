@@ -1,6 +1,10 @@
 import {
   AGENT_SCHEMA_VERSION,
   type MetadataExtractionOutput,
+  type AgentCitation,
+  type ExtractedAmount,
+  type ExtractedDate,
+  type ExtractedParty,
   metadataExtractionSchema,
   isMetadataExtractionOutput,
 } from "@/lib/agent/schemas";
@@ -62,7 +66,7 @@ export function isAgentMetadataExtractionResult(value: unknown): value is Metada
 
 export function normalizeMetadataExtractionResult(
   input: AgentDocumentInput,
-  value: MetadataExtractionOutput,
+  value: Partial<MetadataExtractionOutput>,
 ): MetadataExtractionOutput {
   return {
     ...value,
@@ -70,5 +74,128 @@ export function normalizeMetadataExtractionResult(
     schema_version: AGENT_SCHEMA_VERSION,
     document_id: input.documentId,
     filename: input.documentName,
+    document_date: normalizeOptionalString(value.document_date),
+    period_start: normalizeOptionalString(value.period_start),
+    period_end: normalizeOptionalString(value.period_end),
+    document_reference: normalizeOptionalString(value.document_reference),
+    parties: normalizeParties(value.parties),
+    key_dates: normalizeDates(value.key_dates),
+    key_amounts: normalizeAmounts(value.key_amounts),
+    citations: normalizeCitations(input, value.citations),
+    limitations: normalizeStringArray(value.limitations),
   };
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function normalizeParties(value: unknown): ExtractedParty[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.name !== "string" || typeof item.role !== "string") {
+      return [];
+    }
+
+    return [
+      {
+        name: item.name.trim(),
+        role: item.role.trim(),
+        confidence: normalizeConfidence(item.confidence),
+      },
+    ];
+  });
+}
+
+function normalizeDates(value: unknown): ExtractedDate[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.label !== "string" || typeof item.value !== "string") {
+      return [];
+    }
+
+    return [
+      {
+        label: item.label.trim(),
+        value: item.value.trim(),
+        confidence: normalizeConfidence(item.confidence),
+      },
+    ];
+  });
+}
+
+function normalizeAmounts(value: unknown): ExtractedAmount[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.label !== "string") {
+      return [];
+    }
+
+    const amount = typeof item.amount === "number" ? item.amount : Number(String(item.amount ?? "").replace(/[^0-9.-]/g, ""));
+
+    if (!Number.isFinite(amount)) {
+      return [];
+    }
+
+    return [
+      {
+        label: item.label.trim(),
+        amount,
+        currency: typeof item.currency === "string" && item.currency.trim().length > 0 ? item.currency.trim() : null,
+        confidence: normalizeConfidence(item.confidence),
+      },
+    ];
+  });
+}
+
+function normalizeCitations(input: AgentDocumentInput, value: unknown): AgentCitation[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.reference !== "string" || item.reference.trim().length === 0) {
+      return [];
+    }
+
+    const page = typeof item.page === "number" && Number.isInteger(item.page) && item.page >= 1 ? item.page : null;
+
+    return [
+      {
+        document_id: input.documentId,
+        filename: input.documentName,
+        reference: item.reference.trim(),
+        page,
+        confidence: normalizeConfidence(item.confidence),
+      },
+    ];
+  });
+}
+
+function normalizeConfidence(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.5;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

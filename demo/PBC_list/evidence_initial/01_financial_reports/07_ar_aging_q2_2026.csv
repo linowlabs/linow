@@ -1,0 +1,4 @@
+customer,invoice_id,invoice_date,gross_amount_idr,due_date,days_outstanding_at_2026_06_30,aging_bucket,subsequent_cash_received,receipt_date
+PT Orion Mart Tbk,INV-2026-0630,2026-06-30,189810000,2026-07-15,0,Current,158175000,2026-07-08
+PT Bali Fresh Market,INV-2026-0620,2026-06-28,22200000,2026-07-12,2,Current,22200000,2026-07-03
+PT Sentra Farma Nusantara,INV-2026-0624,2026-06-29,16650000,2026-07-13,1,Current,16650000,2026-07-02

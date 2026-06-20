@@ -12,18 +12,15 @@ import {
 import { buildDocumentTypePromptBlock } from "@/lib/agent/document-taxonomy";
 import {
   buildDocumentContextLines,
+  isRecord,
   type AgentDocumentInput,
 } from "@/lib/agent/common";
 import {
-  isAssertionMappingBundle,
   normalizeAssertionMappingBundle,
   type AssertionMappingBundle,
   type AssertionMappingToolInput,
 } from "@/lib/agent/map-assertions";
-import {
-  isAgentMetadataExtractionResult,
-  normalizeMetadataExtractionResult,
-} from "@/lib/agent/extract-metadata";
+import { normalizeMetadataExtractionResult } from "@/lib/agent/extract-metadata";
 
 interface GroqDocumentAnalysisBundle {
   classification: Parameters<typeof normalizeClassificationResult>[1];
@@ -273,16 +270,14 @@ export function buildDocumentAnalysisMessages(input: AgentDocumentInput) {
 }
 
 export function isGroqDocumentAnalysisBundle(value: unknown): value is GroqDocumentAnalysisBundle {
-  if (typeof value !== "object" || value === null) {
+  if (!isRecord(value)) {
     return false;
   }
 
-  const candidate = value as Record<string, unknown>;
-
   return (
-    isAgentClassificationResult(candidate.classification) &&
-    isAgentMetadataExtractionResult(candidate.metadata) &&
-    isAssertionMappingBundle(candidate.assertion_bundle)
+    isAgentClassificationResult(value.classification) &&
+    isMetadataDraft(value.metadata) &&
+    isAssertionBundleDraft(value.assertion_bundle)
   );
 }
 
@@ -315,6 +310,20 @@ export function normalizeDocumentAnalysisBundle(
     metadata,
     assertion_bundle: assertionBundle,
   };
+}
+
+function isMetadataDraft(value: unknown): value is MetadataExtractionOutput {
+  return isRecord(value) && value.schema_name === "metadata_extraction";
+}
+
+function isAssertionBundleDraft(value: unknown): value is AssertionMappingBundle {
+  return (
+    isRecord(value) &&
+    isRecord(value.assertion_mapping) &&
+    isRecord(value.source_confidence) &&
+    value.assertion_mapping.schema_name === "assertion_mapping" &&
+    value.source_confidence.schema_name === "source_confidence"
+  );
 }
 
 function buildMetadataSummary(metadata: MetadataExtractionOutput): string {

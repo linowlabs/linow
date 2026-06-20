@@ -1,0 +1,13 @@
+From: Finance Controller <controller@arunika.example>
+To: CFO <cfo@arunika.example>
+Date: 2026-06-30 19:42
+Subject: Q2 Revenue Close - Orion manual adjustment
+
+We booked the Orion manual adjustment JRN-2026-06-117 for IDR 72,000,000 based on UAT sign-off and delivery readiness.
+
+Known open items:
+- Commercial Committee minutes need to be attached for Orion because the contract value exceeds the approval threshold.
+- CFO approval for the manual revenue adjustment needs to be attached before the audit pack is final.
+- Production go-live is recorded for 2026-07-02, so we should expect the auditor to ask about cut-off.
+
+This email is company-prepared support only and should not be treated as independent confirmation.

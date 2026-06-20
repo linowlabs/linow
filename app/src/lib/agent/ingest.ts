@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import mammoth from "mammoth";
@@ -19,6 +20,7 @@ export interface IngestedEvidenceFile {
     | "pdf"
     | "spreadsheet"
     | "docx"
+    | "image"
     | "unsupported";
   text: string;
   byteLength: number;
@@ -44,12 +46,38 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"]);
+const browserUploadRoot = path.resolve(os.tmpdir(), "linow-agent-browser-uploads");
 
 export async function ingestEvidenceFile(filePath: string): Promise<IngestedEvidenceFile> {
   const absolutePath = resolveEvidencePath(filePath);
   const fileBuffer = await fs.readFile(absolutePath);
-  const extension = path.extname(absolutePath).toLowerCase();
-  const filename = path.basename(absolutePath);
+  return ingestEvidenceBuffer(path.basename(absolutePath), fileBuffer, {
+    absolutePath,
+    relativePath: path.relative(repoRoot, absolutePath),
+  });
+}
+
+export async function stageBrowserEvidenceFile(input: {
+  filename: string;
+  bytes: Uint8Array;
+}): Promise<IngestedEvidenceFile> {
+  const safeName = sanitizeFilename(input.filename);
+  const absolutePath = path.join(browserUploadRoot, `${randomUUID()}-${safeName}`);
+  await fs.mkdir(browserUploadRoot, { recursive: true });
+  await fs.writeFile(absolutePath, input.bytes);
+
+  return ingestEvidenceBuffer(safeName, Buffer.from(input.bytes), {
+    absolutePath,
+    relativePath: path.relative(repoRoot, absolutePath),
+  });
+}
+
+async function ingestEvidenceBuffer(
+  filename: string,
+  fileBuffer: Buffer,
+  location: { absolutePath: string; relativePath: string },
+): Promise<IngestedEvidenceFile> {
+  const extension = path.extname(filename).toLowerCase();
 
   let format: IngestedEvidenceFile["format"];
   let text = "";
@@ -57,7 +85,7 @@ export async function ingestEvidenceFile(filePath: string): Promise<IngestedEvid
 
   if (TEXT_EXTENSIONS.has(extension)) {
     format = inferTextFormat(extension);
-    text = await fs.readFile(absolutePath, "utf8");
+    text = fileBuffer.toString("utf8");
   } else if (extension === ".pdf") {
     format = "pdf";
     ({ text, warnings } = await extractPdfText(fileBuffer));
@@ -68,12 +96,11 @@ export async function ingestEvidenceFile(filePath: string): Promise<IngestedEvid
     format = "docx";
     ({ text, warnings } = await extractDocxText(fileBuffer));
   } else if (IMAGE_EXTENSIONS.has(extension)) {
-    format = "unsupported";
+    format = "image";
     warnings = [
-      "Image OCR is not enabled in the current cheap-mode ingestion path.",
-      "Provide extracted text or convert the image content into PDF/TXT if the agent must analyze it now.",
+      "Image text is not extracted locally. Gemini provider can analyze this file as an inline image attachment.",
     ];
-    text = `Unsupported image evidence file: ${filename}. OCR is not enabled in the current ingestion pipeline.`;
+    text = `Image evidence file: ${filename}. Use the attached image content for OCR and visual evidence analysis when available.`;
   } else {
     format = "unsupported";
     warnings = [
@@ -84,8 +111,8 @@ export async function ingestEvidenceFile(filePath: string): Promise<IngestedEvid
   }
 
   return {
-    absolutePath,
-    relativePath: path.relative(repoRoot, absolutePath),
+    absolutePath: location.absolutePath,
+    relativePath: location.relativePath,
     filename,
     extension,
     format,
@@ -103,6 +130,12 @@ function resolveEvidencePath(filePath: string): string {
   }
 
   return candidate;
+}
+
+function sanitizeFilename(value: string): string {
+  const trimmed = value.trim();
+  const cleaned = trimmed.replace(/[^\w.\-]+/g, "_");
+  return cleaned.length > 0 ? cleaned : "browser_upload.bin";
 }
 
 function inferTextFormat(extension: string): IngestedEvidenceFile["format"] {
