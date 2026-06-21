@@ -590,7 +590,7 @@
 ### Reasoning
 - Why this approach was chosen:
   - Dark-mode glassmorphism matches the main workspace design system, making the app feel unified and professional.
-  - Creative layouts inspired by `getmodern.ai` and `cofounder.co` improve readability and help show the product value at a glance.
+  - Creative layouts inspired by `getmodern.ai` and other modern reference designs improve readability and help show the product value at a glance.
   - Thin border detailing provides a high-end, high-precision technical feel without relying on distracting colors.
 
 ### Tech Debt
@@ -608,7 +608,7 @@
   - `app/src/app/landing.css`
   - `docs/DEVLOG-APP.md`
 - Summary:
-  - Transitioned the landing page styling to a warm, clean light-mode canvas (`#faf9f6`), aligning with getmodern.ai and cofounder.co.
+  - Transitioned the landing page styling to a warm, clean light-mode canvas (`#faf9f6`), aligning with getmodern.ai and other modern reference layouts.
   - Configured the background placeholder to point to the newly added `/hero.png` asset.
   - Imported and integrated Google's Geist Sans (`Geist`) font as the primary sans-serif font family of the application.
   - Overhauled styles for the mock browser preview, isometric 3D scroll layers, Source Confidence columns, and comparative grids to utilize light glassmorphism and high-contrast dark slate typography.
@@ -1586,6 +1586,65 @@
   - None.
 - Follow-up needed:
   - None.
+## 2026-06-21 — Landing Page Copywriting Update
 
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+- Summary:
+  - Overhauled all landing page copywriting to eliminate generic AI jargon and adopt a punchy, active, pain-point-driven tone inspired by modern SaaS landings.
+  - Updated the Hero Title to "Linow lets you run continuous pre-audits with co-auditor agents".
+  - Updated the Hero Subtitle to emphasize client key control, local browser co-auditor processing, and on-chain verification.
+  - Rewrote the Meet Section headline to address real-world frustrations: "Stop hunting down bank statements and contract PDFs...".
+  - Simplified the Pipeline step-by-step description and column/card titles to focus on clear, concrete actions (Local Mapping, Secure Storage, Ledger Anchor, Auditor Review).
+  - Rewrote the Autonomous Compliance Loop copy and Hexagonal Trust Web benefits to focus on user-centric value and direct benefits.
+  - Strictly followed `AGENTS.md` guidelines, ensuring the "Agent proposes, human signs, chain proves" framing remains intact.
 
+### Reasoning
+- Why this approach was chosen:
+  - The previous copywriting sounded like clinical "AI slop" filled with abstract Web3/AI buzzwords.
+  - A benefit-oriented, direct style helps developers and companies understand the product's immediate utility.
+
+### Tech Debt
+- Known shortcuts:
+  - None. All text replacements are direct JSX updates.
+
+## 2026-06-21 — Meet Eyebrow, Hero Blend, and Branding Update
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/layout.tsx`
+  - `app/src/app/workspace/page.tsx`
+  - `app/src/app/landing.css`
+  - `app/next.config.ts`
+- Summary:
+  - Removed "Agent Co-Auditor" eyebrow from the Meet section in `page.tsx`.
+  - Added `.landing-hero::after` pseudo-element and custom gradient configurations in `landing.css` to blend the bottom edge of the scenic background image seamlessly into the off-white page background, eliminating the hard line.
+  - Linked the tab icon and navigation, topbar, and footer branding logos to `/icon.png` (built dynamically at initialization from `app/src/app/icon.png` via Node copy rules in `next.config.ts`).
+  - Retained `mascot.png` for the Trust Ledger central hub.
+  - Integrated an icon-only X link (`https://x.com/linow_ai`) in the footer on the right, and repositioned the copyright text block to the left side directly next to the brand logo.
+  - Disabled all "Launch Workspace" CTA buttons on the landing page (navbar, hero, and bottom CTA card) by switching them to disabled buttons marked with the text "Coming soon" and disabled styling.
+
+### Reasoning
+- Why this approach was chosen:
+  - Pseudo-element gradient overlays avoid browser-specific scaling edge alignment/subpixel rendering problems.
+  - Auto-syncing `icon.png` at configuration startup avoids build-time asset directory configuration problems across environments.
+
+## 2026-06-21 — Refine Coming Soon Buttons legibility
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Enhanced all "Coming soon" buttons (navbar, hero, and bottom CTA card) on the landing page to use full opacity (`opacity: 1`) instead of the previous transparent/washed-out style (`opacity: 0.75`).
+  - Muted the text color slightly to keep a refined, non-distracting disabled look (`rgba(9, 13, 22, 0.65)` on light states / `rgba(255, 255, 255, 0.8)` on dark states).
+  - Kept button style clean by removing padlock/lock SVG icons.
+
+### Reasoning
+- Why this approach was chosen:
+  - Keeping buttons at full opacity (`opacity: 1`) while slightly muting the text color provides clean readability and prevents a washed-out appearance.
+  - Removing lock icons maintains a cleaner, more text-focused design that matches the minimalist landing page aesthetics.
 
