@@ -91,8 +91,10 @@ export default function PreviewPane({ selectedPbcId, pbcList, selectedFolder }: 
   const renderPreviewCanvas = () => {
     if (!activeFile) {
       return (
-        <div className="pdf-page empty-state" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-          <p className="text-sm text-muted">Select a file from the explorer to preview</p>
+        <div className="pdf-page empty-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '8px', padding: '20px', textAlign: 'center' }}>
+          <span style={{ fontSize: '32px' }}>📄</span>
+          <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', fontWeight: 600 }}>You have not chosen any file to preview</p>
+          <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', maxWidth: '280px', margin: 0 }}>Please select a document from the File Directory or upload new evidence to inspect details.</p>
         </div>
       );
     }

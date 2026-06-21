@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   createRegisterEvidenceFlow,
   createAttestationFlow,
@@ -75,23 +75,12 @@ export default function WorkspaceDemo() {
   const [syncStatus, setSyncStatus] = useState<string>("Not connected to Supabase");
 
   // Dynamic folder paths
-  const [folders, setFolders] = useState<string[]>([
-    "contracts",
-    "demo",
-    "demo/PBC_list",
-    "demo/PBC_list/agent_test_scripts",
-    "demo/PBC_list/audit_docs",
-    "demo/PBC_list/evidence_initial",
-    "demo/PBC_list/evidence_initial/01_financial_reports",
-    "demo/PBC_list/evidence_initial/02_contracts_invoices",
-    "demo/PBC_list/evidence_initial/03_delivery_cutoff",
-    "demo/PBC_list/evidence_initial/04_bank_cash_receipts",
-  ]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [isAddDocumentModalOpen, setIsAddDocumentModalOpen] = useState(false);
 
   // Company PBC List
-  const [pbcList, setPbcList] = useState<PbcItem[]>(DEFAULT_COMPANY_PBC);
-  const [selectedPbcId, setSelectedPbcId] = useState("pbc-orion-contract");
+  const [pbcList, setPbcList] = useState<PbcItem[]>([]);
+  const [selectedPbcId, setSelectedPbcId] = useState("");
   const [pbcRegisteredData, setPbcRegisteredData] = useState<Record<string, RegisterResult>>({
     "pbc-invoice-batch": {
       objectId: "0x9ac2849e7dd55a12b234d98a7c1b52a30f9e41f0",
@@ -119,20 +108,9 @@ export default function WorkspaceDemo() {
   const [reviewAssertions, setReviewAssertions] = useState<string[]>([]);
 
   // Folder tree open states
-  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({
-    "contracts": false,
-    "demo": true,
-    "demo/PBC_list": true,
-    "demo/PBC_list/agent_test_scripts": false,
-    "demo/PBC_list/audit_docs": false,
-    "demo/PBC_list/evidence_initial": true,
-    "demo/PBC_list/evidence_initial/01_financial_reports": false,
-    "demo/PBC_list/evidence_initial/02_contracts_invoices": true,
-    "demo/PBC_list/evidence_initial/03_delivery_cutoff": false,
-    "demo/PBC_list/evidence_initial/04_bank_cash_receipts": false,
-  });
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
-  const [selectedFolder, setSelectedFolder] = useState<string>("demo/PBC_list/evidence_initial/02_contracts_invoices");
+  const [selectedFolder, setSelectedFolder] = useState<string>("");
 
   // Panel sizing & expand state
   const [isPbcExpanded, setIsPbcExpanded] = useState(true);
@@ -142,14 +120,40 @@ export default function WorkspaceDemo() {
 
   // Chat & Sandbox Activity state
   const [agentStep, setAgentStep] = useState(0); 
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([
-    { title: "Coverage check", desc: "4 of 7 required docs found", status: "done" },
-    { title: "Classifying contract", desc: "Matching ISA assertions", status: "running" },
-  ]);
+  const [activityLogsState, setActivityLogsState] = useState<ActivityLog[]>([]);
+  
+  const updateInlineActivityLogs = (logs: ActivityLog[]) => {
+    if (logs.length === 0) return;
+    setChatLog(prev => {
+      const lastMsg = prev[prev.length - 1];
+      if (lastMsg && lastMsg.sender === "activity") {
+        return prev.map((msg, index) => {
+          if (index === prev.length - 1) {
+            return { ...msg, activityLogs: logs };
+          }
+          return msg;
+        });
+      } else {
+        return [...prev, { id: generateId(), sender: "activity", text: "", activityLogs: logs }];
+      }
+    });
+  };
+
+  const setActivityLogs = (val: React.SetStateAction<ActivityLog[]>) => {
+    setActivityLogsState(prev => {
+      const nextLogs = typeof val === "function" ? val(prev) : val;
+      updateInlineActivityLogs(nextLogs);
+      return nextLogs;
+    });
+  };
+
+  const activityLogs = activityLogsState;
   const [chatInput, setChatInput] = useState("");
   const [chatLog, setChatLog] = useState<ChatLogItem[]>([
-    { sender: "agent", text: "Welcome to Linow Agent Sandbox. I am ready to help classify your documents for the Q2 2026 engagement." }
+    { sender: "agent", text: "Welcome to Linow Agent Sandbox! I am your AI compliance assistant. To begin, click \"+ Add document\" or create a folder in the File Directory panel to upload your compliance evidence. Once uploaded, I will automatically scan and verify your documents on Walrus and Sui." }
   ]);
+  const [isAgentThinking, setIsAgentThinking] = useState(false);
+  const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Auditor Findings State
   const [auditorFindings, setAuditorFindings] = useState<Finding[]>([
@@ -168,7 +172,8 @@ export default function WorkspaceDemo() {
 
   // Agent permission dialog state
   const [permissionChoice, setPermissionChoice] = useState<"allow" | "always" | "no">("allow");
-  const [permissionSubmitted, setPermissionSubmitted] = useState(false);
+  const [permissionSubmitted, setPermissionSubmitted] = useState(true);
+  const [permissionFileName, setPermissionFileName] = useState("");
 
   const registeredCount = useMemo(() => {
     return pbcList.filter(p => p.status === "registered" || pbcRegisteredData[p.id]).length;
@@ -186,6 +191,174 @@ export default function WorkspaceDemo() {
       loadSyncEngagement(paramEngId);
     }
   }, []);
+
+  const streamChatResponse = (text: string, callback?: () => void) => {
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+    }
+
+    setIsAgentThinking(false);
+    
+    const bubbleId = generateId();
+    // Add empty bubble for streaming response
+    setChatLog(prev => [...prev, { id: bubbleId, sender: "agent", text: "" }]);
+    
+    const words = text.split(" ");
+    let wordIndex = 0;
+    
+    streamIntervalRef.current = setInterval(() => {
+      if (wordIndex >= words.length) {
+        if (streamIntervalRef.current) {
+          clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = null;
+        }
+        if (callback) callback();
+        return;
+      }
+      
+      const nextWord = words[wordIndex];
+      setChatLog(prev => {
+        return prev.map((msg) => {
+          if (msg.id === bubbleId) {
+            return {
+              ...msg,
+              text: msg.text ? msg.text + " " + nextWord : nextWord
+            };
+          }
+          return msg;
+        });
+      });
+      
+      wordIndex++;
+    }, 90);
+  };
+
+  // Cleanup stream intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Listen for permission submission in Phase 3
+  useEffect(() => {
+    if (agentStep === 3 && permissionSubmitted) {
+      // User submitted the permission!
+      setIsAgentThinking(true);
+
+      setActivityLogs([
+        { title: "Updating checklist matrix", desc: "Syncing verified assertions...", status: "running" }
+      ]);
+
+      const t1 = setTimeout(() => {
+        setActivityLogs([
+          { title: "Updating checklist matrix", desc: "Syncing verified assertions...", status: "done" },
+          { title: "Ledger commit", desc: "Writing transaction to Sui ledger...", status: "running" }
+        ]);
+
+        const t2 = setTimeout(() => {
+          setActivityLogs([
+            { title: "Updating checklist matrix", desc: "Syncing verified assertions...", status: "done" },
+            { title: "Ledger commit", desc: "Writing transaction to Sui ledger...", status: "done" },
+            { title: "Attestation check", desc: "Awaiting Walrus attestation confirmation...", status: "running" }
+          ]);
+
+          const t3 = setTimeout(() => {
+            setActivityLogs([
+              { title: "Updating checklist matrix", desc: "Syncing verified assertions...", status: "done" },
+              { title: "Ledger commit", desc: "Writing transaction to Sui ledger...", status: "done" },
+              { title: "Attestation check", desc: "Walrus attestation confirmed.", status: "done" },
+              { title: "Matrix status update", desc: "100% completeness updated.", status: "done" }
+            ]);
+
+            // Register the contract file in the PBC list
+            setPbcList(currentList =>
+              currentList.map(item => {
+                if (item.name.toLowerCase().includes("contract_04") || item.name.toLowerCase().includes("contract-04")) {
+                  return { ...item, status: "registered" as const, analyzed: true, agentTag: "Verified Revenue Evidence" };
+                }
+                return item;
+              })
+            );
+
+            const replyText = `Action completed. I have updated your matrix and the completeness status for this revenue stream is now 100% green.
+
+However, while reading the commercial terms in that same contract, I detected another specific clause: **'Contracts above IDR 750,000,000 require Commercial Committee approval before revenue recognition.'**
+
+Since this contract is IDR 855,000,000, we need the signed committee approval sheet to prevent a potential valuation risk. Do I have your permission to create a new pending task in your workspace to track this specific document?`;
+
+            setTimeout(() => {
+              streamChatResponse(replyText, () => {
+                setAgentStep(4);
+              });
+            }, 500);
+          }, 2400); // 2400ms
+        }, 2300); // 2300ms
+      }, 2300); // 2300ms
+
+      return () => {
+        clearTimeout(t1);
+      };
+    }
+  }, [permissionSubmitted, agentStep]);
+
+  // Listen for bank reconciliation permission submission in Step 6
+  useEffect(() => {
+    if (agentStep === 6 && permissionSubmitted) {
+      setIsAgentThinking(true);
+
+      setActivityLogs([
+        { title: "Registering on-chain proof", desc: "Generating Zero-Knowledge statement proof...", status: "running" }
+      ]);
+
+      const t1 = setTimeout(() => {
+        setActivityLogs([
+          { title: "Registering on-chain proof", desc: "Generating Zero-Knowledge statement proof...", status: "done" },
+          { title: "Ledger commit", desc: "Writing bank reconciliation to Sui registry...", status: "running" }
+        ]);
+
+        const t2 = setTimeout(() => {
+          setActivityLogs([
+            { title: "Registering on-chain proof", desc: "Generating Zero-Knowledge statement proof...", status: "done" },
+            { title: "Ledger commit", desc: "Writing bank reconciliation to Sui registry...", status: "done" },
+            { title: "Awaiting Walrus attestation", desc: "Storing reconciliation proof...", status: "running" }
+          ]);
+
+          const t3 = setTimeout(() => {
+            setActivityLogs([
+              { title: "Registering on-chain proof", desc: "Generating ZK proof...", status: "done" },
+              { title: "Ledger commit", desc: "Bank reconciliation registered on Sui.", status: "done" },
+              { title: "Awaiting Walrus attestation", desc: "Walrus attestation confirmed.", status: "done" }
+            ]);
+
+            // Register bank statements in PBC list
+            setPbcList(currentList =>
+              currentList.map(item => {
+                if (item.name === "Bank_statement_Q2.pdf" || item.name === "Bank_reconciliation_June.xlsx") {
+                  return { ...item, status: "registered" as const, analyzed: true, agentTag: "Reconciliation Evidence" };
+                }
+                return item;
+              })
+            );
+
+            const replyText = `Reconciliation evidence registered. The registry has been updated. Is there anything else you'd like me to summarize?`;
+
+            setTimeout(() => {
+              streamChatResponse(replyText, () => {
+                setAgentStep(7);
+              });
+            }, 500);
+          }, 2400);
+        }, 2300);
+      }, 2300);
+
+      return () => {
+        clearTimeout(t1);
+      };
+    }
+  }, [permissionSubmitted, agentStep]);
 
   const loadSyncEngagement = async (id: string) => {
     try {
@@ -277,22 +450,691 @@ export default function WorkspaceDemo() {
     setIsAddDocumentModalOpen(true);
   };
 
+  const triggerStep1Scan = () => {
+    // If workspace is empty, populate mock files to make sure the user can run the scenario successfully!
+    if (pbcList.length === 0) {
+      const defaultDocs: PbcItem[] = [
+        { id: "pbc-1", name: "General_Ledger_2026.xlsx", folder: "", size: "1.2 MB", status: "unregistered", type: "excel", analyzed: false },
+        { id: "pbc-2", name: "Balance_Sheet_Q2.pdf", folder: "", size: "450 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-3", name: "Sales_contract_01.pdf", folder: "", size: "820 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-4", name: "Sales_contract_02.pdf", folder: "", size: "680 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-5", name: "Sales_contract_03.pdf", folder: "", size: "710 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-6", name: "Sales_invoice_INV-2026-001.pdf", folder: "", size: "120 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-7", name: "Sales_invoice_INV-2026-002.pdf", folder: "", size: "140 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-8", name: "Sales_invoice_INV-2026-003.pdf", folder: "", size: "115 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-9", name: "Sales_invoice_INV-2026-004.pdf", folder: "", size: "130 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-10", name: "Bank_statement_Q2.pdf", folder: "", size: "980 KB", status: "unregistered", type: "pdf", analyzed: false },
+        { id: "pbc-11", name: "Bank_reconciliation_June.xlsx", folder: "", size: "320 KB", status: "unregistered", type: "excel", analyzed: false }
+      ];
+      setPbcList(defaultDocs);
+    }
+
+    setIsAgentThinking(true);
+
+    setTimeout(() => {
+      streamChatResponse("Sure, I can do that for you right away. Let me look through the files in the directory.", () => {
+        // T0: Start scanning
+        setActivityLogs([
+          { title: "Processing financial files", desc: "Reading directories...", status: "running" },
+          { title: "Categorizing taxonomy", desc: "Matching file headers...", status: "queued" },
+          { title: "Structuring folder directory", desc: "Organizing workspace...", status: "queued" }
+        ]);
+
+        // T1: 4000ms
+        setTimeout(() => {
+          setActivityLogs([
+            { title: "Processing financial files", desc: "Successfully read all uploaded files.", status: "done" },
+            {
+              title: "Categorizing taxonomy",
+              desc: "Classifying documents...",
+              status: "running",
+              subCards: [
+                { title: "Read metadata & headers", status: "done" },
+                { title: "Classify document types", status: "running" }
+              ]
+            },
+            { title: "Structuring folder directory", desc: "Organizing workspace...", status: "queued" }
+          ]);
+
+          // T2: 8000ms
+          setTimeout(() => {
+            setActivityLogs([
+              { title: "Processing financial files", desc: "Successfully read all uploaded files.", status: "done" },
+              {
+                title: "Categorizing taxonomy",
+                desc: "All files successfully classified.",
+                status: "done",
+                subCards: [
+                  { title: "Read metadata & headers", status: "done" },
+                  { title: "Classify document types", status: "done" }
+                ]
+              },
+              {
+                title: "Structuring folder directory",
+                desc: "Creating folder groups...",
+                status: "running",
+                subCards: [
+                  { title: "Create directories", status: "running" }
+                ]
+              }
+            ]);
+
+            // T3: 12500ms
+            setTimeout(() => {
+              // Actually create folders and move files!
+              const newFolders = ["01_financial_reports", "02_customer_contracts", "03_bank_statements"];
+              setFolders(newFolders);
+              setPbcList(currentList => currentList.map(item => {
+                const name = item.name.toLowerCase();
+                let targetFolder = "";
+                let tag = "General";
+                if (name.includes("ledger") || name.includes("balance") || name.includes("report") || name.includes("sheet") || name.includes("financial")) {
+                  targetFolder = "01_financial_reports";
+                  tag = "Financial Report";
+                } else if (name.includes("contract") || name.includes("invoice") || name.includes("sales") || name.includes("orion") || name.includes("agreement")) {
+                  targetFolder = "02_customer_contracts";
+                  tag = "Sales & Customer";
+                } else if (name.includes("bank") || name.includes("statement") || name.includes("reconciliation") || name.includes("rec")) {
+                  targetFolder = "03_bank_statements";
+                  tag = "Reconciliation";
+                } else {
+                  targetFolder = "01_financial_reports";
+                  tag = "Financial Report";
+                }
+                return {
+                  ...item,
+                  folder: targetFolder,
+                  analyzed: true,
+                  agentTag: tag,
+                  agentAssertions: tag === "Sales & Customer" ? ["Occurrence", "Accuracy"] : ["Completeness"]
+                };
+              }));
+
+              setOpenFolders({
+                "01_financial_reports": true,
+                "02_customer_contracts": true,
+                "03_bank_statements": true
+              });
+
+              setActivityLogs([
+                { title: "Processing financial files", desc: "Successfully read all uploaded files.", status: "done" },
+                {
+                  title: "Categorizing taxonomy",
+                  desc: "All files successfully classified.",
+                  status: "done",
+                  subCards: [
+                    { title: "Read metadata & headers", status: "done" },
+                    { title: "Classify document types", status: "done" }
+                  ]
+                },
+                {
+                  title: "Structuring folder directory",
+                  desc: "Folders created and sorted.",
+                  status: "done",
+                  subCards: [
+                    { title: "Create directories", status: "done" },
+                    { title: "Move files to target folders", status: "done" }
+                  ]
+                }
+              ]);
+
+              const replyText = `All done. I found 3 main groups of documents in your file and organized them into your directory:
+• **01_financial_reports**: Mapped your Year-End Balance Sheets and General Ledger.
+• **02_customer_contracts**: Sorted 5 customer contracts and their corresponding sales invoices.
+• **03_bank_statements**: Organized your bank statements and monthly reconciliation files.
+
+Where should we go next? I can start analyzing these files if you want.`;
+
+              setTimeout(() => {
+                streamChatResponse(replyText, () => {
+                  setAgentStep(1);
+                });
+              }, 500);
+            }, 4500);
+          }, 4000);
+        }, 4000);
+      });
+    }, 800);
+  };
+
+  const triggerStep2Find = () => {
+    setIsAgentThinking(true);
+    setTimeout(() => {
+      streamChatResponse("Let me check the `02_customer_contracts` folder to review contracts vs sales invoices.", () => {
+        // T0: Start analysis
+        setActivityLogs([
+          {
+            title: "Analyzing contracts and invoices",
+            desc: "Checking invoice-to-contract matches...",
+            status: "running",
+            subCards: [
+              { title: "Verify Sales Invoice 1 vs Contract 1", status: "running" },
+              { title: "Verify Sales Invoice 2 vs Contract 2", status: "queued" },
+              { title: "Verify Sales Invoice 3 vs Contract 3", status: "queued" },
+              { title: "Verify Sales Invoice 4 vs Contract 4", status: "queued" }
+            ]
+          }
+        ]);
+
+        // T1: 4000ms
+        setTimeout(() => {
+          setActivityLogs([
+            {
+              title: "Analyzing contracts and invoices",
+              desc: "Checking invoice-to-contract matches...",
+              status: "running",
+              subCards: [
+                { title: "Verify Sales Invoice 1 vs Contract 1", status: "done" },
+                { title: "Verify Sales Invoice 2 vs Contract 2", status: "done" },
+                { title: "Verify Sales Invoice 3 vs Contract 3", status: "running" },
+                { title: "Verify Sales Invoice 4 vs Contract 4", status: "queued" }
+              ]
+            }
+          ]);
+
+          // T2: 8000ms
+          setTimeout(() => {
+            setActivityLogs([
+              {
+                title: "Analyzing contracts and invoices",
+                desc: "Checking invoice-to-contract matches...",
+                status: "running",
+                subCards: [
+                  { title: "Verify Sales Invoice 1 vs Contract 1", status: "done" },
+                  { title: "Verify Sales Invoice 2 vs Contract 2", status: "done" },
+                  { title: "Verify Sales Invoice 3 vs Contract 3", status: "done" },
+                  { title: "Verify Sales Invoice 4 vs Contract 4", status: "running" }
+                ]
+              }
+            ]);
+
+            // T3: 12500ms
+            setTimeout(() => {
+              setActivityLogs([
+                {
+                  title: "Analyzing contracts and invoices",
+                  desc: "Gap detected: INV-2026-004 has no contract.",
+                  status: "done",
+                  subCards: [
+                    { title: "Verify Sales Invoice 1 vs Contract 1", status: "done" },
+                    { title: "Verify Sales Invoice 2 vs Contract 2", status: "done" },
+                    { title: "Verify Sales Invoice 3 vs Contract 3", status: "done" },
+                    { title: "Verify Sales Invoice 4 vs Contract 4: Missing Contract Gap", status: "running" }
+                  ]
+                }
+              ]);
+
+              const replyText = `I just finished reviewing the files in the **02_customer_contracts** folder. I noticed that you have 4 major sales invoices listed, but I can only find 3 corresponding signed customer contracts in the directory.
+
+Based on standard audit compliance, this creates a gap in your Completeness check, because every recognized revenue invoice should have a matching contract as supporting Evidence. Please upload the missing contract (\`Sales_contract_04.pdf\`).`;
+
+              setTimeout(() => {
+                streamChatResponse(replyText, () => {
+                  setAgentStep(2);
+                });
+              }, 500);
+            }, 4500);
+          }, 4000);
+        }, 4000);
+      });
+    }, 800);
+  };
+
+  const triggerContractUploadAndAnalysis = (uploadedFileName?: string) => {
+    const fileName = uploadedFileName || "Sales_contract_04.pdf";
+
+    // Add Sales_contract_04.pdf if it doesn't exist in pbcList
+    setPbcList(currentList => {
+      const exists = currentList.some(p => p.name === fileName);
+      if (exists) return currentList;
+
+      return [
+        ...currentList,
+        {
+          id: `pbc-contract-04-${Math.random().toString(36).substring(2)}`,
+          name: fileName,
+          size: "850 KB",
+          status: "unregistered",
+          type: "pdf",
+          folder: "02_customer_contracts",
+          analyzed: false
+        }
+      ];
+    });
+
+    setIsAgentThinking(true);
+
+    streamChatResponse(`Got it, I see the new file. Let me analyze the contents of **${fileName}** real quick to make sure it matches our missing gap.`, () => {
+      // T0: Start analysis
+      setActivityLogs([
+        { title: "Re-scanning folder content", desc: "Checking file system...", status: "running" }
+      ]);
+
+      // T1: 4000ms
+      setTimeout(() => {
+        setActivityLogs([
+          { title: "Re-scanning folder content", desc: "File folder scan completed.", status: "done" },
+          {
+            title: "Extracting clauses & cross-referencing",
+            desc: "Reading document clauses...",
+            status: "running",
+            subCards: [
+              { title: "Read commercial terms", status: "running" },
+              { title: "Verify PT Orion Mart Tbk match", status: "queued" },
+              { title: "Confirm contract value IDR 855,000,000", status: "queued" }
+            ]
+          }
+        ]);
+
+        // T2: 8000ms
+        setTimeout(() => {
+          setActivityLogs([
+            { title: "Re-scanning folder content", desc: "File folder scan completed.", status: "done" },
+            {
+              title: "Extracting clauses & cross-referencing",
+              desc: "Reading document clauses...",
+              status: "running",
+              subCards: [
+                { title: "Read commercial terms", status: "done" },
+                { title: "Verify PT Orion Mart Tbk match", status: "running" },
+                { title: "Confirm contract value IDR 855,000,000", status: "queued" }
+              ]
+            }
+          ]);
+
+          // T3: 12500ms
+          setTimeout(() => {
+            setActivityLogs([
+              { title: "Re-scanning folder content", desc: "File folder scan completed.", status: "done" },
+              {
+                title: "Extracting clauses & cross-referencing",
+                desc: "Extraction and matching complete.",
+                status: "done",
+                subCards: [
+                  { title: "Read commercial terms", status: "done" },
+                  { title: "Verify PT Orion Mart Tbk match", status: "done" },
+                  { title: "Confirm contract value IDR 855,000,000", status: "done" }
+                ]
+              }
+            ]);
+
+            const replyText = `I have finished reading the clauses inside **${fileName}**. Here is what I found:
+1. The document is a signed agreement with PT Orion Mart Tbk dated March 28, 2026.
+2. The total contract value is exactly IDR 855,000,000.
+
+When I cross-referenced this with your invoice folder, the numbers and dates perfectly matched your 4th invoice (INV-2026-004). Mathematically and legally, this fulfills the Accuracy and Occurrence requirements.
+
+Since this completes the missing link for your revenue check, I need your permission to take the next action. Would you like me to officially tag this file as verified Evidence and link it directly to your Completeness compliance checklist?`;
+
+            setTimeout(() => {
+              streamChatResponse(replyText, () => {
+                // Trigger permission popup
+                setPermissionFileName(fileName);
+                setPermissionChoice("allow");
+                setPermissionSubmitted(false);
+
+                setAgentStep(3);
+              });
+            }, 500);
+          }, 4500);
+        }, 4000);
+      }, 4000);
+    });
+  };
+
+  const triggerStep5Good = () => {
+    setIsAgentThinking(true);
+    streamChatResponse("Understood. I will proceed with generating the recommendation and drafting the board task...", () => {
+      // T0: Start analysis
+      setActivityLogs([
+        { title: "Generating task details", desc: "Analyzing commercial clause threshold...", status: "running" }
+      ]);
+
+      // T1: 4000ms
+      setTimeout(() => {
+        setActivityLogs([
+          { title: "Generating task details", desc: "Analyzing commercial clause threshold...", status: "done" },
+          { title: "Drafting recommendation", desc: "Drafting recommendation action items...", status: "running" }
+        ]);
+
+        // T2: 8000ms
+        setTimeout(() => {
+          setActivityLogs([
+            { title: "Generating task details", desc: "Analyzing commercial clause threshold...", status: "done" },
+            { title: "Drafting recommendation", desc: "Drafting recommendation action items...", status: "done" },
+            { title: "Registering ticket", desc: "Registering compliance board ticket...", status: "running" }
+          ]);
+
+          // T3: 12500ms
+          setTimeout(() => {
+            setActivityLogs([
+              { title: "Generating task details", desc: "Analyzing commercial clause threshold...", status: "done" },
+              { title: "Drafting recommendation", desc: "Drafting recommendation action items...", status: "done" },
+              { title: "Registering ticket", desc: "Task registered successfully.", status: "done" }
+            ]);
+
+            // Add f-2 to auditorFindings
+            const newTask: Finding = {
+              id: "f-2",
+              title: "Commercial Committee Approval Sheet Required (Valuation Risk)",
+              severity: "high",
+              condition: "Sales Contract Sales_contract_04.pdf with PT Orion Mart Tbk is IDR 855,000,000 (exceeding the IDR 750,000,000 threshold requirement). No signed Commercial Committee approval sheet found.",
+              criteria: "Contracts above IDR 750,000,000 require Commercial Committee approval before revenue recognition.",
+              recommendation: "Upload signed Commercial Committee approval sheet.",
+              status: "draft",
+              txDigest: ""
+            };
+            setAuditorFindings(prev => [...prev, newTask]);
+
+            setTimeout(() => {
+              streamChatResponse("Done. The task is now live on your board. We are all set for this section. Let me know if you want me to scan the bank statements next.", () => {
+                setAgentStep(5);
+              });
+            }, 500);
+          }, 4500);
+        }, 4000);
+      }, 4000);
+    });
+  };
+
+  const triggerStep6Bank = () => {
+    setIsAgentThinking(true);
+    streamChatResponse("Sure, let me check the bank statements folder and perform a reconciliation check with your General Ledger...", () => {
+      // T0: Start analysis
+      setActivityLogs([
+        { title: "Checking bank statements folder", desc: "Reading directories...", status: "running" },
+        { title: "Comparing bank statement transactions with General Ledger", desc: "Matching data entries...", status: "queued" },
+        { title: "Verifying reconciliation matches", desc: "Checking balances...", status: "queued" }
+      ]);
+
+      // T1: 4000ms
+      setTimeout(() => {
+        setActivityLogs([
+          { title: "Checking bank statements folder", desc: "Successfully read all statement files.", status: "done" },
+          { title: "Comparing bank statement transactions with General Ledger", desc: "Matching data entries...", status: "running" },
+          { title: "Verifying reconciliation matches", desc: "Checking balances...", status: "queued" }
+        ]);
+
+        // T2: 8000ms
+        setTimeout(() => {
+          setActivityLogs([
+            { title: "Checking bank statements folder", desc: "Successfully read all statement files.", status: "done" },
+            { title: "Comparing bank statement transactions with General Ledger", desc: "All transactions successfully compared.", status: "done" },
+            { title: "Verifying reconciliation matches", desc: "Checking balances...", status: "running" }
+          ]);
+
+          // T3: 12500ms
+          setTimeout(() => {
+            setActivityLogs([
+              { title: "Checking bank statements folder", desc: "Successfully read all statement files.", status: "done" },
+              { title: "Comparing bank statement transactions with General Ledger", desc: "All transactions successfully compared.", status: "done" },
+              { title: "Verifying reconciliation matches", desc: "Reconciliation verified successfully.", status: "done" }
+            ]);
+
+            const replyText = `I have cross-referenced the Bank Statements with the General Ledger. All transaction records match, but I need your permission to register the bank reconciliation evidence on-chain. Shall I proceed?`;
+            
+            setTimeout(() => {
+              streamChatResponse(replyText, () => {
+                setPermissionFileName("Bank_statement_Q2.pdf");
+                setPermissionChoice("allow");
+                setPermissionSubmitted(false);
+                setAgentStep(6);
+              });
+            }, 500);
+          }, 4500);
+        }, 4000);
+      }, 4000);
+    });
+  };
+
   const handleSendChatMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
     const text = chatInput;
     setChatInput("");
-    setChatLog(prev => [...prev, { sender: "user", text }]);
+    setChatLog(prev => [...prev, { id: generateId(), sender: "user", text }]);
 
-    setTimeout(() => {
-      let reply = "I am currently analyzing your input. Please continue verifying the documents in your file directory.";
-      if (text.toLowerCase().includes("register") || text.toLowerCase().includes("sui")) {
-        reply = "To permanently register this document to Sui & Walrus, please click the down arrow button on your screen to open the Web3 Registry panel.";
-      } else if (text.toLowerCase().includes("kontrak") || text.toLowerCase().includes("orion") || text.toLowerCase().includes("sales")) {
-        reply = "Contract 09_customer_contract_orion_C-ORION-2026-019.pdf has a total transaction value of IDR 855,000,000 and is ready to be registered with Occurrence & Accuracy assertions.";
+    const lower = text.toLowerCase();
+
+    // Check for explicit keywords to manually trigger/jump steps
+    if (lower.includes("analyze")) {
+      triggerStep1Scan();
+      return;
+    }
+    if (lower.includes("find")) {
+      triggerStep2Find();
+      return;
+    }
+    if (lower.includes("missing")) {
+      triggerContractUploadAndAnalysis();
+      return;
+    }
+    if (lower.includes("yes") && agentStep === 3) {
+      setPermissionChoice("allow");
+      setPermissionSubmitted(true);
+      return;
+    }
+    if (lower.includes("good")) {
+      triggerStep5Good();
+      return;
+    }
+    if (lower.includes("bank statement") || lower.includes("bank")) {
+      triggerStep6Bank();
+      return;
+    }
+    if (lower.includes("yes") && agentStep === 6) {
+      setPermissionChoice("allow");
+      setPermissionSubmitted(true);
+      return;
+    }
+    if (lower.includes("summarize") || lower.includes("summary")) {
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("I already organized and tagged your files to be prepared and ready for audit. We have checked:\n1. Customer contracts and invoices (matched, missing gap resolved)\n2. Bank reconciliation (100% matched and registered on-chain).\n\nYour workspace is now fully prepared.", () => {
+          setAgentStep(8);
+        });
+      }, 800);
+      return;
+    }
+    if (lower.includes("thank you") || lower.includes("review")) {
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Yes, please review at the registry workspace and you can verify to on-chain. Let me know if you need anything else!", () => {
+          setAgentStep(9);
+        });
+      }, 800);
+      return;
+    }
+
+    // Normal Step Fallbacks if keywords are not used
+    // -------------------------------------------------------------------------
+    // Phase 0: Welcome / Idle -> Scanning & Organizing Files (Step 1: analyze)
+    // -------------------------------------------------------------------------
+    if (agentStep === 0) {
+      const isScanRequest = ["scan", "analisis", "check", "verify", "validate", "run", "proses", "mulai", "start", "cek", "periksa", "sort", "organize"].some(kw => lower.includes(kw));
+
+      if (isScanRequest) {
+        triggerStep1Scan();
+        return;
       }
-      setChatLog(prev => [...prev, { sender: "agent", text: reply }]);
-    }, 1000);
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("I'm ready. Ask me to **scan** or **sort** the uploaded files (or type **analyze**) to organize your directory.");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 1: Sort Complete -> Review/Check Contracts folder (Step 2: find)
+    // -------------------------------------------------------------------------
+    if (agentStep === 1) {
+      const isReviewFolderRequest = ["look", "review", "check", "folder", "contracts", "invoices", "lihat", "periksa", "orion"].some(kw => lower.includes(kw));
+
+      if (isReviewFolderRequest) {
+        triggerStep2Find();
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Please tell me to **check** or **review** the customer contracts folder (or type **find**) to continue the analysis.");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 2: Gap Found -> Upload Missing Contract (Step 3: missing)
+    // -------------------------------------------------------------------------
+    if (agentStep === 2) {
+      const isUploadMention = ["upload", "drop", "added", "new file", "masuk", "contract", "contract_04", "contract-04", "orion", "sales_contract_04"].some(kw => lower.includes(kw));
+
+      if (isUploadMention) {
+        triggerContractUploadAndAnalysis();
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Please upload the missing contract file (**Sales_contract_04.pdf**) or type **missing** / mention that you uploaded it in the chat.");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 3: Contract Uploaded -> Waiting for Permission (Step 4: yes)
+    // -------------------------------------------------------------------------
+    if (agentStep === 3) {
+      const isPermissionRequest = ["yes", "allow", "approve", "allow this time", "setuju", "boleh", "ya"].some(kw => lower.includes(kw));
+      if (isPermissionRequest) {
+        setPermissionChoice("allow");
+        setPermissionSubmitted(true);
+        return;
+      }
+      
+      const isDenyRequest = ["no", "deny", "cancel", "tidak", "jangan"].some(kw => lower.includes(kw));
+      if (isDenyRequest) {
+        setPermissionChoice("no");
+        setPermissionSubmitted(true);
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Please allow or deny the transaction by choosing an option in the sandbox permission request or typing **yes** / **no**.");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 4: Proposing a New Task -> Create Board Task (Step 5: good)
+    // -------------------------------------------------------------------------
+    if (agentStep === 4) {
+      const isConfirm = ["yes", "create", "catch", "boards", "buat", "tambahkan", "sure", "ok", "boleh", "silahkan"].some(kw => lower.includes(kw));
+
+      if (isConfirm) {
+        triggerStep5Good();
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Do I have your permission to create a new pending task on your board to track the Commercial Committee approval? Please type **good** or **yes**.");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 5: Task Created -> Prompt to scan Bank Statements (Step 6: bank)
+    // -------------------------------------------------------------------------
+    if (agentStep === 5) {
+      const isBankRequest = ["bank", "statement", "reconciliation", "scan", "check"].some(kw => lower.includes(kw));
+      if (isBankRequest) {
+        triggerStep6Bank();
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("We are all set for this section. Let me know if you want me to scan the bank statements next (or type **bank**).");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 6: Bank Statement Scan Complete -> Waiting for permission (Step 7: yes)
+    // -------------------------------------------------------------------------
+    if (agentStep === 6) {
+      const isPermissionRequest = ["yes", "allow", "approve", "allow this time", "setuju", "boleh", "ya"].some(kw => lower.includes(kw));
+      if (isPermissionRequest) {
+        setPermissionChoice("allow");
+        setPermissionSubmitted(true);
+        return;
+      }
+      
+      const isDenyRequest = ["no", "deny", "cancel", "tidak", "jangan"].some(kw => lower.includes(kw));
+      if (isDenyRequest) {
+        setPermissionChoice("no");
+        setPermissionSubmitted(true);
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Please allow or deny the transaction by choosing an option in the sandbox permission request or typing **yes** / **no**.");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 7: Reconciliation registered -> Awaiting summary (Step 8: summarize)
+    // -------------------------------------------------------------------------
+    if (agentStep === 7) {
+      const isSummaryRequest = ["summarize", "summary", "please", "recap", "singkat"].some(kw => lower.includes(kw));
+      if (isSummaryRequest) {
+        setIsAgentThinking(true);
+        setTimeout(() => {
+          streamChatResponse("I already organized and tagged your files to be prepared and ready for audit. We have checked:\n1. Customer contracts and invoices (matched, missing gap resolved)\n2. Bank reconciliation (100% matched and registered on-chain).\n\nYour workspace is now fully prepared.", () => {
+            setAgentStep(8);
+          });
+        }, 800);
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Reconciliation evidence registered. Would you like me to summarize the workspace status? (Please type **please summarize**).");
+      }, 1500);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 8: Summary sent -> Awaiting review confirmation (Step 9: thank you let me review)
+    // -------------------------------------------------------------------------
+    if (agentStep === 8) {
+      const isReviewRequest = ["thank", "review", "ok", "good", "great", "terima kasih"].some(kw => lower.includes(kw));
+      if (isReviewRequest) {
+        setIsAgentThinking(true);
+        setTimeout(() => {
+          streamChatResponse("Yes, please review at the registry workspace and you can verify to on-chain. Let me know if you need anything else!", () => {
+            setAgentStep(9);
+          });
+        }, 800);
+        return;
+      }
+
+      setIsAgentThinking(true);
+      setTimeout(() => {
+        streamChatResponse("Your workspace is ready. You can type **thank you let me review** or just **review** to complete this flow.");
+      }, 1500);
+      return;
+    }
+
+    // Phase 9: Done / Idle
+    setIsAgentThinking(true);
+    setTimeout(() => {
+      streamChatResponse("Compliance session complete. Everything is verified and tagged. You can review all records in the Registry and Verifier workspaces.");
+    }, 1500);
   };
 
   const handleRegisterWeb3ForFile = async (fileId: string, docType: string, assertions: string[]) => {
@@ -597,97 +1439,34 @@ export default function WorkspaceDemo() {
     document.addEventListener("mouseup", stopDrag);
   };
 
-  const handleInitializeWorkspace = (folderName: string, isZip: boolean) => {
+  const handleInitializeWorkspace = (folderName?: string, isZip?: boolean) => {
     if (!onboardingSelections) return;
     const result = onboardingSelections;
-    
-    // Select matching PBC files list and paths
-    let customList = DEFAULT_COMPANY_PBC;
-    let initialPbcId = "pbc-orion-contract";
 
-    if (result.goal === "Financial") {
-      // Scenario 3: Manufacturing
-      customList = MANUFACTURING_PBC;
-      initialPbcId = "pbc-mf-1";
-    } else if (result.industry === "Healthcare") {
-      // Scenario 1: Healthcare
-      customList = HEALTHCARE_PBC;
-      initialPbcId = "pbc-hc-1";
-    } else if (result.industry === "Fintech") {
-      // Scenario 2: Fintech
-      customList = FINTECH_PBC;
-      initialPbcId = "pbc-ft-1";
-    } else if (result.industry === "E-commerce") {
-      // Scenario 4: E-Commerce
-      customList = ECOMMERCE_PBC;
-      initialPbcId = "pbc-ec-1";
-    }
-
-    const targetFolder = `demo/PBC_list/evidence_initial/${folderName}`;
-    const mappedList = customList.map(item => ({
-      ...item,
-      folder: targetFolder
-    }));
-
-    const initialFolders = [
-      "contracts",
-      "demo",
-      "demo/PBC_list",
-      "demo/PBC_list/agent_test_scripts",
-      "demo/PBC_list/audit_docs",
-      "demo/PBC_list/evidence_initial",
-      targetFolder
-    ];
-    mappedList.forEach(item => {
-      if (item.folder && !initialFolders.includes(item.folder)) {
-        initialFolders.push(item.folder);
-      }
-    });
-    setFolders(initialFolders);
-
-    setPbcList(mappedList);
-    setSelectedFolder(targetFolder);
-    setSelectedPbcId(initialPbcId);
-
-    setOpenFolders({
-      "contracts": false,
-      "demo": true,
-      "demo/PBC_list": true,
-      "demo/PBC_list/evidence_initial": true,
-      [targetFolder]: true
-    });
+    // Reset everything to empty for a brand new user
+    setPbcList([]);
+    setFolders([]);
+    setSelectedFolder("");
+    setSelectedPbcId("");
+    setOpenFolders({});
 
     setIsUploadOverlayOpen(false);
 
-    // Trigger AI Agent scanning sequencing
-    setActivityLogs([
-      { title: "Extracting evidence", desc: isZip ? "Extracting uploaded archive..." : "Loading folder metadata...", status: "running" },
-      { title: "Coverage check", desc: "Analyzing files matching compliance goals", status: "queued" }
+    // Initial state for activity log: waiting/introduce state
+    setActivityLogs([]);
+
+    // Initial agent welcome chat log
+    setChatLog([
+      { 
+        sender: "agent", 
+        text: `Hi **${result.orgName}**, welcome to Linow Workspace. Let's get your audit ready. Where should we start?` 
+      }
     ]);
 
-    setTimeout(() => {
-      setActivityLogs([
-        { title: "Extracting evidence", desc: isZip ? "Extracted uploaded ZIP: 3 files found." : "Metadata loaded: 3 files found.", status: "done" },
-        { title: "Coverage check", desc: "Running compliance coverage test...", status: "running" },
-        { title: "Classifying contracts", desc: "Matching controls on Walrus & Sui...", status: "queued" }
-      ]);
-      setChatLog(prev => [
-        ...prev,
-        { sender: "agent", text: `I have completed extraction of your uploaded files inside the **${folderName}** folder. Starting coverage scans for ${result.industry} frameworks.` }
-      ]);
-
-      setTimeout(() => {
-        setActivityLogs([
-          { title: "Extracting evidence", desc: isZip ? "Extracted uploaded ZIP: 3 files found." : "Metadata loaded: 3 files found.", status: "done" },
-          { title: "Coverage check", desc: "All core files detected in sandbox.", status: "done" },
-          { title: "Classifying contracts", desc: "Classified 3 assets with assertions", status: "done" }
-        ]);
-        setChatLog(prev => [
-          ...prev,
-          { sender: "agent", text: `Scans complete. The folder **${folderName}** is fully synchronized. I have classified all documents and matched them with audit assertions (**Occurrence & Accuracy**). Open the **Registry** tab to register the batch on-chain.` }
-        ]);
-      }, 2500);
-    }, 2000);
+    // Hide permission dialog by default
+    setPermissionSubmitted(true);
+    setPermissionFileName("");
+    setAgentStep(0);
   };
 
   // ----------------------------------------------------
@@ -719,28 +1498,19 @@ export default function WorkspaceDemo() {
 
           // Clear files list and select empty state in background workspace
           setPbcList([]);
-          setFolders([
-            "contracts",
-            "demo",
-            "demo/PBC_list",
-            "demo/PBC_list/evidence_initial"
-          ]);
+          setFolders([]);
           setSelectedFolder("");
           setSelectedPbcId("");
-          setOpenFolders({
-            "contracts": false,
-            "demo": true,
-            "demo/PBC_list": true,
-            "demo/PBC_list/evidence_initial": true
-          });
+          setOpenFolders({});
 
           // Reset agent activity to idle/waiting
-          setActivityLogs([
-            { title: "Compliance sandbox", desc: "Waiting for folder initialization...", status: "queued" }
-          ]);
+          setActivityLogs([]);
           setChatLog([
-            { sender: "agent", text: `Welcome to Linow Workspace, ${result.orgName}. Please complete the folder setup and upload your compliance documents to begin audit verification.` }
+            { sender: "agent", text: `Hi **${result.orgName}**, welcome to Linow Workspace. Let's get your audit ready. Where should we start?` }
           ]);
+          setPermissionSubmitted(true);
+          setPermissionFileName("");
+          setAgentStep(0);
         }}
       />
     );
@@ -823,10 +1593,12 @@ export default function WorkspaceDemo() {
                 setPermissionChoice={setPermissionChoice}
                 permissionSubmitted={permissionSubmitted}
                 setPermissionSubmitted={setPermissionSubmitted}
+                permissionFileName={permissionFileName}
                 pbcList={pbcList}
                 setPbcList={setPbcList}
                 startResizeRight={startResizeRight}
                 onGoToRegistry={() => setActiveTab("registry")}
+                isAgentThinking={isAgentThinking}
               />
             </main>
           ) : activeTab === "registry" ? (
@@ -873,49 +1645,74 @@ export default function WorkspaceDemo() {
 
         {isAddDocumentModalOpen && (
           <UploadDocumentModal
-            folders={folders.filter(f => f.includes("evidence_initial"))}
-            defaultFolder={selectedFolder || (folders.find(f => f.includes("evidence_initial")) || "")}
+            folders={folders}
+            defaultFolder=""
             onClose={() => setIsAddDocumentModalOpen(false)}
-            onAdd={(name, folder, size) => {
-              const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() : "";
-              const type = ext === "xlsx" || ext === "xls" ? "excel" : ext === "csv" ? "csv" : "pdf";
+            onAdd={(files, folder) => {
+              // Intercept upload in Phase 2 to trigger analysis of the contract!
+              if (agentStep === 2 && files.length > 0) {
+                setIsAddDocumentModalOpen(false);
+                triggerContractUploadAndAnalysis(files[0].name);
+                return;
+              }
+
+              // Normal Phase 0/1 file addition
+              const containsZip = files.some(f => f.name.toLowerCase().endsWith(".zip"));
+              let filesToProcess = [...files];
+
+              // If a zip is uploaded or if the user uploads any file when workspace is empty, populate the scenario set!
+              if (containsZip || (pbcList.length === 0 && files.length === 1)) {
+                filesToProcess = [
+                  { name: "General_Ledger_2026.xlsx", size: "1.2 MB" },
+                  { name: "Balance_Sheet_Q2.pdf", size: "450 KB" },
+                  { name: "Sales_contract_01.pdf", size: "820 KB" },
+                  { name: "Sales_contract_02.pdf", size: "680 KB" },
+                  { name: "Sales_contract_03.pdf", size: "710 KB" },
+                  { name: "Sales_invoice_INV-2026-001.pdf", size: "120 KB" },
+                  { name: "Sales_invoice_INV-2026-002.pdf", size: "140 KB" },
+                  { name: "Sales_invoice_INV-2026-003.pdf", size: "115 KB" },
+                  { name: "Sales_invoice_INV-2026-004.pdf", size: "130 KB" },
+                  { name: "Bank_statement_Q2.pdf", size: "980 KB" },
+                  { name: "Bank_reconciliation_June.xlsx", size: "320 KB" }
+                ];
+              }
+
+              const newDocs: PbcItem[] = filesToProcess.map((f) => {
+                const ext = f.name.includes(".") ? f.name.split(".").pop()?.toLowerCase() : "";
+                const type = ext === "xlsx" || ext === "xls" ? "excel" : ext === "csv" ? "csv" : "pdf";
+                const newFileId = `pbc-${Math.random().toString(36).substring(2) + Date.now().toString(36)}`;
+                return {
+                  id: newFileId,
+                  name: f.name,
+                  size: f.size,
+                  status: "unregistered",
+                  type: type as any,
+                  folder: folder,
+                  analyzed: false
+                };
+              });
+
+              setPbcList(prev => [...prev, ...newDocs]);
               
-              const newFileId = `pbc-${Math.random().toString(36).substring(2) + Date.now().toString(36)}`;
-              const newDoc: PbcItem = {
-                id: newFileId,
-                name: name,
-                size: size,
-                status: "unregistered",
-                type: type as any,
-                folder: folder,
-                analyzed: false
-              };
-              setPbcList(prev => [...prev, newDoc]);
-              setSelectedPbcId(newFileId);
+              if (newDocs.length > 0) {
+                setSelectedPbcId(newDocs[0].id);
+              }
               setSelectedFolder(folder);
-              setOpenFolders(prev => ({ ...prev, [folder]: true }));
-              
-              // Trigger AI Agent scanning sequencing for this document
-              setActivityLogs(prev => [
+              if (folder) {
+                setOpenFolders(prev => ({ 
+                  ...prev, 
+                  [folder]: true
+                }));
+                if (!folders.includes(folder)) {
+                  setFolders(prev => [...prev, folder]);
+                }
+              }
+
+              // Just acknowledge files were added
+              setChatLog(prev => [
                 ...prev,
-                { title: "Analyzing upload", desc: `Reading ${name}...`, status: "running" }
+                { sender: "agent", text: `**${newDocs.length}** new file${newDocs.length > 1 ? "s" : ""} added to your file directory${containsZip ? " (unpacked ZIP archive)" : ""}. When you're ready, ask me to **scan** or **analyze** them to start compliance validation.` }
               ]);
-
-              setTimeout(() => {
-                setActivityLogs(prev =>
-                  prev.map(log =>
-                    log.title === "Analyzing upload" && log.desc.includes(name)
-                      ? { ...log, desc: `Document ${name} successfully analyzed.`, status: "done" }
-                      : log
-                  )
-                );
-
-                setPbcList(currentList =>
-                  currentList.map(item =>
-                    item.id === newFileId ? { ...item, analyzed: true } : item
-                  )
-                );
-              }, 2000);
 
               setIsAddDocumentModalOpen(false);
             }}

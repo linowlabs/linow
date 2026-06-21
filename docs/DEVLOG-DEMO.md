@@ -96,3 +96,30 @@
 - Follow-up needed:
   - None. Core dynamic interaction matches expectations.
 
+## 2026-06-21 — Compliance Sandbox Scenario and Agent Improvements
+
+### Change
+- Files touched:
+  - `app/src/app/workspace-demo/page.tsx`
+  - `app/src/app/workspace-demo/components/AgentSandbox.tsx`
+  - `app/src/app/workspace-demo/demo.css`
+  - `docs/DEVLOG-DEMO.md`
+- Summary:
+  - Fixed double-text streaming bug in `streamChatResponse` by copying state objects instead of mutating. Adjusted word delay to 90ms.
+  - Integrated logs inline to the conversation stream using a custom `setActivityLogs` wrapper.
+  - Added scenario keywords (`analyze`, `find`, `missing`, `yes`, `good`, `bank`, `summarize`, `review`) to transition through 9 distinct compliance scenario steps.
+  - Created `triggerStep6Bank` to simulate bank statements scan, comparison with General Ledger, and proposed on-chain registration.
+  - Refactored `AgentSandbox.tsx` activity card layout to wrap long titles (avoiding overlaps with "DONE") and stack descriptions underneath.
+
+### Reasoning
+- Why this approach was chosen:
+  - Streamlining the sandbox conversation logs inline allows presenting the agent actions in one unified chat window.
+  - Using unique bubble ID maps for stream intervals isolates streaming bubbles from subsequent inline updates.
+  - Wrapping text and using vertical layouts prevents layout overflows on narrow screens during the demo.
+
+### Tech Debt
+- Known shortcuts:
+  - None. Scenario flow matches design goals.
+- Follow-up needed:
+  - Prepare for demo delivery.
+
