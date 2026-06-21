@@ -1466,6 +1466,51 @@
 - Follow-up needed:
   - Move the chat panel styling into `globals.css` when polishing the workspace layout.
 
+## 2026-06-20 — Landing Page Copywriting Polish
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Polished landing page copywriting to align with professional auditing standards (ISA 500), the Company vs. Auditor dual-role workflow, and cryptographic evidence registry concepts.
+  - Replaced marketing buzzwords and AI-slop terminology with precise technical terms.
+  - Updated the main Hero title to a focused one-liner: "AI Audit Agent with Verifiable Walrus Memory".
+
+### Reasoning
+- Why this approach was chosen:
+  - Aligning copywriting with real-world auditor vocabulary ensures domain credibility and trust for professional users.
+  - Setting expectations for the Company/Auditor split views directly on the landing page matches the workspace's functional changes.
+
+### Tech Debt
+- Known shortcuts:
+  - None. Text replacements are direct JSX content updates.
+- Follow-up needed:
+  - Implement role-based workspace login controls and styling polish for the landing page next.
+
+## 2026-06-20 — Landing Page Visual Redesign & Modernization
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+- Summary:
+  - Redesigned the landing page with morning-dew style glassmorphism (15px blur, 15-20% white overlay, 1px rgba border, soft shadows) applied to CTA cards, header, and key navigation buttons.
+  - Replaced the hero background color gradient and added a footer background gradient to enhance visual depth.
+  - Modernized the overall layout, including the interactive benefits network card, and simplified the main agent simulation view using a minimalist macOS window theme with custom message bubbles.
+
+### Reasoning
+- Why this approach was chosen:
+  - Visual excellence and premium glassmorphism styling are essential to provide a professional, modern look that builds user confidence.
+  - Incorporating a dual-role benefit network switcher visually communicates the distinct value of the evidence workflow for companies versus auditors.
+
+### Tech Debt
+- Known shortcuts:
+  - Static mockup elements are used for the chatbot interactive simulation.
+- Follow-up needed:
+  - Implement full interactivity in the co-auditor question-answering console mockup.
+
+
 ## 2026-06-20 — Build Rebuilt Workspace for Demo (workspace-demo)
 
 ### Change
@@ -1492,4 +1537,55 @@
   - Document parser upload triggers are mock-handled in this demo page.
 - Follow-up needed:
   - Refine document upload form to allow feeding custom files into the mock list if needed.
+
+## 2026-06-20 — Animated Workspace Showcase Simulation
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Replaced the static, skeleton workspace mockup container on the landing page with an animated simulation mirroring the new `/workspace-demo` page.
+  - Implemented 3-column + sidebar nav rail structure matching `/workspace-demo` (File Directory, Document Preview, and Agent Activities).
+  - Wired a `useEffect` loop cycling through 3 mock steps (File Selection, Agent Assertion Mapping with text highlighting, and Sui Registry Commit with transaction receipt display).
+  - Styled all simulated panes, item highlight animations, and modal overlays in `landing.css`.
+
+### Reasoning
+- Why this approach was chosen:
+  - Standardizing the landing page mockup representation around the actual `/workspace-demo` layout ensures consistency and prevents user confusion.
+  - A looping step-by-step animation makes the "propose, sign, prove" lifecycle concrete and engaging without requiring complex user input on first landing.
+
+### Tech Debt
+- Known shortcuts:
+  - The browser mockup simulation relies on state intervals rather than actual file directory hooks.
+- Follow-up needed:
+  - None.
+
+## 2026-06-20 — Co-Auditor Simulator Panel Adjustment
+
+### Change
+- Files touched:
+  - `app/src/app/page.tsx`
+  - `app/src/app/landing.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Adjusted the landing page Co-Auditor simulator loop card to match the `/workspace-demo` Agent Sandbox.
+  - Implemented simulated activity logs with Done/Running/Queued card badges.
+  - Implemented Command Approval prompt mockup (`sui_execute_transaction`) inside Phase 1 of the simulation loop.
+  - Replaced message styles with double-colon (`::`) translucent chat bubbles matching the workspace theme.
+  - Guaranteed a persistent status bar sticking directly above the input box across all phases.
+
+### Reasoning
+- Why this approach was chosen:
+  - Aligning the landing page visual showcase with the actual workspace-demo Agent activities ensures design continuity and sets correct expectations.
+  - Rendering the Command Approval prompt highlights Linow's core design constraint: "agent proposes, human signs".
+
+### Tech Debt
+- Known shortcuts:
+  - None.
+- Follow-up needed:
+  - None.
+
+
 
