@@ -54,9 +54,10 @@ export default function FileExplorer({
   const [isCreatingNode, setIsCreatingNode] = useState<"file" | "folder" | null>(null);
   const [createNodeParentPath, setCreateNodeParentPath] = useState<string>("");
   const [newInputName, setNewInputName] = useState<string>("");
+  const [dragOverFolderPath, setDragOverFolderPath] = useState<string | null>(null);
 
   const handleStartCreateNode = (type: "file" | "folder") => {
-    let parentPath = "demo/PBC_list/evidence_initial";
+    let parentPath = "";
     if (selectedFolder) {
       parentPath = selectedFolder;
     } else if (selectedPbcId) {
@@ -71,7 +72,9 @@ export default function FileExplorer({
     setNewInputName("");
 
     // Make sure the parent folder is expanded
-    setOpenFolders(prev => ({ ...prev, [parentPath]: true }));
+    if (parentPath) {
+      setOpenFolders(prev => ({ ...prev, [parentPath]: true }));
+    }
   };
 
   const handleCancelVirtualNode = () => {
@@ -88,7 +91,7 @@ export default function FileExplorer({
 
     const name = newInputName.trim();
     if (isCreatingNode === "folder") {
-      const newFolder = `${createNodeParentPath}/${name}`;
+      const newFolder = createNodeParentPath ? `${createNodeParentPath}/${name}` : name;
       setFolders(prev => {
         if (prev.includes(newFolder)) return prev;
         return [...prev, newFolder];
@@ -99,7 +102,7 @@ export default function FileExplorer({
     } else if (isCreatingNode === "file") {
       const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() : "";
       const type = ext === "xlsx" || ext === "xls" ? "excel" : ext === "csv" ? "csv" : "pdf";
-      
+
       const newFileId = `pbc-${Math.random().toString(36).substring(2) + Date.now().toString(36)}`;
       const newDoc: PbcItem = {
         id: newFileId,
@@ -119,10 +122,45 @@ export default function FileExplorer({
     handleCancelVirtualNode();
   };
 
+  const handleDeleteNode = (e: React.MouseEvent, nodeType: "folder" | "file", nodeId: string, nodePath: string) => {
+    e.stopPropagation();
+
+    if (nodeType === "folder") {
+      // Remove this folder and all sub-folders
+      setFolders(prev => prev.filter(f => f !== nodePath && !f.startsWith(nodePath + "/")));
+      // Move files inside this folder (and sub-folders) to root
+      setPbcList(prev => prev.map(file => {
+        if (file.folder === nodePath || file.folder.startsWith(nodePath + "/")) {
+          return { ...file, folder: "" };
+        }
+        return file;
+      }));
+      // Clean up open state
+      setOpenFolders(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(key => {
+          if (key === nodePath || key.startsWith(nodePath + "/")) {
+            delete next[key];
+          }
+        });
+        return next;
+      });
+      if (selectedFolder === nodePath || selectedFolder.startsWith(nodePath + "/")) {
+        setSelectedFolder("");
+      }
+    } else {
+      // Remove file from list
+      setPbcList(prev => prev.filter(file => file.id !== nodeId));
+      if (selectedPbcId === nodeId) {
+        setSelectedPbcId("");
+      }
+    }
+  };
+
   // Helper to generate dynamic file explorer nodes from the pbcList
   const getExplorerNodes = (): ExplorerNode[] => {
     const folderPaths = new Set<string>(folders);
-    
+
     pbcList.forEach(item => {
       if (item.folder) {
         folderPaths.add(item.folder);
@@ -142,9 +180,7 @@ export default function FileExplorer({
 
       // Determine pretty display name
       let displayName = name;
-      if (path === "demo/PBC_list") {
-        displayName = "file directory";
-      } else if (FOLDER_METADATA[path]) {
+      if (FOLDER_METADATA[path]) {
         displayName = FOLDER_METADATA[path].displayName;
       }
 
@@ -158,14 +194,14 @@ export default function FileExplorer({
     });
 
     const files = pbcList.map(item => {
-      const folderPath = item.folder || "demo/PBC_list/evidence_initial/02_contracts_invoices";
-      const depth = folderPath.split("/").length;
+      const folderPath = item.folder || "";
+      const depth = folderPath ? folderPath.split("/").length : 0;
       return {
         id: item.id,
         name: item.name,
         type: "file" as const,
         fileType: item.type as "pdf" | "excel" | "csv",
-        path: `${folderPath}/${item.name}`,
+        path: folderPath ? `${folderPath}/${item.name}` : item.name,
         depth
       };
     });
@@ -173,13 +209,13 @@ export default function FileExplorer({
     const allNodes = [...folderNodes, ...files];
 
     // Append virtual input row if creating a node
-    if (isCreatingNode && createNodeParentPath) {
-      const depth = createNodeParentPath.split("/").length;
+    if (isCreatingNode && createNodeParentPath !== null && createNodeParentPath !== undefined) {
+      const depth = createNodeParentPath ? createNodeParentPath.split("/").length : 0;
       allNodes.push({
         id: "virtual-temp-input",
         name: "",
         type: "virtual_input",
-        path: `${createNodeParentPath}/!_virtual_temp_input`, // '!' sorts first among sibling names
+        path: createNodeParentPath ? `${createNodeParentPath}/!_virtual_temp_input` : "!_virtual_temp_input", // '!' sorts first among sibling names
         depth
       } as any);
     }
@@ -210,7 +246,7 @@ export default function FileExplorer({
 
   return (
     <>
-      <section 
+      <section
         className={`workspace-pane pane-pbc ${!isPbcExpanded ? 'collapsed' : ''}`}
         style={{ width: isPbcExpanded ? `${pbcWidth}px` : '52px' }}
       >
@@ -228,15 +264,7 @@ export default function FileExplorer({
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {role === "company" && (
                   <>
-                    <button 
-                      className="ide-action-btn"
-                      onClick={() => handleStartCreateNode("file")}
-                      title="New File"
-                      style={{ padding: "4px", background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", display: "flex", alignItems: "center" }}
-                    >
-                      <Icons.NewFile size={15} />
-                    </button>
-                    <button 
+                    <button
                       className="ide-action-btn"
                       onClick={() => handleStartCreateNode("folder")}
                       title="New Folder"
@@ -277,12 +305,22 @@ export default function FileExplorer({
                   }
 
                   const visibleNodes = explorerNodes.filter(node => isNodeVisible(node.path));
-                  
+
                   if (role === "auditor" && visibleNodes.filter(n => n.type === "file").length === 0) {
                     return (
                       <p className="text-xs text-muted text-center w-full" style={{ padding: '20px 10px' }}>
                         No evidence files registered by the Company yet. Go to Company Mode to register files first.
                       </p>
+                    );
+                  }
+
+                  if (role === "company" && pbcList.length === 0 && folders.length === 0 && !isCreatingNode) {
+                    return (
+                      <div className="file-tree-empty-state" style={{ padding: "20px 14px", textAlign: "center", color: "var(--text-secondary)", fontSize: "12px", border: "1px dashed rgba(0,0,0,0.08)", borderRadius: "12px", margin: "14px 10px", background: "rgba(255,255,255,0.2)" }}>
+                        <span style={{ fontSize: "22px", display: "block", marginBottom: "6px" }}>📂</span>
+                        <span style={{ fontWeight: 600, display: "block", marginBottom: "4px", color: "var(--text-primary)" }}>Empty Directory</span>
+                        Create a folder or drop your files here to let Linow organize everything for you.
+                      </div>
                     );
                   }
 
@@ -294,8 +332,8 @@ export default function FileExplorer({
                           className="tree-row-wrapper"
                           style={{ paddingLeft: `${node.depth * 14}px` }}
                         >
-                          <div 
-                            className="tree-row file-row virtual-input-row" 
+                          <div
+                            className="tree-row file-row virtual-input-row"
                             style={{ gap: 6, display: "flex", alignItems: "center", background: "rgba(255,255,255,0.25)", borderRadius: "6px", padding: "3px 6px" }}
                           >
                             <span className="tree-chevron-wrapper"></span>
@@ -328,7 +366,7 @@ export default function FileExplorer({
                     const isOpen = openFolders[node.path];
                     const isSelectedFile = !isFolder && selectedPbcId === node.id;
                     const isSelectedFolder = isFolder && selectedFolder === node.path;
-                    
+
                     let FileIcon = Icons.FileText;
                     if (node.fileType === "pdf") FileIcon = Icons.FilePdf;
                     else if (node.fileType === "excel" || node.fileType === "csv") FileIcon = Icons.FileExcel;
@@ -341,6 +379,40 @@ export default function FileExplorer({
                       >
                         <div
                           className={`tree-row ${isFolder ? "folder-row" : "file-row"} ${isSelectedFile ? "active" : ""} ${isSelectedFolder ? "active-folder" : ""}`}
+                          style={isFolder && dragOverFolderPath === node.path ? {
+                            background: "rgba(37, 99, 235, 0.08)",
+                            border: "1px dashed rgba(37, 99, 235, 0.4)",
+                            borderRadius: "6px"
+                          } : {}}
+                          draggable={!isFolder && role === "company"}
+                          onDragStart={!isFolder && role === "company" ? (e) => {
+                            e.dataTransfer.setData("text/plain", node.id);
+                          } : undefined}
+                          onDragEnter={isFolder && role === "company" ? (e) => {
+                            e.preventDefault();
+                            setDragOverFolderPath(node.path);
+                          } : undefined}
+                          onDragOver={isFolder && role === "company" ? (e) => {
+                            e.preventDefault();
+                          } : undefined}
+                          onDragLeave={isFolder && role === "company" ? () => {
+                            setDragOverFolderPath(null);
+                          } : undefined}
+                          onDrop={isFolder && role === "company" ? (e) => {
+                            e.preventDefault();
+                            setDragOverFolderPath(null);
+                            const fileId = e.dataTransfer.getData("text/plain");
+                            if (fileId) {
+                              setPbcList(prev => prev.map(file => {
+                                if (file.id === fileId) {
+                                  return { ...file, folder: node.path };
+                                }
+                                return file;
+                              }));
+                              setSelectedPbcId(fileId);
+                              setSelectedFolder(node.path);
+                            }
+                          } : undefined}
                           onClick={() => {
                             if (isFolder) {
                               setOpenFolders(prev => ({ ...prev, [node.path]: !prev[node.path] }));
@@ -362,7 +434,7 @@ export default function FileExplorer({
                               )
                             ) : null}
                           </span>
-                          
+
                           <span className="tree-icon-wrapper">
                             {isFolder ? (
                               isOpen ? <Icons.FolderOpen /> : <Icons.FolderClosed />
@@ -372,11 +444,51 @@ export default function FileExplorer({
                           </span>
 
                           <span className="tree-node-name">{node.name}</span>
+
+                          {role === "company" && (
+                            <button
+                              className="tree-delete-btn"
+                              title={isFolder ? "Delete folder" : "Delete file"}
+                              onClick={(e) => handleDeleteNode(e, isFolder ? "folder" : "file", node.id, node.path)}
+                            >
+                              <Icons.Trash size={11} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
                   });
                 })()}
+
+                {/* Drop-to-root zone: allows dragging files back to root */}
+                {role === "company" && (
+                  <div
+                    className={`tree-drop-root-zone ${dragOverFolderPath === "__root__" ? "drop-active" : ""}`}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      setDragOverFolderPath("__root__");
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDragLeave={() => setDragOverFolderPath(null)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragOverFolderPath(null);
+                      const fileId = e.dataTransfer.getData("text/plain");
+                      if (fileId) {
+                        setPbcList(prev => prev.map(file => {
+                          if (file.id === fileId) {
+                            return { ...file, folder: "" };
+                          }
+                          return file;
+                        }));
+                        setSelectedPbcId(fileId);
+                        setSelectedFolder("");
+                      }
+                    }}
+                  >
+                    <span style={{ fontSize: "11px", opacity: 0.5 }}>⤴ Drop here to move to root</span>
+                  </div>
+                )}
               </div>
 
               {role === "company" && handleAddDocument && (
