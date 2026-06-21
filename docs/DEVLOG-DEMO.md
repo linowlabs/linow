@@ -66,3 +66,33 @@
 - Follow-up needed:
   - Connect upload handlers to feed files into the active PBC list.
 
+## 2026-06-21 — Add Dynamic IDE File Tree Actions & Document Upload Overlay
+
+### Change
+- Files touched:
+  - `app/src/app/workspace-demo/components/FileExplorer.tsx`
+  - `app/src/app/workspace-demo/components/UploadDocumentModal.tsx`
+  - `app/src/app/workspace-demo/components/PreviewPane.tsx`
+  - `app/src/app/workspace-demo/page.tsx`
+  - `app/src/app/workspace-demo/icons.tsx`
+  - `app/src/app/workspace-demo/types.ts`
+  - `app/src/app/workspace-demo/demo.css`
+  - `.github/PULL_REQUEST_TEMPLATE.md`
+  - `docs/DEVLOG-DEMO.md`
+- Summary:
+  - Integrated dynamic inline file and folder creation actions in the `FileExplorer` sidebar header, supporting virtual input rows and inline key/focus handlers.
+  - Developed `UploadDocumentModal` component to serve as a glassmorphic overlay for file upload. Replaced legacy `prompt()` in `handleAddDocument`.
+  - Upgraded folder metadata lookup fallback in `PreviewPane` to display custom smart folder descriptors reactively.
+  - Linked upload success directly to the AI Agent activity pipeline to run automated compliance checks and logs.
+
+### Reasoning
+- Why this approach was chosen:
+  - Providing inline VS Code-like tree inputs and a dedicated target-folder upload dialog makes the demo completely interactive and natural, allowing presenters to prove dynamic Sui/Walrus registration on custom compliance data.
+  - Keeping folder states separate ensures empty directories can be created and previewed before file attachments.
+
+### Tech Debt
+- Known shortcuts:
+  - Mock file uploads simulate checksum and size generation.
+- Follow-up needed:
+  - None. Core dynamic interaction matches expectations.
+
