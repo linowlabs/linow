@@ -9,10 +9,10 @@ const benefitsNodes = [
   {
     id: 0,
     role: "company" as const,
-    title: "Automated Evidence Preparation",
-    shortDesc: "Classify and prep compliance archives.",
-    detail: "Linow's browser co-auditor runs automated document classification, maps local client files to standard regulatory assertions, and highlights potential coverage gaps before auditor review.",
-    label: "Auto-Prep",
+    title: "Automated prep",
+    shortDesc: "Scan, categorize, and check gap coverage.",
+    detail: "Linow scans your folders, classifies contracts and bank statements, and flags assertion gaps before the audit begins.",
+    label: "Automated Prep",
     x: 30,
     y: 23,
     icon: (
@@ -24,10 +24,10 @@ const benefitsNodes = [
   {
     id: 1,
     role: "company" as const,
-    title: "Zero-Knowledge Local Commitments",
-    shortDesc: "Generate cryptographic proofs in the browser.",
-    detail: "Files are hashed locally in the user's browser. Only the secure SHA-256 hash commitment is registered on-chain, preserving complete client confidentiality and zero-trust verification.",
-    label: "Local Hash",
+    title: "Private commitments",
+    shortDesc: "Register file hashes locally.",
+    detail: "Your sensitive files stay local. We only register secure cryptographic hashes on-chain to guarantee absolute confidentiality.",
+    label: "Private Hashes",
     x: 18,
     y: 50,
     icon: (
@@ -39,10 +39,10 @@ const benefitsNodes = [
   {
     id: 2,
     role: "company" as const,
-    title: "Real-Time Readiness Gaps",
-    shortDesc: "Identify compliance issues instantly.",
-    detail: "Track assertion completeness and compliance scores dynamically. Instantly identify missing documents, signature gaps, or mismatching records before finalizing ledger entries.",
-    label: "Readiness Gaps",
+    title: "Instant readiness checks",
+    shortDesc: "Spot missing signatures and incomplete files.",
+    detail: "See your readiness score instantly. Spot missing signatures or incomplete files before writing anything to the blockchain.",
+    label: "Readiness Check",
     x: 30,
     y: 77,
     icon: (
@@ -54,10 +54,10 @@ const benefitsNodes = [
   {
     id: 3,
     role: "auditor" as const,
-    title: "One-Click Evidence Verification",
-    shortDesc: "Authenticate file signatures instantly.",
-    detail: "Compare evidence hashes directly against immutable Sui ledger anchors. Instantly verify that client documents match the registered commitments, blocking all tampering attempts.",
-    label: "Verification",
+    title: "Tamper-detection",
+    shortDesc: "Compare document hashes with ledger anchors.",
+    detail: "Verify file integrity in seconds. Linow automatically compares document hashes against Sui ledger anchors to flag any tampering.",
+    label: "Tamper-Proof",
     x: 70,
     y: 23,
     icon: (
@@ -69,9 +69,9 @@ const benefitsNodes = [
   {
     id: 4,
     role: "auditor" as const,
-    title: "Wallet-Backed Attestations",
-    shortDesc: "Sign immutable review results.",
-    detail: "Log wallet-authorized reviewer signatures directly on Sui. Link verified evidence objects to formal audit findings, forming a durable, legally-robust attest chain.",
+    title: "Wallet attestations",
+    shortDesc: "Sign records directly to the Sui ledger.",
+    detail: "Attest with your wallet. Sign off on verified records directly to the Sui ledger, building a permanent, verifiable review trail.",
     label: "Attestations",
     x: 82,
     y: 50,
@@ -84,10 +84,10 @@ const benefitsNodes = [
   {
     id: 5,
     role: "auditor" as const,
-    title: "Verifiable Audit History",
-    shortDesc: "Replay agent reasoning step-by-step.",
-    detail: "Access a completely transparent timeline of AI classifications, file state commits, and human reviewer approvals. Full traceability ensures frictionless audit inspections.",
-    label: "Audit Trail",
+    title: "Reasoning history",
+    shortDesc: "Replay agent categorization and decisions.",
+    detail: "Replay agent reasoning step-by-step. Get a transparent timeline showing how documents were categorized and when they were approved.",
+    label: "Reasoning Path",
     x: 70,
     y: 77,
     icon: (
@@ -318,8 +318,8 @@ export default function LandingPage() {
         <Link href="/" className="nav-brand">
           <Image
             className="nav-logo-img"
-            src="/mascot.png"
-            alt="Linow mascot"
+            src="/icon.png"
+            alt="Linow logo"
             width={24}
             height={24}
             priority
@@ -352,9 +352,9 @@ export default function LandingPage() {
           <Link href="/workspace" className="nav-login-link">
             Log in
           </Link>
-          <Link href="/workspace" className="nav-cta-btn">
-            Launch Workspace
-          </Link>
+          <button className="nav-cta-btn" disabled>
+            Coming soon
+          </button>
         </div>
       </nav>
 
@@ -362,16 +362,16 @@ export default function LandingPage() {
       <header className="landing-hero">
         <div className="hero-content">
           <h1 className="hero-title">
-            AI Audit Agent with Verifiable Walrus Memory
+            Linow lets you run continuous pre-audits with co-auditor agents
           </h1>
           <p className="hero-subtitle">
-            Encrypt client-side evidence, register hash commitments on Sui, and log wallet-backed reviewer attestations. The agent proposes findings; the auditor signs on-chain.
+            Point Linow to your directories. Our browser co-auditor classifies evidence, checks assertion gaps, and stages verification logs. You control the keys, the agent proposes the facts, the chain proves the history.
           </p>
           
           <div className="hero-cta-group">
-            <Link href="/workspace" className="hero-cta-primary">
-              Launch Workspace
-            </Link>
+            <button className="hero-cta-primary" disabled>
+              Coming soon
+            </button>
             <a href="#how-it-works" className="hero-cta-secondary" onClick={(e) => {
               e.preventDefault();
               stickyTrackRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -381,13 +381,12 @@ export default function LandingPage() {
           </div>
         </div>
       </header>
-
+ 
       {/* Meet Linow & Workspace Mockup Section */}
       <section className="landing-meet-section" id="meet-linow">
         <div className="meet-content">
-          <span className="meet-eyebrow">Evidence Intelligence</span>
           <h2 className="meet-title">
-            Linow runs automated evidence classification, analyzes assertion gaps, and drafts structured audit findings for auditor review.
+            Stop hunting down bank statements and contract PDFs. Linow scans your directories, maps documents to required assertions, and catches compliance gaps before your auditors do.
           </h2>
         </div>
 
@@ -583,34 +582,34 @@ export default function LandingPage() {
               </div>
 
               <div className="clean-explanation-step" ref={cardRefs[0]}>
-                <span className="step-badge">Step 1 — Local Hash Generation</span>
-                <h3 className="step-title">Upload & Generate Hash</h3>
+                <span className="step-badge">Step 1 — Zero-knowledge local scanning</span>
+                <h3 className="step-title">Map local files</h3>
                 <p className="step-desc">
-                  Select a client file. The application computes a SHA-256 hash locally in the browser. The raw document remains confidential on your local machine; only the cryptographic hash commitment is registered.
+                  Drag your files into the workspace. Linow reads them locally in your browser. We generate secure SHA-256 hash commitments without uploading your raw, sensitive files anywhere.
                 </p>
               </div>
 
               <div className="clean-explanation-step" ref={cardRefs[1]}>
-                <span className="step-badge">Step 2 — Client-Side Payload Encryption</span>
-                <h3 className="step-title">Secure Decentralized Storage</h3>
+                <span className="step-badge">Step 2 — Client-controlled encryption</span>
+                <h3 className="step-title">Encrypt and backup</h3>
                 <p className="step-desc">
-                  To guarantee strict confidentiality, evidence files are encrypted in the browser using AES-256-GCM prior to storage. The encrypted ciphertext is stored on the decentralized Walrus protocol.
+                  Linow encrypts your evidence using client-side AES-256-GCM before it ever leaves your machine. The encrypted backup is sent to Walrus, keeping it private and decentralized.
                 </p>
               </div>
 
               <div className="clean-explanation-step" ref={cardRefs[2]}>
-                <span className="step-badge">Step 3 — On-Chain Anchor</span>
-                <h3 className="step-title">Register On-Chain Commitment</h3>
+                <span className="step-badge">Step 3 — Sui ledger commitments</span>
+                <h3 className="step-title">Anchor to the ledger</h3>
                 <p className="step-desc">
-                  An immutable, tamper-evident EvidenceRecord is registered on the Sui ledger, anchoring the cryptographic hash commitment, transaction timestamp, and Walrus blob ID.
+                  Every file hash, timestamp, and Walrus blob ID is anchored directly to the Sui blockchain. Once written, the timeline cannot be altered or falsified.
                 </p>
               </div>
 
               <div className="clean-explanation-step" ref={cardRefs[3]}>
-                <span className="step-badge">Step 4 — Auditor Verification & Attestation</span>
-                <h3 className="step-title">Auditor Verification & Attestation</h3>
+                <span className="step-badge">Step 4 — Peer-signed attestations</span>
+                <h3 className="step-title">Verify and attest</h3>
                 <p className="step-desc">
-                  The Auditor logs in, verifies the file integrity against the on-chain hash commitment, and signs wallet-backed attestations. The chain proves the timeline and integrity of the review.
+                  Auditors verify your staged files against the on-chain ledger hashes with a single click. When they sign an attestation with their wallet, the Sui blockchain proves it.
                 </p>
               </div>
 
@@ -624,18 +623,18 @@ export default function LandingPage() {
                 <div className="pipeline-column" ref={pcolPrepRef} id="col-prep">
                   <div className="pipeline-col-header">
                     <span className="col-num">01</span>
-                    <span className="col-title">LOCAL PREP</span>
+                    <span className="col-title">LOCAL MAPPING</span>
                   </div>
                   <div className="pipeline-cards">
                     <div className="pipeline-card" ref={pcardUploadRef} id="pcard-upload">
                       <div className="pcard-role-tag company">Company Role</div>
-                      <h4 className="pcard-title">Client File Selection</h4>
-                      <div className="pcard-indicator">Raw File</div>
+                      <h4 className="pcard-title">Drag & Drop Evidence</h4>
+                      <div className="pcard-indicator">Raw Files</div>
                     </div>
                     <div className="pipeline-card" ref={pcardHashRef} id="pcard-hash">
-                      <div className="pcard-role-tag system">Browser Agent</div>
-                      <h4 className="pcard-title">SHA-256 Hash</h4>
-                      <div className="pcard-indicator code-font">Commitment</div>
+                      <div className="pcard-role-tag system">Co-Auditor Agent</div>
+                      <h4 className="pcard-title">Generate Browser Hash</h4>
+                      <div className="pcard-indicator code-font">Local Commitment</div>
                     </div>
                   </div>
                 </div>
@@ -648,14 +647,14 @@ export default function LandingPage() {
                   </div>
                   <div className="pipeline-cards">
                     <div className="pipeline-card" ref={pcardEncryptRef} id="pcard-encrypt">
-                      <div className="pcard-role-tag system">Browser Agent</div>
-                      <h4 className="pcard-title">AES-256-GCM Encrypt</h4>
-                      <div className="pcard-indicator code-font">Ciphertext</div>
+                      <div className="pcard-role-tag system">Co-Auditor Agent</div>
+                      <h4 className="pcard-title">Client-Side AES Encrypt</h4>
+                      <div className="pcard-indicator code-font">Encrypted Payload</div>
                     </div>
                     <div className="pipeline-card" ref={pcardWalrusRef} id="pcard-walrus">
                       <div className="pcard-role-tag storage">Walrus Network</div>
-                      <h4 className="pcard-title">Encrypted Blob Upload</h4>
-                      <div className="pcard-indicator code-font">Blob ID</div>
+                      <h4 className="pcard-title">Walrus Blob Upload</h4>
+                      <div className="pcard-indicator code-font">Decentralized Backup</div>
                     </div>
                   </div>
                 </div>
@@ -664,13 +663,13 @@ export default function LandingPage() {
                 <div className="pipeline-column" ref={pcolRegistryRef} id="col-registry">
                   <div className="pipeline-col-header">
                     <span className="col-num">03</span>
-                    <span className="col-title">DURABLE REGISTRY</span>
+                    <span className="col-title">LEDGER ANCHOR</span>
                   </div>
                   <div className="pipeline-cards">
                     <div className="pipeline-card" ref={pcardSuiRef} id="pcard-sui">
                       <div className="pcard-role-tag sui">Sui Blockchain</div>
-                      <h4 className="pcard-title">Register EvidenceRecord</h4>
-                      <div className="pcard-indicator code-font">Evidence Object</div>
+                      <h4 className="pcard-title">Anchor EvidenceRecord</h4>
+                      <div className="pcard-indicator code-font">On-Chain Commit</div>
                     </div>
                   </div>
                 </div>
@@ -679,17 +678,17 @@ export default function LandingPage() {
                 <div className="pipeline-column" ref={pcolReviewRef} id="col-review">
                   <div className="pipeline-col-header">
                     <span className="col-num">04</span>
-                    <span className="col-title">REVIEW ATTEST</span>
+                    <span className="col-title">AUDITOR REVIEW</span>
                   </div>
                   <div className="pipeline-cards">
                     <div className="pipeline-card" ref={pcardVerifyRef} id="pcard-verify">
                       <div className="pcard-role-tag auditor">Auditor Role</div>
-                      <h4 className="pcard-title">Integrity Verification</h4>
-                      <div className="pcard-indicator">Hash Comparison</div>
+                      <h4 className="pcard-title">Verify Ledger Hashes</h4>
+                      <div className="pcard-indicator">Match Commitments</div>
                     </div>
                     <div className="pipeline-card" ref={pcardAttestRef} id="pcard-attest">
                       <div className="pcard-role-tag auditor">Auditor Role</div>
-                      <h4 className="pcard-title">Wallet Attestation</h4>
+                      <h4 className="pcard-title">Reviewer Signature</h4>
                       <div className="pcard-indicator code-font">Attestation Object</div>
                     </div>
                   </div>
@@ -714,21 +713,21 @@ export default function LandingPage() {
           <div className="agent-desc-col">
             <span className="section-eyebrow">Autonomous Compliance Loop</span>
             <h2 className="agent-section-title">
-              Verify compliance readiness locally & register findings on-chain
+              A continuous compliance loop you actually control.
             </h2>
             <p className="agent-section-desc">
-              Linow runs automated evidence mapping against required audit assertions. All actions proposed by the agent are anchored to the ledger and require wallet signature.
+              No autonomous rogue transactions. Linow acts as your browser co-auditor: classifying documents and staging ledger records. The agent proposes the transaction; you review and sign it.
             </p>
             
             <div className="agent-feature-points">
               <div className="feature-point">
-                <h4>Local Assertion Mapping</h4>
-                <p>Analyze evidence files directly in the browser to class compliance indicators. Files never leave your local environment.</p>
+                <h4>In-Browser Gap Detection</h4>
+                <p>Find missing approvals and document mismatches before your audit starts. The agent flags gaps locally, keeping your workspace secure.</p>
               </div>
               
               <div className="feature-point">
-                <h4>Ledger Commitments</h4>
-                <p>Commit cryptographic proofs and agent rationales to the Sui blockchain, securing an immutable history.</p>
+                <h4>Immutable Audit Trail</h4>
+                <p>Log reviewer decisions and agent rationales directly on the Sui blockchain. Build a tamper-proof history of your compliance lifecycle.</p>
               </div>
             </div>
           </div>
@@ -927,9 +926,9 @@ export default function LandingPage() {
       <section className="landing-benefits-section" id="benefits">
         <div className="benefits-header">
           <span className="section-eyebrow">Engagement Benefits</span>
-          <h2 className="section-title">A Shared Hub for Verifiable Auditing</h2>
+          <h2 className="section-title">One ledger. Clear benefits for everyone.</h2>
           <p className="benefits-subtitle">
-            Linow streamlines readiness prep for companies and simplifies verification for auditors on a single cryptographic network.
+            No more chasing emails or arguing over dates. Linow creates a single, verifiable source of truth for both companies and auditors.
           </p>
         </div>
 
@@ -1067,29 +1066,44 @@ export default function LandingPage() {
       {/* Bottom CTA Section */}
       <section className="landing-cta-section">
         <div className="cta-glass-card">
-          <h2 className="cta-title">Build your verifiable audit trail</h2>
+          <h2 className="cta-title">Get audit-ready without the chaos.</h2>
           <p className="cta-desc">
-            Choose your role—Company or Auditor—and connect your wallet. Gather evidence, map assertions, and run pre-audit verification anchored on Sui and stored on Walrus.
+            Connect your wallet, point Linow to your compliance files, and run your first browser-based pre-audit today.
           </p>
-          <Link href="/workspace" className="cta-btn-primary">
-            Launch Workspace
-          </Link>
+          <button className="cta-btn-primary" disabled>
+            Coming soon
+          </button>
         </div>
       </section>
 
       {/* Footer */}
       <footer className="landing-footer">
-        <Link href="/" className="footer-brand">
-          <Image
-            className="footer-logo-img"
-            src="/mascot.png"
-            alt="Linow mascot"
-            width={16}
-            height={16}
-          />
-          <span>Linow</span>
-        </Link>
-        <p className="footer-copyright">&copy; {new Date().getFullYear()} Linow. Powered by Sui & Walrus.</p>
+        <div className="footer-left">
+          <Link href="/" className="footer-brand">
+            <Image
+              className="footer-logo-img"
+              src="/icon.png"
+              alt="Linow logo"
+              width={16}
+              height={16}
+            />
+            <span>Linow</span>
+          </Link>
+          <span className="footer-copyright">&copy; {new Date().getFullYear()} Linow. Powered by Sui & Walrus.</span>
+        </div>
+        <div className="footer-right">
+          <a 
+            href="https://x.com/linow_ai" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="footer-x-link"
+            aria-label="X (formerly Twitter)"
+          >
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+          </a>
+        </div>
       </footer>
     </div>
   );

@@ -4748,7 +4748,7 @@ export default function WorkspacePage() {
     <main className="app-container">
       <header className="topbar">
         <div className="topbar-left">
-          <Image className="topbar-logo" src="/mascot.png" alt="Linow mascot" width={22} height={22} priority />
+          <Image className="topbar-logo" src="/icon.png" alt="Linow logo" width={22} height={22} priority />
           <div className="topbar-brand-block">
             <span className="topbar-brand">Linow</span>
             <span className="topbar-badge">AUDIT WORKSPACE</span>

@@ -18,8 +18,8 @@ export const metadata: Metadata = {
   description:
     "Verifiable audit evidence on Sui — upload, verify, and attest documents with tamper-proof blockchain commitments.",
   icons: {
-    icon: "/mascot.png",
-    apple: "/mascot.png",
+    icon: "/icon.png",
+    apple: "/icon.png",
   },
 };
 
