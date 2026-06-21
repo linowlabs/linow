@@ -21,15 +21,23 @@ export interface Finding {
   txDigest: string;
 }
 
+export interface SubCard {
+  title: string;
+  status: "done" | "running" | "queued";
+}
+
 export interface ActivityLog {
   title: string;
   desc: string;
   status: "done" | "running" | "queued";
+  subCards?: SubCard[];
 }
 
 export interface ChatLogItem {
-  sender: "user" | "agent";
+  id?: string;
+  sender: "user" | "agent" | "activity";
   text: string;
+  activityLogs?: ActivityLog[];
 }
 
 export interface ExplorerNode {

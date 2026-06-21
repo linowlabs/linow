@@ -1648,3 +1648,31 @@
   - Keeping buttons at full opacity (`opacity: 1`) while slightly muting the text color provides clean readability and prevents a washed-out appearance.
   - Removing lock icons maintains a cleaner, more text-focused design that matches the minimalist landing page aesthetics.
 
+## 2026-06-21 — Dynamic File Explorer: Remove Hardcoded Folders & Add Drag-to-Root
+
+### Change
+- Files touched:
+  - `app/src/app/workspace-demo/page.tsx`
+  - `app/src/app/workspace-demo/components/FileExplorer.tsx`
+  - `app/src/app/workspace-demo/components/UploadDocumentModal.tsx`
+  - `app/src/app/workspace-demo/demo.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Removed hardcoded `openFolders` initialization (`"demo"`, `"demo/PBC_list"`, etc.) — starts empty `{}`.
+  - Removed hardcoded `defaultFolder="demo/PBC_list/evidence_initial"` and folder filter in `UploadDocumentModal` props — now passes all folders and defaults to root.
+  - Removed hardcoded `"demo/PBC_list"` display name override in `getExplorerNodes()` — user-created folders show their actual name; `FOLDER_METADATA` lookup still works for preset industry templates.
+  - Removed hardcoded `getFolderLabel` switch-case in `UploadDocumentModal` — replaced with generic last-path-segment extractor with root label.
+  - Added a "Drop here to move to root" zone at the bottom of the file tree so users can drag files back out of folders to root level.
+  - Added CSS styles for `.tree-drop-root-zone` with `.drop-active` highlight state.
+
+### Reasoning
+- Why this approach was chosen:
+  - The file explorer was tightly coupled to the demo dataset paths, making it impossible for fresh users (post-onboarding) to create their own folder structure from scratch.
+  - Uploaded files should default to root (no folder) so users can organize them by drag-and-drop, matching real IDE behavior.
+  - A visible drop-to-root zone completes the drag-and-drop cycle — without it, files could be dragged into folders but never back out.
+
+### Tech Debt
+- Known shortcuts:
+  - The drop-to-root zone is always visible for company role; could be hidden when no files exist in folders.
+- Follow-up needed:
+  - None. TypeScript compiles cleanly with zero new errors.
