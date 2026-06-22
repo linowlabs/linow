@@ -14,6 +14,11 @@ interface DetailsModalProps {
   setReviewAssertions: React.Dispatch<React.SetStateAction<string[]>>;
   isRegistering: boolean;
   handleRegisterWeb3ForFile: (fileId: string, docType: string, assertions: string[]) => void;
+  registerNotice: {
+    tone: "success" | "error" | "info";
+    title: string;
+    message?: string;
+  } | null;
 }
 
 export default function DetailsModal({
@@ -27,6 +32,7 @@ export default function DetailsModal({
   setReviewAssertions,
   isRegistering,
   handleRegisterWeb3ForFile,
+  registerNotice,
 }: DetailsModalProps) {
   const isRegistered = selectedReviewFile.status === "registered" || !!pbcRegisteredData[selectedReviewFile.id];
 
@@ -41,6 +47,23 @@ export default function DetailsModal({
         </div>
 
         <div className="modal-body">
+          {registerNotice && (
+            <div className={`register-notice ${registerNotice.tone}`}>
+              <div className="register-notice-icon">
+                {registerNotice.tone === "success" ? (
+                  <Icons.Check size={13} />
+                ) : registerNotice.tone === "error" ? (
+                  <span>!</span>
+                ) : (
+                  <span>...</span>
+                )}
+              </div>
+              <div>
+                <strong>{registerNotice.title}</strong>
+                {registerNotice.message && <p>{registerNotice.message}</p>}
+              </div>
+            </div>
+          )}
           <div className="modal-section-grid">
             <div className="modal-form-side">
               <div className="modal-form-group">

@@ -1466,6 +1466,54 @@
 - Follow-up needed:
   - Move the chat panel styling into `globals.css` when polishing the workspace layout.
 
+## 2026-06-22 -- Fix Workspace Demo Web3 Registration Inputs
+
+### Change
+- Files touched:
+  - `app/src/app/workspace-demo/page.tsx`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Updated `/workspace-demo` Web3 registration to use the real connected Sui wallet for signing instead of the demo/mock wallet address.
+  - Replaced the mock package fallback with the same live package fallback used by the main workspace.
+  - Prevented mock or malformed AuditPack IDs from being passed into the Sui registration transaction.
+  - Typed the local Tatum execute shim with SDK transaction and JSON types.
+
+### Reasoning
+- Why this approach was chosen:
+  - The demo workspace can run with mock UI data, but live Sui transactions must not be built with mock signer, package, or object IDs.
+  - The main workspace worked because it used a real package ID and real wallet path; the demo page needed the same live boundary for registration.
+
+### Tech Debt
+- Known shortcuts:
+  - `/workspace-demo` still has mock data and older lint issues unrelated to the Web3 registration path.
+- Follow-up needed:
+  - Add a real AuditPack creation/reuse flow to `/workspace-demo` if evidence must always link to a pack instead of registering without a pack when the current ID is mock.
+
+## 2026-06-22 -- Inline Workspace Demo Register Notices
+
+### Change
+- Files touched:
+  - `app/src/app/workspace-demo/page.tsx`
+  - `app/src/app/workspace-demo/components/DetailsModal.tsx`
+  - `app/src/app/workspace-demo/components/RegistryWorkspace.tsx`
+  - `app/src/app/workspace-demo/demo.css`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Replaced browser alert popups from evidence registration with inline register notices.
+  - Added success, error, and in-progress messages to the register details modal.
+  - Added the same glassmorphism notice style to the registry workspace for batch registration.
+
+### Reasoning
+- Why this approach was chosen:
+  - Registration feedback should stay inside the workspace flow instead of using localhost/browser popups.
+  - Keeping the modal open after success lets the user immediately inspect the generated Sui and Walrus artifacts.
+
+### Tech Debt
+- Known shortcuts:
+  - Notices are local UI state and are cleared when a new review file is opened.
+- Follow-up needed:
+  - If registration gets multi-step progress in `/workspace-demo`, connect these notices to step-level progress instead of a single summary message.
+
 ## 2026-06-20 — Landing Page Copywriting Polish
 
 ### Change

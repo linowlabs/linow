@@ -10,6 +10,11 @@ interface RegistryWorkspaceProps {
   setReviewDocType: (type: string) => void;
   setReviewAssertions: (assertions: string[]) => void;
   handleRegisterBatch: (fileIds: string[]) => Promise<void>;
+  registerNotice: {
+    tone: "success" | "error" | "info";
+    title: string;
+    message?: string;
+  } | null;
 }
 
 export default function RegistryWorkspace({
@@ -20,6 +25,7 @@ export default function RegistryWorkspace({
   setReviewDocType,
   setReviewAssertions,
   handleRegisterBatch,
+  registerNotice,
 }: RegistryWorkspaceProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -69,6 +75,24 @@ export default function RegistryWorkspace({
           </div>
         </div>
       </div>
+
+      {registerNotice && (
+        <div className={`register-notice registry-register-notice ${registerNotice.tone}`}>
+          <div className="register-notice-icon">
+            {registerNotice.tone === "success" ? (
+              <Icons.Check size={13} />
+            ) : registerNotice.tone === "error" ? (
+              <span>!</span>
+            ) : (
+              <span>...</span>
+            )}
+          </div>
+          <div>
+            <strong>{registerNotice.title}</strong>
+            {registerNotice.message && <p>{registerNotice.message}</p>}
+          </div>
+        </div>
+      )}
 
       {/* Kanban Board Container */}
       <div className="registry-kanban-board">
