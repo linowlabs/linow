@@ -6,6 +6,8 @@ import {
   createAttestationFlow,
   createEmitAgentActionFlow,
   type AssertionId,
+  type ExecuteTransactionBlockInput,
+  type JsonValue,
 } from "@linow/sdk";
 import {
   createDemoEngagement,
@@ -45,6 +47,42 @@ import CompanyOnboarding, { OnboardingResult } from "./components/CompanyOnboard
 import WorkspaceUploadOverlay from "./components/WorkspaceUploadOverlay";
 import UploadDocumentModal from "./components/UploadDocumentModal";
 
+async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : response.statusText,
+    );
+  }
+  return payload as TResponse;
+}
+
+const serverTatumExecute = {
+  executeTransactionBlock(input: ExecuteTransactionBlockInput) {
+    return postJson<JsonValue>("/api/sui/execute", input);
+  },
+};
+
+const LIVE_PACKAGE_ID =
+  process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID ??
+  "0x8460a046d70e0e0940d556d9526c48ee683ca8672390ff6480e937dc9a69d6aa";
+
+const isLiveSuiObjectId = (value?: string | null) =>
+  Boolean(value && /^0x[0-9a-fA-F]{64}$/.test(value));
+
+type RegisterNotice = {
+  tone: "success" | "error" | "info";
+  title: string;
+  message?: string;
+};
+
 export default function WorkspaceDemo() {
   const realWallet = useWalletBridge();
   const [mockAddress, setMockAddress] = useState<string | undefined>(undefined);
@@ -69,6 +107,7 @@ export default function WorkspaceDemo() {
   const [auditPackId, setAuditPackId] = useState<string>("");
   const [registerResult, setRegisterResult] = useState<RegisterResult | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [registerNotice, setRegisterNotice] = useState<RegisterNotice | null>(null);
 
   // Supabase Sync state
   const [engagementId, setEngagementId] = useState<string>("");
@@ -106,6 +145,11 @@ export default function WorkspaceDemo() {
   const [selectedReviewFile, setSelectedReviewFile] = useState<PbcItem | null>(null);
   const [reviewDocType, setReviewDocType] = useState<string>("");
   const [reviewAssertions, setReviewAssertions] = useState<string[]>([]);
+
+  const handleSelectReviewFile = (file: PbcItem | null) => {
+    setSelectedReviewFile(file);
+    setRegisterNotice(null);
+  };
 
   // Folder tree open states
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
@@ -1138,8 +1182,12 @@ Since this completes the missing link for your revenue check, I need your permis
   };
 
   const handleRegisterWeb3ForFile = async (fileId: string, docType: string, assertions: string[]) => {
-    if (!wallet.address) {
-      alert("Please connect your wallet first.");
+    if (!realWallet.address) {
+      setRegisterNotice({
+        tone: "error",
+        title: "Wallet required",
+        message: "Connect a real Sui wallet before registering evidence on-chain.",
+      });
       return;
     }
     setIsRegistering(true);
@@ -1148,6 +1196,7 @@ Since this completes the missing link for your revenue check, I need your permis
     try {
       const activeFile = pbcList.find(p => p.id === fileId);
       if (!activeFile) throw new Error("No active file selected");
+      const activeAuditPackId = isLiveSuiObjectId(auditPackId) ? auditPackId : undefined;
 
       const dummyFile = new File(["dummy sales contract evidence content"], activeFile.name, {
         type: activeFile.name.endsWith(".pdf") ? "application/pdf" : activeFile.name.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv"
@@ -1157,11 +1206,11 @@ Since this completes the missing link for your revenue check, I need your permis
       const fileContent = await dummyFile.arrayBuffer();
 
       const flow = createRegisterEvidenceFlow({
-        packageId: process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID || "0x-mock-package",
-        signerAddress: wallet.address || "0x-mock-signer",
-        signTransaction: wallet.signTransaction as any,
+        packageId: LIVE_PACKAGE_ID,
+        signerAddress: realWallet.address,
+        signTransaction: realWallet.signTransaction,
         encryptionKey: await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]),
-        tatumApiKey: process.env.TATUM_API_KEY,
+        tatum: serverTatumExecute,
       });
 
       // Map string assertion names to numeric AssertionId values
@@ -1183,8 +1232,8 @@ Since this completes the missing link for your revenue check, I need your permis
           description: `Demo registered: ${activeFile.name}`,
         },
         assertions: numericAssertions,
-        auditPackId: auditPackId || undefined,
-        signerAddress: wallet.address || undefined,
+        auditPackId: activeAuditPackId,
+        signerAddress: realWallet.address,
       });
 
       const regInfo: RegisterResult = {
@@ -1217,38 +1266,55 @@ Since this completes the missing link for your revenue check, I need your permis
           assertions: assertions,
           commitment: result.artifacts.commitment,
           walrus_blob_id: result.artifacts.walrus.blobId,
-          audit_pack_id: auditPackId || null,
-          registered_by_wallet: wallet.address,
+          audit_pack_id: activeAuditPackId || null,
+          registered_by_wallet: realWallet.address,
           status: "registered",
         });
         setSyncStatus("Registered evidence successfully synced to Supabase demo store.");
       }
 
-      alert(`Evidence ${activeFile.name} successfully registered on Sui & Walrus!`);
-      setSelectedReviewFile(null);
+      setRegisterNotice({
+        tone: "success",
+        title: "Evidence registered",
+        message: `${activeFile.name} was successfully registered on Sui and Walrus.`,
+      });
     } catch (err) {
       console.error(err);
-      alert(`Registration failed: ${err instanceof Error ? err.message : String(err)}`);
+      setRegisterNotice({
+        tone: "error",
+        title: "Registration failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setIsRegistering(false);
     }
   };
 
   const handleRegisterBatch = async (fileIds: string[]) => {
-    if (!wallet.address) {
-      alert("Please connect your wallet first.");
+    if (!realWallet.address) {
+      setRegisterNotice({
+        tone: "error",
+        title: "Wallet required",
+        message: "Connect a real Sui wallet before registering evidence on-chain.",
+      });
       return;
     }
     setIsRegistering(true);
+    setRegisterNotice({
+      tone: "info",
+      title: "Batch registration in progress",
+      message: `Preparing ${fileIds.length} evidence file(s) for Sui and Walrus registration.`,
+    });
     let successCount = 0;
 
     try {
+      const activeAuditPackId = isLiveSuiObjectId(auditPackId) ? auditPackId : undefined;
       const flow = createRegisterEvidenceFlow({
-        packageId: process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID || "0x-mock-package",
-        signerAddress: wallet.address || "0x-mock-signer",
-        signTransaction: wallet.signTransaction as any,
+        packageId: LIVE_PACKAGE_ID,
+        signerAddress: realWallet.address,
+        signTransaction: realWallet.signTransaction,
         encryptionKey: await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]),
-        tatumApiKey: process.env.TATUM_API_KEY,
+        tatum: serverTatumExecute,
       });
 
       for (const fileId of fileIds) {
@@ -1281,8 +1347,8 @@ Since this completes the missing link for your revenue check, I need your permis
             description: `Batch registered: ${activeFile.name}`,
           },
           assertions: numericAssertions,
-          auditPackId: auditPackId || undefined,
-          signerAddress: wallet.address || undefined,
+          auditPackId: activeAuditPackId,
+          signerAddress: realWallet.address,
         });
 
         const regInfo: RegisterResult = {
@@ -1316,18 +1382,26 @@ Since this completes the missing link for your revenue check, I need your permis
             assertions: assertions,
             commitment: result.artifacts.commitment,
             walrus_blob_id: result.artifacts.walrus.blobId,
-            audit_pack_id: auditPackId || null,
-            registered_by_wallet: wallet.address,
+            audit_pack_id: activeAuditPackId || null,
+            registered_by_wallet: realWallet.address,
             status: "registered",
           });
         }
         successCount++;
       }
 
-      alert(`Successfully registered ${successCount} files in batch on Sui & Walrus!`);
+      setRegisterNotice({
+        tone: "success",
+        title: "Batch registered",
+        message: `${successCount} evidence file(s) were successfully registered on Sui and Walrus.`,
+      });
     } catch (err) {
       console.error(err);
-      alert(`Batch registration failed: ${err instanceof Error ? err.message : String(err)}`);
+      setRegisterNotice({
+        tone: "error",
+        title: "Batch registration failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setIsRegistering(false);
     }
@@ -1606,10 +1680,11 @@ Since this completes the missing link for your revenue check, I need your permis
               pbcList={pbcList}
               pbcRegisteredData={pbcRegisteredData}
               registerResult={registerResult}
-              setSelectedReviewFile={setSelectedReviewFile}
+              setSelectedReviewFile={handleSelectReviewFile}
               setReviewDocType={setReviewDocType}
               setReviewAssertions={setReviewAssertions}
               handleRegisterBatch={handleRegisterBatch}
+              registerNotice={registerNotice}
             />
           ) : activeTab === "verifier" ? (
             <VerifierWorkspace
@@ -1623,7 +1698,7 @@ Since this completes the missing link for your revenue check, I need your permis
           {selectedReviewFile && (
             <DetailsModal
               selectedReviewFile={selectedReviewFile}
-              setSelectedReviewFile={setSelectedReviewFile}
+              setSelectedReviewFile={handleSelectReviewFile}
               pbcRegisteredData={pbcRegisteredData}
               registerResult={registerResult}
               reviewDocType={reviewDocType}
@@ -1632,6 +1707,7 @@ Since this completes the missing link for your revenue check, I need your permis
               setReviewAssertions={setReviewAssertions}
               isRegistering={isRegistering}
               handleRegisterWeb3ForFile={handleRegisterWeb3ForFile}
+              registerNotice={registerNotice}
             />
           )}
         </div>
