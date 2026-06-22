@@ -1,10 +1,11 @@
 docs/docs-archive/
-
+.DS_Store
 node_modules/
 **/node_modules/
 **/dist/
 contracts/**/build/
 
 app/.next/
-
+app/.cache/
+docs-archive
 .env

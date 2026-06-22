@@ -6,7 +6,14 @@ import {
   exportEncryptionKey,
   hashFile,
   type EncryptedPayload,
+  deserializeEncryptedPayload,
+  serializeEncryptedPayload,
+  type SerializedEncryptedPayload,
 } from "./crypto.js";
+
+export type { SerializedEncryptedPayload };
+export { serializeEncryptedPayload };
+
 import type {
   AssertionId,
   CommitmentHex,
@@ -36,6 +43,16 @@ export interface RegisterEvidenceChainResult {
   packageId?: string;
   registrantAddress?: WalletAddress;
   registeredAt?: string;
+}
+
+export interface BatchRegisterEvidenceChainInput {
+  items: RegisterEvidenceChainInput[];
+  signerAddress?: WalletAddress;
+}
+
+export interface BatchRegisterEvidenceChainResult {
+  items: RegisterEvidenceChainResult[];
+  transactionDigest?: string;
 }
 
 export interface CreateRegisterEvidenceHandlerConfig {
@@ -134,11 +151,27 @@ export interface RegisterEvidenceWithArtifactsResult extends RegisterEvidenceRes
   artifacts: RegisterEvidencePreparedArtifacts;
 }
 
-export interface SerializedEncryptedPayload {
-  algorithm: EncryptedPayload["algorithm"];
-  iv: string;
-  ciphertext: string;
+export interface BatchRegisterEvidenceItemInput extends RegisterEvidenceInput {
+  clientId?: string;
 }
+
+export interface BatchRegisterEvidenceInput {
+  items: BatchRegisterEvidenceItemInput[];
+  auditPackId?: string;
+  signerAddress?: WalletAddress;
+}
+
+export interface BatchRegisterEvidenceItemResult extends RegisterEvidenceWithArtifactsResult {
+  clientId?: string;
+}
+
+export interface BatchRegisterEvidenceWithArtifactsResult {
+  items: BatchRegisterEvidenceItemResult[];
+  transactionDigest?: string;
+  warnings: string[];
+}
+
+
 
 export function createRegisterEvidenceHandler(
   config: CreateRegisterEvidenceHandlerConfig,
@@ -166,6 +199,7 @@ export function createRegisterEvidenceHandler(
       walrusBlobIdBytes: textEncoder.encode(walrus.blobId),
       encryptedMetadata: encryptedMetadataBytes,
       assertions: input.assertions,
+      auditPackId: input.auditPackId,
       signerAddress: input.signerAddress,
     });
 
@@ -176,6 +210,7 @@ export function createRegisterEvidenceHandler(
       assertions: input.assertions,
       metadata: input.metadata,
       blobId: walrus.blobId,
+      auditPackId: input.auditPackId,
       registrantAddress: chain.registrantAddress ?? input.signerAddress,
       registeredAt: chain.registeredAt,
       proof: {
@@ -183,6 +218,7 @@ export function createRegisterEvidenceHandler(
         packageId: chain.packageId,
         transactionDigest: chain.transactionDigest,
         walrusBlobId: walrus.blobId,
+        auditPackId: input.auditPackId,
       },
     };
 
@@ -200,6 +236,106 @@ export function createRegisterEvidenceHandler(
         walrus,
         encryptionKey: config.exportEncryptionKey ? await exportEncryptionKey(config.encryptionKey) : undefined,
       },
+    };
+  };
+}
+
+export function createBatchRegisterEvidenceHandler(
+  config: Omit<CreateRegisterEvidenceHandlerConfig, "registerOnChain"> & {
+    registerOnChain: (input: BatchRegisterEvidenceChainInput) => Promise<BatchRegisterEvidenceChainResult>;
+  },
+): (input: BatchRegisterEvidenceInput) => Promise<BatchRegisterEvidenceWithArtifactsResult> {
+  return async function batchRegister(input) {
+    if (input.items.length === 0) {
+      throw new Error("At least one evidence item is required for batch registration.");
+    }
+
+    const preparedItems = [];
+
+    for (const item of input.items) {
+      const signerAddress = item.signerAddress ?? input.signerAddress;
+      const auditPackId = item.auditPackId ?? input.auditPackId;
+      const commitment = await hashFile(item.content);
+      const encryptedFile = await encryptFile(item.content, config.encryptionKey);
+      const encryptedMetadata = await encryptMetadata(item.metadata, config.encryptionKey);
+      const serializedFile = serializeEncryptedPayload(encryptedFile);
+      const serializedMetadata = serializeEncryptedPayload(encryptedMetadata);
+      const encryptedFileBytes = textEncoder.encode(JSON.stringify(serializedFile));
+      const encryptedMetadataBytes = textEncoder.encode(JSON.stringify(serializedMetadata));
+
+      const walrus = await config.walrus.uploadEncryptedBlob({
+        encryptedContent: encryptedFileBytes,
+        epochs: config.walrusEpochs,
+        deletable: config.walrusDeletable,
+        sendObjectTo: signerAddress,
+      });
+
+      preparedItems.push({
+        item,
+        signerAddress,
+        auditPackId,
+        commitment,
+        encryptedFile: serializedFile,
+        encryptedMetadata: serializedMetadata,
+        encryptedMetadataBytes,
+        walrus,
+      });
+    }
+
+    const chain = await config.registerOnChain({
+      signerAddress: input.signerAddress,
+      items: preparedItems.map((prepared) => ({
+        commitment: prepared.commitment,
+        commitmentBytes: hexToBytes(prepared.commitment),
+        walrusBlobId: prepared.walrus.blobId,
+        walrusBlobIdBytes: textEncoder.encode(prepared.walrus.blobId),
+        encryptedMetadata: prepared.encryptedMetadataBytes,
+        assertions: prepared.item.assertions,
+        auditPackId: prepared.auditPackId,
+        signerAddress: prepared.signerAddress,
+      })),
+    });
+
+    return {
+      transactionDigest: chain.transactionDigest,
+      warnings: [
+        "Walrus stores public blobs; only encrypted file and metadata payloads were uploaded or registered.",
+        "Verification proves integrity against the commitment, not document truth or audit sufficiency.",
+      ],
+      items: preparedItems.map((prepared, index) => {
+        const chainItem = chain.items[index];
+        const evidence: EvidenceRecord = {
+          id: chainItem.evidenceId,
+          commitment: prepared.commitment,
+          status: "registered",
+          assertions: prepared.item.assertions,
+          metadata: prepared.item.metadata,
+          blobId: prepared.walrus.blobId,
+          auditPackId: prepared.auditPackId,
+          registrantAddress: chainItem.registrantAddress ?? prepared.signerAddress,
+          registeredAt: chainItem.registeredAt,
+          proof: {
+            evidenceId: chainItem.evidenceId,
+            packageId: chainItem.packageId,
+            transactionDigest: chainItem.transactionDigest,
+            walrusBlobId: prepared.walrus.blobId,
+            auditPackId: prepared.auditPackId,
+          },
+        };
+
+        return {
+          clientId: prepared.item.clientId,
+          evidence,
+          transactionDigest: chainItem.transactionDigest,
+          warnings: [],
+          artifacts: {
+            commitment: prepared.commitment,
+            encryptedFile: prepared.encryptedFile,
+            encryptedMetadata: prepared.encryptedMetadata,
+            walrus: prepared.walrus,
+          },
+        };
+      }),
     };
   };
 }
@@ -233,6 +369,44 @@ export function createRegisterEvidenceFlow(
   });
 
   return createRegisterEvidenceHandler({
+    encryptionKey: config.encryptionKey,
+    walrus,
+    registerOnChain,
+    walrusEpochs: config.walrusEpochs,
+    walrusDeletable: config.walrusDeletable,
+    exportEncryptionKey: config.exportEncryptionKey,
+  });
+}
+
+export function createBatchRegisterEvidenceFlow(
+  config: CreateRegisterEvidenceFlowConfig,
+): (input: BatchRegisterEvidenceInput) => Promise<BatchRegisterEvidenceWithArtifactsResult> {
+  const tatum =
+    config.tatum ??
+    createTatumSuiClient({
+      apiKey: required(config.tatumApiKey, "TATUM_API_KEY"),
+      network: config.tatumNetwork ?? "testnet",
+      endpoint: config.tatumEndpoint,
+      fetchFn: config.fetchFn,
+    });
+  const walrus =
+    config.walrus ??
+    createWalrusClient({
+      network: config.walrusNetwork ?? "testnet",
+      publisherUrl: config.walrusPublisherUrl,
+      aggregatorUrl: config.walrusAggregatorUrl,
+      fetchFn: config.fetchFn,
+    });
+  const registerOnChain = createSuiBatchRegisterOnChainHandler({
+    packageId: config.packageId,
+    signerAddress: config.signerAddress,
+    tatum,
+    signTransaction: config.signTransaction,
+    network: config.tatumNetwork ?? "testnet",
+    clockObjectId: config.clockObjectId,
+  });
+
+  return createBatchRegisterEvidenceHandler({
     encryptionKey: config.encryptionKey,
     walrus,
     registerOnChain,
@@ -282,8 +456,8 @@ export function createSuiRegisterOnChainHandler(
         transaction.pure.vector("u8", Array.from(input.commitmentBytes)),
         transaction.pure.vector("u8", Array.from(input.walrusBlobIdBytes)),
         transaction.pure.vector("u8", Array.from(input.encryptedMetadata)),
-        transaction.pure.vector("u8", input.assertions),
-        transaction.pure.option("address", input.auditPackId ?? null),
+        transaction.pure.vector("u8", Array.from(input.assertions)),
+        transaction.pure.option("id", input.auditPackId ?? null),
         transaction.object(config.clockObjectId ?? SUI_CLOCK_OBJECT_ID),
       ],
     });
@@ -312,6 +486,67 @@ export function createSuiRegisterOnChainHandler(
       packageId: config.packageId,
       registrantAddress: signerAddress,
       registeredAt: new Date().toISOString(),
+    };
+  };
+}
+
+export function createSuiBatchRegisterOnChainHandler(
+  config: CreateSuiRegisterOnChainHandlerConfig,
+): (input: BatchRegisterEvidenceChainInput) => Promise<BatchRegisterEvidenceChainResult> {
+  return async function batchRegisterOnChain(input) {
+    if (input.items.length === 0) {
+      throw new Error("At least one evidence item is required for batch registration.");
+    }
+
+    const signerAddress = input.signerAddress ?? input.items[0]?.signerAddress ?? config.signerAddress;
+    const transaction = new Transaction();
+    transaction.setSender(signerAddress);
+
+    const records = input.items.map((item) =>
+      transaction.moveCall({
+        target: `${config.packageId}::evidence::register_evidence`,
+        arguments: [
+          transaction.pure.vector("u8", Array.from(item.commitmentBytes)),
+          transaction.pure.vector("u8", Array.from(item.walrusBlobIdBytes)),
+          transaction.pure.vector("u8", Array.from(item.encryptedMetadata)),
+          transaction.pure.vector("u8", Array.from(item.assertions)),
+          transaction.pure.option("id", item.auditPackId ?? null),
+          transaction.object(config.clockObjectId ?? SUI_CLOCK_OBJECT_ID),
+        ],
+      }),
+    );
+
+    transaction.transferObjects(records, signerAddress);
+
+    const signed = await config.signTransaction({
+      transaction,
+      chain: toSuiChain(config.network ?? "testnet"),
+    });
+
+    const execution = await config.tatum.executeTransactionBlock({
+      transactionBlock: signed.bytes,
+      signature: signed.signature,
+      options: {
+        showEffects: true,
+        showEvents: true,
+        showObjectChanges: true,
+      },
+      requestType: "WaitForLocalExecution",
+    });
+
+    const transactionDigest = extractTransactionDigest(execution);
+    const evidenceIds = extractEvidenceIds(execution, input.items.length);
+    const registeredAt = new Date().toISOString();
+
+    return {
+      transactionDigest,
+      items: evidenceIds.map((evidenceId) => ({
+        evidenceId,
+        transactionDigest,
+        packageId: config.packageId,
+        registrantAddress: signerAddress,
+        registeredAt,
+      })),
     };
   };
 }
@@ -360,14 +595,6 @@ function toSuiChain(network: TatumSuiNetwork): SignRegisterEvidenceTransactionIn
   return "sui:testnet";
 }
 
-export function serializeEncryptedPayload(payload: EncryptedPayload): SerializedEncryptedPayload {
-  return {
-    algorithm: payload.algorithm,
-    iv: bytesToBase64(payload.iv),
-    ciphertext: bytesToBase64(payload.ciphertext),
-  };
-}
-
 function hexToBytes(value: string): Uint8Array {
   if (value.length % 2 !== 0) {
     throw new Error("Hex string must have an even length.");
@@ -380,26 +607,6 @@ function hexToBytes(value: string): Uint8Array {
   }
 
   return bytes;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
-
-  if (typeof btoa === "function") {
-    return btoa(binary);
-  }
-
-  const nodeBuffer = globalThis as typeof globalThis & {
-    Buffer?: {
-      from(value: string, encoding: "binary"): { toString(encoding: "base64"): string };
-    };
-  };
-
-  if (nodeBuffer.Buffer) {
-    return nodeBuffer.Buffer.from(binary, "binary").toString("base64");
-  }
-
-  throw new Error("No base64 encoder is available in this runtime.");
 }
 
 function extractEvidenceId(execution: unknown): string {
@@ -441,6 +648,43 @@ function extractEvidenceId(execution: unknown): string {
   }
 
   throw new Error("Could not find created EvidenceRecord ID in Sui execution result.");
+}
+
+function extractEvidenceIds(execution: unknown, expectedCount: number): string[] {
+  const objectChangeIds = getObjectChanges(execution)
+    .filter(
+      (change) =>
+        "objectType" in change &&
+        typeof change.objectType === "string" &&
+        change.objectType.endsWith("::evidence::EvidenceRecord") &&
+        "objectId" in change &&
+        typeof change.objectId === "string",
+    )
+    .map((change) => change.objectId as string);
+
+  if (objectChangeIds.length >= expectedCount) {
+    return objectChangeIds.slice(0, expectedCount);
+  }
+
+  const eventIds = getEvents(execution)
+    .filter(
+      (event) =>
+        "type" in event &&
+        typeof event.type === "string" &&
+        event.type.endsWith("::evidence::EvidenceRegistered") &&
+        "parsedJson" in event &&
+        event.parsedJson &&
+        typeof event.parsedJson === "object" &&
+        "evidence_id" in event.parsedJson &&
+        typeof event.parsedJson.evidence_id === "string",
+    )
+    .map((event) => (event.parsedJson as { evidence_id: string }).evidence_id);
+
+  if (eventIds.length >= expectedCount) {
+    return eventIds.slice(0, expectedCount);
+  }
+
+  throw new Error(`Could not find ${expectedCount} created EvidenceRecord IDs in Sui execution result.`);
 }
 
 function extractTransactionDigest(execution: unknown): string | undefined {

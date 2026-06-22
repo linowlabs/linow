@@ -1,0 +1,9 @@
+entry_id,date,account_code,account_name,debit_idr,credit_idr,description,source_doc,prepared_by,approved_by
+JRN-2026-04-088,2026-04-30,1200,Accounts Receivable,336000000,0,Recognize April revenue,sales_register_q2,Finance Staff,Finance Controller
+JRN-2026-04-088,2026-04-30,4100,Revenue,0,336000000,Recognize April revenue,sales_register_q2,Finance Staff,Finance Controller
+JRN-2026-05-102,2026-05-31,1200,Accounts Receivable,371750000,0,Recognize May revenue,sales_register_q2,Finance Staff,Finance Controller
+JRN-2026-05-102,2026-05-31,4100,Revenue,0,371750000,Recognize May revenue,sales_register_q2,Finance Staff,Finance Controller
+JRN-2026-06-117,2026-06-30,1250,Contract Asset,72000000,0,Manual Orion go-live acceleration adjustment,manual_adjustment_note,Finance Controller,MISSING
+JRN-2026-06-117,2026-06-30,4100,Revenue,0,72000000,Manual Orion go-live acceleration adjustment,manual_adjustment_note,Finance Controller,MISSING
+JRN-2026-06-118,2026-06-30,1200,Accounts Receivable,391000000,0,Recognize June revenue,sales_register_q2,Finance Staff,Finance Controller
+JRN-2026-06-118,2026-06-30,4100,Revenue,0,391000000,Recognize June revenue,sales_register_q2,Finance Staff,Finance Controller

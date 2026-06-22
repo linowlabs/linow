@@ -1,0 +1,60 @@
+{
+  "case_id": "LINOW-ISA500-Q2REV-2026-ACC",
+  "stage": "before_remediation",
+  "overall_readiness_score": 74,
+  "assertion_coverage": {
+    "Existence": "covered",
+    "Completeness": "covered",
+    "Valuation & Allocation": "covered",
+    "Rights & Obligations": "partial_gap",
+    "Cut-off": "exception_detected",
+    "Classification": "partial_gap",
+    "Occurrence": "partial_gap",
+    "Accuracy": "covered_with_exception"
+  },
+  "open_gaps": [
+    {
+      "gap_id": "GAP-01",
+      "title": "Missing Commercial Committee approval for material Orion contract",
+      "severity": "HIGH",
+      "affected_assertions": [
+        "Rights & Obligations",
+        "Occurrence"
+      ],
+      "trigger": "Contract C-ORION-2026-019 total value IDR 855,000,000 exceeds approval threshold IDR 750,000,000.",
+      "missing_evidence": "Commercial Committee minutes or approval log.",
+      "recommendation": "Upload board or Commercial Committee minutes approving the Orion contract."
+    },
+    {
+      "gap_id": "GAP-02",
+      "title": "Missing CFO approval for manual revenue adjustment",
+      "severity": "HIGH",
+      "affected_assertions": [
+        "Classification",
+        "Accuracy",
+        "Rights & Obligations"
+      ],
+      "trigger": "JRN-2026-06-117 manual adjustment IDR 72,000,000 exceeds approval threshold IDR 50,000,000 and approved_by is MISSING.",
+      "missing_evidence": "CFO approval evidence.",
+      "recommendation": "Upload CFO approval for JRN-2026-06-117."
+    },
+    {
+      "gap_id": "GAP-03",
+      "title": "Potential cut-off issue for Orion implementation milestone 2",
+      "severity": "MEDIUM",
+      "affected_assertions": [
+        "Cut-off",
+        "Occurrence"
+      ],
+      "trigger": "Service acceptance certificate shows UAT on 2026-06-25, but delivery log shows production go-live on 2026-07-02.",
+      "missing_evidence": "Additional production readiness evidence dated on or before 2026-06-30, or management analysis supporting June recognition.",
+      "recommendation": "Escalate for auditor review. Do not mark as fully resolved using UAT alone."
+    }
+  ],
+  "agent_must_not_claim": [
+    "Do not claim the bank issued the statement unless connector proof exists.",
+    "Do not claim revenue is correctly recognized with audit certainty.",
+    "Do not issue audit opinion.",
+    "Do not upgrade source confidence above L2 before auditor attestation."
+  ]
+}

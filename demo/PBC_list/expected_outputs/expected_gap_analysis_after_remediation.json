@@ -1,0 +1,28 @@
+{
+  "case_id": "LINOW-ISA500-Q2REV-2026-ACC",
+  "stage": "after_remediation",
+  "overall_readiness_score": 88,
+  "assertion_coverage": {
+    "Existence": "covered",
+    "Completeness": "covered",
+    "Valuation & Allocation": "covered",
+    "Rights & Obligations": "covered_for_approval",
+    "Cut-off": "exception_still_requires_review",
+    "Classification": "covered_for_manual_je_approval",
+    "Occurrence": "covered_with_cutoff_exception",
+    "Accuracy": "covered"
+  },
+  "resolved_gaps": [
+    "GAP-01",
+    "GAP-02"
+  ],
+  "remaining_review_items": [
+    {
+      "gap_id": "GAP-03",
+      "title": "Potential cut-off issue for Orion implementation milestone 2",
+      "status": "open_review_item",
+      "reason": "Commercial approval and CFO approval do not eliminate delivery timing risk."
+    }
+  ],
+  "source_confidence_expected": "L2 before auditor attestation, L3 after auditor wallet attests selected evidence."
+}

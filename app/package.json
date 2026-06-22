@@ -5,18 +5,23 @@
   "scripts": {
     "predev": "npm --prefix ../sdk install && npm --prefix ../sdk run build",
     "prebuild": "npm --prefix ../sdk install && npm --prefix ../sdk run build",
+    "agent:smoke": "node ./scripts/agent-cli-smoke.mjs",
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "patch-css": "node C:\\Users\\USER\\.gemini\\antigravity-ide\\scratch\\patch_css.js"
   },
   "dependencies": {
     "@linow/sdk": "file:../sdk",
     "@mysten/dapp-kit-react": "^2.0.3",
     "@mysten/sui": "^2.17.0",
+    "mammoth": "^1.12.0",
     "next": "16.2.7",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20",

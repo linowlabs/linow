@@ -7,10 +7,13 @@ export {
   createSuiAttestationHandler,
 } from "./attest.js";
 export {
+  createBatchRegisterEvidenceFlow,
+  createBatchRegisterEvidenceHandler,
   createRegisterEvidenceClient,
   createRegisterEvidenceFlow,
   createRegisterEvidenceFlowFromEnv,
   createRegisterEvidenceHandler,
+  createSuiBatchRegisterOnChainHandler,
   createSuiRegisterOnChainHandler,
   serializeEncryptedPayload,
 } from "./register.js";
@@ -22,6 +25,29 @@ export {
   createVerifyEvidenceHandler,
   parseEvidenceRecordObject,
 } from "./verify.js";
+export {
+  createAuditPackClient,
+  createAuditPackFlow,
+  createAuditPackFlowFromEnv,
+  createSuiCreateAuditPackHandler,
+  createSuiGetAuditPackHandler,
+  parseAuditPackObject,
+} from "./audit-pack.js";
+export {
+  createAgentActionClient,
+  createEmitAgentActionFlow,
+  createEmitAgentActionFlowFromEnv,
+  createSuiEmitAgentActionHandler,
+} from "./agent-action.js";
+export {
+  createDelegateKeyFlow,
+  createStagingMemWalClient,
+  validateMemWalCore,
+  storeAgentOutputsInMemWal,
+  recallPriorAuditMemory,
+  MEMWAL_DEFAULT_RELAYER,
+  MEMWAL_STAGING_RELAYER,
+} from "./memwal.js";
 export { createTatumSuiClient, TATUM_SUI_ENDPOINTS, TatumSuiRpcError } from "./tatum.js";
 export { createWalrusClient, WALRUS_HTTP_ENDPOINTS } from "./walrus.js";
 export {
@@ -53,6 +79,12 @@ export type {
 } from "./attest.js";
 export type { LinowClient, LinowClientHandlers } from "./client.js";
 export type {
+  BatchRegisterEvidenceChainInput,
+  BatchRegisterEvidenceChainResult,
+  BatchRegisterEvidenceInput,
+  BatchRegisterEvidenceItemInput,
+  BatchRegisterEvidenceItemResult,
+  BatchRegisterEvidenceWithArtifactsResult,
   CreateRegisterEvidenceFlowConfig,
   CreateRegisterEvidenceFlowFromEnvConfig,
   CreateRegisterEvidenceHandlerConfig,
@@ -75,6 +107,27 @@ export type {
   VerifyEvidenceEnvironment,
 } from "./verify.js";
 export type {
+  CreateAuditPackChainInput,
+  CreateAuditPackChainResult,
+  CreateAuditPackFlowConfig,
+  CreateAuditPackFlowFromEnvConfig,
+  CreateAuditPackResult,
+  CreateSuiCreateAuditPackHandlerConfig,
+  CreateSuiGetAuditPackHandlerConfig,
+  GetAuditPackInput,
+  GetAuditPackResult,
+} from "./audit-pack.js";
+export type {
+  AgentActionEventProof,
+  CreateSuiEmitAgentActionHandlerConfig,
+  EmitAgentActionChainInput,
+  EmitAgentActionChainResult,
+  EmitAgentActionFlowConfig,
+  EmitAgentActionFlowFromEnvConfig,
+  EmitAgentActionInput,
+  EmitAgentActionResult,
+} from "./agent-action.js";
+export type {
   ExecuteTransactionBlockInput,
   JsonValue,
   SuiObjectReadOptions,
@@ -95,8 +148,19 @@ export type {
   WalrusUploadResult,
 } from "./walrus.js";
 export {
+  readEncryptedAgentArtifact,
+  readEncryptedMemoryManifest,
+  readJsonAgentArtifact,
+  readJsonMemoryManifest,
+  uploadEncryptedAgentArtifact,
+  uploadEncryptedMemoryManifest,
+  uploadJsonAgentArtifact,
+  uploadJsonMemoryManifest,
+} from "./walrus.js";
+export {
   ATTESTATION_TYPE_VALUES,
   ASSERTION_IDS,
+  AUDIT_PACK_STATUSES,
   EVIDENCE_STATUS_VALUES,
   RETENTION_STATUS_VALUES,
   SOURCE_CONFIDENCE_LEVELS,
@@ -108,6 +172,8 @@ export type {
   AttestationType,
   AttestEvidenceInput,
   AttestEvidenceResult,
+  AuditPack,
+  AgentAction,
   BinaryContent,
   BlobId,
   CommitmentHex,
@@ -129,4 +195,5 @@ export type {
   VerificationResult,
   VerifyEvidenceInput,
   WalletAddress,
+  WalrusMemoryManifest,
 } from "./types.js";

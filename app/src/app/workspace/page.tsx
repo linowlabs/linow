@@ -1,0 +1,4972 @@
+"use client";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import {
+  createAttestationFlow,
+  createAuditPackFlow,
+  createBatchRegisterEvidenceFlow,
+  createEmitAgentActionFlow,
+  createRegisterEvidenceFlow,
+  createVerifyEvidenceFlow,
+  encryptJson,
+  generateEncryptionKey,
+  serializeEncryptedPayload,
+  type AssertionId,
+  type AttestationType,
+  type AgentActionEventProof,
+  type ExecuteTransactionBlockInput,
+  type JsonValue,
+  type SourceConfidenceLevel,
+  type SuiObjectReadOptions,
+} from "@linow/sdk";
+import {
+  createDemoEngagement,
+  downloadDemoEvidenceFile,
+  insertDemoAgentAction,
+  insertDemoAttestation,
+  isDemoStoreConfigured,
+  loadDemoEngagement,
+  updateDemoEngagement,
+  uploadDemoEvidenceFile,
+  upsertDemoEvidence,
+  type DemoEvidenceRow,
+} from "@/lib/demo-store";
+import { useWalletBridge } from "@/lib/wallet-context";
+
+type WorkspaceRole = "company" | "auditor" | "verifier";
+type RailPanel = "explorer" | "export" | "settings";
+type BottomTab = "details" | "chain" | "memory" | "agent" | "privacy" | "raw";
+type OperationType = "register" | "batch" | "verify" | "attest" | "agent";
+type RecordStatus = "Registered" | "Superseded";
+type LocalDocumentStatus = "local" | "queued" | "registering" | "registered" | "flagged";
+
+interface AttestationSummary {
+  id: string;
+  action: string;
+  reviewer: string;
+  note: string;
+  txDigest: string;
+  createdAt: string;
+}
+
+interface EvidenceRecord {
+  id: string;
+  date: string;
+  type: string;
+  source: string;
+  commitment: string;
+  status: RecordStatus;
+  blobId: string;
+  assertions: string[];
+  reviewer: string;
+  notes: string;
+  fileSize?: string;
+  fileName?: string;
+  sourceFile?: File;
+  auditPackId?: string;
+  latestAttestation?: AttestationSummary;
+  demoEvidenceRowId?: string;
+  demoStoragePath?: string;
+}
+
+interface LocalDocument {
+  id: string;
+  file: File;
+  fileName: string;
+  fileSize: string;
+  addedAt: string;
+  documentType: string;
+  source: string;
+  description: string;
+  assertions: string[];
+  status: LocalDocumentStatus;
+  evidenceId?: string;
+  warning?: string;
+  demoEvidenceRowId?: string;
+  demoStoragePath?: string;
+}
+
+interface AuditPackDraft {
+  id?: string;
+  txDigest?: string;
+  owner?: string;
+  createdAt?: string;
+  status: "not-created" | "created";
+}
+
+interface ProgressStep {
+  label: string;
+  status: "pending" | "running" | "done" | "error";
+  detail?: string;
+}
+
+interface RegisterResult {
+  objectId: string;
+  txDigest: string;
+  blobId: string;
+  commitment: string;
+  encryptedFileSize: string;
+  encryptedMetadataSize: string;
+  sourceConfidence: string;
+}
+
+interface VerificationSession {
+  evidenceId: string;
+  status: "success" | "tampered";
+  checkedFileLabel: string;
+  checkedAt: string;
+}
+
+interface ProofArtifactsSnapshot {
+  auditPackId?: string;
+  evidenceId?: string;
+  txDigest?: string;
+  packageId?: string;
+  commitment?: string;
+  blobReference?: string;
+  attestationId?: string;
+  verificationStatus?: "success" | "tampered";
+  checkedFileLabel?: string;
+  memoryStatus?: string;
+  agentActionTxDigest?: string;
+  agentActionEventType?: string;
+  agentActionEventSeq?: string;
+  agentActionOutputHash?: string;
+  updatedAt: string;
+}
+
+interface AgentFindingSummary {
+  id: string;
+  title: string;
+  severity: string;
+  status: "draft" | "approved" | "logged" | "blocked";
+}
+
+interface AgentActionCandidate {
+  packId?: string;
+  actionType: string;
+  outputHash: string;
+  targetKind?: string;
+  targetId?: string;
+  evidenceId?: string;
+  documentId?: string;
+  findingId?: string;
+  requiresHumanApproval: boolean;
+}
+
+interface LoggedAgentAction {
+  key: string;
+  packId: string;
+  evidenceId?: string;
+  actionType: string;
+  outputHash: string;
+  targetKind?: string;
+  targetId?: string;
+  signer: string;
+  txDigest?: string;
+  packageId?: string;
+  eventCount: number;
+  objectChangeCount: number;
+  event?: AgentActionEventProof;
+  loggedAt: string;
+}
+
+interface AgentActionLogState {
+  status: "idle" | "signing" | "success" | "error";
+  message: string;
+  activeKey?: string;
+  logs: LoggedAgentAction[];
+}
+
+interface AgentDocumentReview {
+  id: string;
+  filename: string;
+  evidenceId?: string;
+  documentType: string;
+  confidence?: number;
+  classificationRationale?: string;
+  classificationLimitations: string[];
+  sourceConfidence?: string;
+  sourceReason?: string;
+  sourceCaveats: string[];
+  mappedAssertions: Array<{
+    label: string;
+    coverage: string;
+    confidence?: number;
+    rationale?: string;
+  }>;
+  metadataSummary: string[];
+}
+
+interface AgentFindingReview {
+  id: string;
+  title: string;
+  severity: string;
+  status: string;
+  condition?: string;
+  criteria?: string;
+  cause?: string;
+  effect?: string;
+  recommendation?: string;
+  missingAssertions: string[];
+  citationCount: number;
+}
+
+interface AgentWorkspaceReview {
+  documents: AgentDocumentReview[];
+  findings: AgentFindingReview[];
+  gapSummary: {
+    readinessScore?: number;
+    coveredLabels: string[];
+    missingLabels: string[];
+    recommendations: string[];
+  };
+  approval: {
+    requiresHumanApproval: boolean;
+    chainWriteReady: boolean;
+    outputHashes: string[];
+    nextSteps: string[];
+  };
+  persistence: {
+    memoryNamespace?: string;
+    memwalStatus?: string;
+    walrusStatus?: string;
+    manifestBlobId?: string;
+    artifactBlobId?: string;
+    linkedDocuments?: number;
+    totalDocuments?: number;
+  };
+}
+
+interface WalrusMemoryReloadResult {
+  status: "reloaded";
+  encrypted: true;
+  network: string;
+  manifestBlobId: string;
+  artifactBlobId: string;
+  manifest: {
+    schemaName?: string;
+    schemaVersion?: string;
+    packId?: string;
+    createdAt?: string;
+    evidenceRefCount: number;
+    agentOutputHashCount: number;
+    findingHashCount: number;
+    owner?: string;
+    auditor?: string;
+  };
+  artifact: {
+    schemaName?: string;
+    schemaVersion?: string;
+    packId?: string;
+    createdAt?: string;
+    documentCount: number;
+    outputHashCount: number;
+    artifactCount: number;
+    findingCount: number;
+    recalledCount: number;
+    recallNoteCount: number;
+    recallItemCount: number;
+  };
+}
+
+interface WalrusMemoryReloadState {
+  status: "idle" | "loading" | "success" | "error";
+  message: string;
+  result?: WalrusMemoryReloadResult;
+}
+
+interface AgentRunState {
+  status: "idle" | "running" | "success" | "error";
+  message: string;
+  recalledPriorCount?: number;
+  readinessScore?: number;
+  documentsAnalyzed?: number;
+  findings: AgentFindingSummary[];
+  actionCandidates: AgentActionCandidate[];
+  memoryStatus?: string;
+  trace: AgentTraceEntry[];
+  raw?: unknown;
+}
+
+interface AgentTraceEntry {
+  id: string;
+  title: string;
+  detail: string;
+  tone: "info" | "success" | "warning";
+  fileName?: string;
+  stepMs?: number;
+  totalMs?: number;
+}
+
+interface RegisterDraftOverride {
+  file: File;
+  documentType: string;
+  source: string;
+  description: string;
+  assertions: string[];
+  localDocumentId?: string;
+}
+
+interface RegisterEvidenceDraft {
+  file: File;
+  documentType: string;
+  source: string;
+  description: string;
+  assertions: string[];
+  localDocumentId?: string;
+}
+
+interface RegisteredEvidenceArtifacts {
+  record: EvidenceRecord;
+  result: RegisterResult;
+  localDocumentId?: string;
+}
+
+interface BatchRegistrationSummary {
+  total: number;
+  completed: number;
+  failed: number;
+  currentFile?: string;
+  lastError?: string;
+}
+
+interface CreatedAuditPackArtifacts {
+  id: string;
+  txDigest?: string;
+  owner: string;
+  createdAt: string;
+}
+
+interface DemoEngagementState {
+  id?: string;
+  companyWallet?: string;
+  auditorWallet?: string;
+  status: "disabled" | "idle" | "loading" | "ready" | "error";
+  message: string;
+}
+
+interface VerifierExport {
+  schema: "linow_demo_verifier_export";
+  version: "1.0.0";
+  generatedAt: string;
+  engagement: {
+    id?: string;
+    companyWallet?: string;
+    auditorWallet?: string;
+  };
+  chain: {
+    packageId: string;
+    auditPackId?: string;
+  };
+  evidence: Array<{
+    evidenceId: string;
+    fileName?: string;
+    documentType: string;
+    source: string;
+    commitment: string;
+    walrusBlobId: string;
+    auditPackId?: string;
+    assertions: string[];
+    status: string;
+    latestAttestation?: AttestationSummary;
+    demoStoragePath?: string;
+  }>;
+  memory: {
+    memwalStatus?: string;
+    walrusStatus?: string;
+    namespace?: string;
+    manifestBlobId?: string;
+    artifactBlobId?: string;
+    reloadStatus: WalrusMemoryReloadState["status"];
+  };
+  agentActions: Array<{
+    packId: string;
+    evidenceId?: string;
+    actionType: string;
+    outputHash: string;
+    txDigest?: string;
+    eventType?: string;
+    eventSeq?: string;
+    signer: string;
+    loggedAt: string;
+  }>;
+  verification: {
+    latestStatus: "idle" | "success" | "tampered";
+    checkedFileLabel?: string;
+    computedHash?: string;
+    expectedHash?: string;
+  };
+  limitations: string[];
+}
+
+const ISA_ASSERTIONS = [
+  "Existence",
+  "Completeness",
+  "Valuation",
+  "Rights & Obligations",
+  "Cut-off",
+  "Classification",
+  "Occurrence",
+  "Accuracy",
+];
+
+const PACKAGE_ID =
+  process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID ??
+  "0x8460a046d70e0e0940d556d9526c48ee683ca8672390ff6480e937dc9a69d6aa";
+
+const WORKSPACE_AGENT_PROVIDER =
+  process.env.NEXT_PUBLIC_AGENT_PROVIDER === "groq" || process.env.NEXT_PUBLIC_AGENT_PROVIDER === "gemini"
+    ? process.env.NEXT_PUBLIC_AGENT_PROVIDER
+    : "gemini";
+
+const TEXT_AGENT_EXTENSIONS = new Set([
+  "csv",
+  "json",
+  "md",
+  "markdown",
+  "txt",
+  "tsv",
+  "log",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+const STAGED_AGENT_EXTENSIONS = new Set([
+  ...TEXT_AGENT_EXTENSIONS,
+  "pdf",
+  "xlsx",
+  "xls",
+  "xlsm",
+  "xlsb",
+  "docx",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "bmp",
+  "tif",
+  "tiff",
+]);
+
+const DEFAULT_AGENT_STATE: AgentRunState = {
+  status: "idle",
+  message: "Select evidence or a folder, then run analysis when the pack has supported evidence files.",
+  findings: [],
+  actionCandidates: [],
+  trace: [],
+};
+
+const DEFAULT_MEMORY_RELOAD_STATE: WalrusMemoryReloadState = {
+  status: "idle",
+  message: "Run agent analysis with Walrus fallback configured, then reload the encrypted memory artifact.",
+};
+
+const DEFAULT_AGENT_ACTION_LOG_STATE: AgentActionLogState = {
+  status: "idle",
+  message: "Approve an agent action candidate to log its output hash on Sui.",
+  logs: [],
+};
+
+const DEFAULT_DEMO_ENGAGEMENT_STATE: DemoEngagementState = {
+  status: isDemoStoreConfigured() ? "idle" : "disabled",
+  message: isDemoStoreConfigured()
+    ? "Create or load a shared demo engagement to sync across browsers."
+    : "Supabase demo persistence is not configured.",
+};
+
+async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : `Request failed with HTTP ${response.status}.`,
+    );
+  }
+
+  return payload as TResponse;
+}
+
+async function postFormData<TResponse>(url: string, body: FormData): Promise<TResponse> {
+  const response = await fetch(url, {
+    method: "POST",
+    body,
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : "Request failed.",
+    );
+  }
+
+  return payload as TResponse;
+}
+
+const serverTatumExecute = {
+  executeTransactionBlock(input: ExecuteTransactionBlockInput) {
+    return postJson<JsonValue>("/api/sui/execute", input);
+  },
+};
+
+const serverTatumRead = {
+  getObject(objectId: string, options?: SuiObjectReadOptions) {
+    return postJson<JsonValue>("/api/sui/object", { objectId, options });
+  },
+};
+
+function truncateValue(value: string, visible = 18): string {
+  return value.length > visible ? `${value.substring(0, visible)}...` : value;
+}
+
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function toSourceLabel(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) return "Company Upload (L2)";
+  return trimmed.includes("(L") ? trimmed : `${trimmed} (L2)`;
+}
+
+function toAssertionId(assertion: string): AssertionId {
+  const index = ISA_ASSERTIONS.indexOf(assertion);
+  if (index < 0) throw new Error(`Unsupported ISA assertion: ${assertion}`);
+  return index as AssertionId;
+}
+
+function toAttestationType(action: string): AttestationType {
+  if (action === "IssueFlagged") return "rejected";
+  if (action === "EvidenceReviewed") return "evidenceVerified";
+  return "hashConfirmed";
+}
+
+function toAttestationLabel(value: AttestationType): string {
+  const labels: Record<AttestationType, string> = {
+    evidenceVerified: "Evidence reviewed",
+    packReviewed: "Pack reviewed",
+    hashConfirmed: "Hash confirmed",
+    rejected: "Issue flagged",
+  };
+
+  return labels[value];
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function nowLabel(): string {
+  return new Date().toISOString().replace("T", " ").substring(0, 16);
+}
+
+function createLocalDocument(file: File): LocalDocument {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    file,
+    fileName: file.name,
+    fileSize: formatMegabytes(file.size),
+    addedAt: nowLabel(),
+    documentType: inferDocumentType(file.name),
+    source: "Company Upload (L2)",
+    description: "",
+    assertions: ["Existence"],
+    status: "local",
+  };
+}
+
+function createLocalDocumentFromDemoEvidence(row: DemoEvidenceRow, file: File): LocalDocument {
+  return {
+    id: row.id,
+    file,
+    fileName: row.file_name,
+    fileSize: formatMegabytes(row.file_size ?? file.size),
+    addedAt: row.created_at?.replace("T", " ").substring(0, 16) ?? nowLabel(),
+    documentType: row.document_type ?? inferDocumentType(row.file_name),
+    source: row.source ?? "Company Upload (L2)",
+    description: row.description ?? "",
+    assertions: Array.isArray(row.assertions) ? row.assertions : ["Existence"],
+    status: row.evidence_id ? "registered" : "local",
+    evidenceId: row.evidence_id ?? undefined,
+    demoEvidenceRowId: row.id,
+    demoStoragePath: row.storage_path ?? undefined,
+  };
+}
+
+function createEvidenceRecordFromDemoEvidence(
+  row: DemoEvidenceRow,
+  sourceFile?: File,
+  attestation?: AttestationSummary,
+): EvidenceRecord | undefined {
+  if (!row.evidence_id || !row.commitment || !row.walrus_blob_id) return undefined;
+
+  return {
+    id: row.evidence_id,
+    date: row.updated_at?.replace("T", " ").substring(0, 16) ?? row.created_at?.replace("T", " ").substring(0, 16) ?? nowLabel(),
+    type: row.document_type ?? inferDocumentType(row.file_name),
+    source: row.source ?? "Company Upload (L2)",
+    commitment: row.commitment,
+    status: "Registered",
+    blobId: row.walrus_blob_id,
+    assertions: Array.isArray(row.assertions) ? row.assertions : [],
+    reviewer: attestation?.reviewer ?? "n/a",
+    notes: attestation?.note ?? row.description ?? "Loaded from shared demo engagement.",
+    fileSize: row.file_size ? formatMegabytes(row.file_size) : undefined,
+    fileName: row.file_name,
+    sourceFile,
+    auditPackId: row.audit_pack_id ?? undefined,
+    latestAttestation: attestation,
+    demoEvidenceRowId: row.id,
+    demoStoragePath: row.storage_path ?? undefined,
+  };
+}
+
+function toDemoEvidenceRow(input: {
+  engagementId: string;
+  document: LocalDocument;
+  bucket?: string;
+  path?: string;
+  record?: EvidenceRecord;
+  signerAddress?: string;
+}): DemoEvidenceRow {
+  return {
+    id: input.document.demoEvidenceRowId ?? input.document.id,
+    engagement_id: input.engagementId,
+    evidence_id: input.record?.id ?? input.document.evidenceId ?? null,
+    file_name: input.document.fileName,
+    file_mime: input.document.file.type || "application/octet-stream",
+    file_size: input.document.file.size,
+    storage_bucket: input.bucket ?? "demo-evidence",
+    storage_path: input.path ?? input.document.demoStoragePath ?? null,
+    document_type: input.record?.type ?? input.document.documentType,
+    source: input.record?.source ?? input.document.source,
+    description: input.record?.notes ?? input.document.description,
+    assertions: input.record?.assertions ?? input.document.assertions,
+    commitment: input.record?.commitment ?? null,
+    walrus_blob_id: input.record?.blobId ?? null,
+    audit_pack_id: input.record?.auditPackId ?? null,
+    registered_by_wallet: input.record ? input.signerAddress ?? null : null,
+    status: input.record ? "registered" : input.document.status,
+  };
+}
+
+function isLocalDocumentReady(document: LocalDocument): boolean {
+  return Boolean(
+    document.documentType.trim() &&
+    document.source.trim() &&
+    document.description.trim() &&
+    document.assertions.length > 0,
+  );
+}
+
+function inferDocumentType(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.includes("bank")) return "Bank Statement";
+  if (lower.includes("invoice")) return "Sales Invoice";
+  if (lower.includes("contract")) return "Vendor Contract";
+  if (lower.includes("ledger")) return "ERP Ledger Export";
+  if (lower.includes("board")) return "Board Resolution";
+  return "Audit Evidence";
+}
+
+function getFileExtension(fileName: string): string {
+  return fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
+}
+
+function isAgentProcessableFile(file: File): boolean {
+  return file.type.startsWith("text/") || STAGED_AGENT_EXTENSIONS.has(getFileExtension(file.name));
+}
+
+function isSuiObjectId(value: string | undefined): value is string {
+  return Boolean(value && /^0x[0-9a-fA-F]{2,}$/.test(value));
+}
+
+async function readAgentText(file: File): Promise<{ text?: string; warning?: string }> {
+  const extension = getFileExtension(file.name);
+  const isTextLike = file.type.startsWith("text/") || TEXT_AGENT_EXTENSIONS.has(extension);
+
+  if (!isTextLike) {
+    return {
+      warning: "This file needs server-side staging before the agent can analyze its contents.",
+    };
+  }
+
+  const text = (await file.text()).trim();
+  if (!text) {
+    return { warning: "This file has no readable text for the agent." };
+  }
+
+  return { text };
+}
+
+interface StagedAgentFileResponse {
+  filePath: string;
+  ingestion?: {
+    filename?: string;
+    format?: string;
+    warnings?: string[];
+  };
+  extracted_characters?: number;
+  warnings?: string[];
+}
+
+async function stageAgentFile(file: File): Promise<StagedAgentFileResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return postFormData<StagedAgentFileResponse>("/api/agent/stage-file", formData);
+}
+
+function buildAgentTraceFromResult(root: Record<string, unknown>, warnings: string[]): AgentTraceEntry[] {
+  const progressTrace = readArray(root.progress_trace).flatMap((entry, index) => {
+    const row = isRecord(entry) ? entry : {};
+    const details = isRecord(row.details) ? row.details : {};
+    const message = readString(row.message) ?? `Server step ${index + 1}`;
+    const stepMs = readNumber(row.step_ms);
+    const totalMs = readNumber(row.total_ms);
+    const fileName =
+      readString(details.filename) ??
+      readString(details.file) ??
+      readString(details.document_id) ??
+      undefined;
+
+    return [
+      {
+        id: `trace-progress-${index}`,
+        title: message,
+        detail: formatAgentProgressDetail(message, details),
+        tone: inferAgentTraceTone(message, details),
+        fileName,
+        stepMs,
+        totalMs,
+      },
+    ];
+  });
+
+  const documents = readArray(root.documents);
+  const gap = isRecord(root.gap_analysis) ? root.gap_analysis : {};
+  const findings = readArray(root.findings);
+  const persistence = isRecord(root.persistence_result) ? root.persistence_result : {};
+  const memwal = isRecord(persistence.memwal) ? persistence.memwal : {};
+  const walrus = isRecord(persistence.walrus) ? persistence.walrus : {};
+
+  const reasoningTrace: AgentTraceEntry[] = documents.flatMap((document, index) => {
+    const row = isRecord(document) ? document : {};
+    const classification = isRecord(row.classification) ? row.classification : {};
+    const sourceConfidence = isRecord(row.source_confidence) ? row.source_confidence : {};
+    const metadata = isRecord(row.metadata) ? row.metadata : {};
+
+    const filename = readString(row.filename) ?? `Document ${index + 1}`;
+    const documentType = readString(classification.document_type) ?? "unclassified evidence";
+    const rationale = readString(classification.rationale) ?? "Classification rationale not returned.";
+    const sourceLevel = readString(sourceConfidence.source_confidence) ?? readString(classification.source_confidence) ?? "unknown";
+    const sourceReason = readString(sourceConfidence.source_confidence_reason) ?? readString(classification.source_confidence_reason);
+    const metadataSummary = buildMetadataSummary(metadata).slice(0, 2).join(" · ");
+
+    return [
+      {
+        id: `trace-open-${index}`,
+        title: `Opened ${filename}`,
+        detail: `Prepared ${documentType} evidence for audit analysis.`,
+        tone: "info",
+        fileName: filename,
+      },
+      {
+        id: `trace-classify-${index}`,
+        title: `Classified ${filename}`,
+        detail: `${documentType}: ${rationale}`,
+        tone: "success",
+        fileName: filename,
+      },
+      {
+        id: `trace-source-${index}`,
+        title: `Assessed source confidence`,
+        detail: `${filename} was kept at ${sourceLevel}${sourceReason ? ` because ${sourceReason}` : "."}${metadataSummary ? ` Metadata noticed: ${metadataSummary}.` : ""}`,
+        tone: "info",
+        fileName: filename,
+      },
+    ];
+  });
+
+  if (readNumber(gap.readiness_score) !== undefined) {
+    reasoningTrace.push({
+      id: "trace-gap-summary",
+      title: "Reviewed pack readiness",
+      detail: `Readiness score ${readNumber(gap.readiness_score)}/100 with ${readArray(gap.gaps).length} flagged gap(s).`,
+      tone: readArray(gap.gaps).length > 0 ? "warning" : "success",
+    });
+  }
+
+  findings.slice(0, 3).forEach((finding, index) => {
+    const row = isRecord(finding) ? finding : {};
+    reasoningTrace.push({
+      id: `trace-finding-${index}`,
+      title: `Drafted finding insight`,
+      detail: `${readString(row.title) ?? `Finding ${index + 1}`}${readString(row.severity) ? ` (${readString(row.severity)})` : ""}`,
+      tone: "warning",
+    });
+  });
+
+  if (warnings.length > 0) {
+    reasoningTrace.push({
+      id: "trace-browser-warnings",
+      title: "Browser ingest limitations noticed",
+      detail: warnings.slice(0, 2).join(" "),
+      tone: "warning",
+    });
+  }
+
+  reasoningTrace.push({
+    id: "trace-persistence",
+    title: "Prepared proof persistence",
+    detail: `MemWal ${readString(memwal.status) ?? "not run"} · Walrus ${readString(walrus.status) ?? "not run"}`,
+    tone: "info",
+  });
+
+  return [...progressTrace, ...reasoningTrace];
+}
+
+function inferAgentTraceTone(message: string, details: Record<string, unknown>): AgentTraceEntry["tone"] {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("gap analysis complete")) {
+    return (readNumber(details.gaps) ?? 0) > 0 ? "warning" : "success";
+  }
+  if (normalized.includes("complete") || normalized.includes("ready")) {
+    return "success";
+  }
+  if (normalized.includes("warning") || normalized.includes("gap")) {
+    return "warning";
+  }
+  return "info";
+}
+
+function formatAgentProgressDetail(message: string, details: Record<string, unknown>): string {
+  const normalized = message.toLowerCase();
+
+  if (normalized.startsWith("reading evidence")) {
+    return `Opening ${readString(details.file) ?? "evidence file"} for ingestion.`;
+  }
+
+  if (normalized.includes("evidence") && normalized.includes("ready")) {
+    return `${readString(details.filename) ?? "Document"} extracted ${readNumber(details.chars) ?? 0} characters as ${readString(details.format) ?? "text"} evidence.`;
+  }
+
+  if (normalized.includes("analyzing evidence")) {
+    return `${readString(details.filename) ?? "Document"} is being reviewed in ${readString(details.mode) ?? "analysis"} mode.`;
+  }
+
+  if (normalized.includes("evidence analysis complete")) {
+    return `${readString(details.document_type) ?? "Document"} finished with ${readString(details.source_confidence) ?? "unknown"} confidence from ${readString(details.source) ?? "analysis"}.`;
+  }
+
+  if (normalized.includes("running pack gap analysis")) {
+    return `Cross-checking ${readNumber(details.analyzed_documents) ?? 0} analyzed documents against pack-level assertions.`;
+  }
+
+  if (normalized.includes("gap analysis complete")) {
+    return `Pack readiness is ${readNumber(details.readiness_score) ?? "n/a"}/100 with ${readNumber(details.gaps) ?? 0} flagged gap(s).`;
+  }
+
+  if (normalized.includes("drafting finding")) {
+    return `Drafting a reviewer-facing summary for ${readString(details.title) ?? "the current gap"}.`;
+  }
+
+  if (normalized.includes("finding draft complete")) {
+    return `${readString(details.finding_id) ?? "Finding"} drafted with ${readString(details.severity) ?? "unrated"} severity.`;
+  }
+
+  if (normalized.includes("building audit pack summary")) {
+    return `Compiling the pack summary and output hashes for human review.`;
+  }
+
+  if (normalized.includes("audit pack summary/hash complete")) {
+    return `Summary hash set prepared across ${readNumber(details.hash_count) ?? 0} artifacts.`;
+  }
+
+  if (normalized.includes("building review and persistence plan")) {
+    return "Preparing human-approval controls and storage instructions.";
+  }
+
+  if (normalized.includes("persisting/preparing web3 outputs")) {
+    return `Preparing ${readNumber(details.hashes) ?? 0} hashes for memory storage and optional chain approval.`;
+  }
+
+  if (normalized.includes("web3 persistence preparation complete")) {
+    return `MemWal ${readString(details.memwal_status) ?? "unknown"} · Walrus ${readString(details.walrus_status) ?? "unknown"} · ${readNumber(details.action_candidates) ?? 0} chain action candidates.`;
+  }
+
+  if (normalized.includes("building orchestrate api response")) {
+    return "Shaping the workspace response for the browser.";
+  }
+
+  if (normalized.includes("orchestrate api response ready")) {
+    return `Workspace payload finished in ${readNumber(details.duration_ms) ?? 0}ms for ${readString(details.response_mode) ?? "response"} mode.`;
+  }
+
+  if (normalized.includes("orchestration complete")) {
+    return `${readNumber(details.documents) ?? 0} documents, ${readNumber(details.gaps) ?? 0} gaps, and ${readNumber(details.findings) ?? 0} findings were prepared.`;
+  }
+
+  return Object.entries(details)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(" · ") || "Agent step completed.";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return readArray(value).map(readString).filter((item): item is string => Boolean(item));
+}
+
+function formatPercent(value: number | undefined): string {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "n/a";
+}
+
+function buildMetadataSummary(metadata: Record<string, unknown>): string[] {
+  const summary = [
+    readString(metadata.document_date) ? `Date ${readString(metadata.document_date)}` : null,
+    readString(metadata.period_start) && readString(metadata.period_end)
+      ? `Period ${readString(metadata.period_start)} to ${readString(metadata.period_end)}`
+      : null,
+    readString(metadata.document_reference) ? `Ref ${readString(metadata.document_reference)}` : null,
+  ].filter((item): item is string => Boolean(item));
+
+  const parties = readArray(metadata.parties)
+    .map((party) => {
+      const row = isRecord(party) ? party : {};
+      const name = readString(row.name);
+      const role = readString(row.role);
+      return name ? `${name}${role ? ` (${role})` : ""}` : undefined;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  if (parties.length > 0) summary.push(`Parties ${parties.slice(0, 2).join(", ")}`);
+
+  return summary;
+}
+
+function parseAgentWorkspaceReview(raw: unknown): AgentWorkspaceReview {
+  const root = isRecord(raw) ? raw : {};
+  const gap = isRecord(root.gap_analysis) ? root.gap_analysis : {};
+  const approvalControls = isRecord(root.approval_controls) ? root.approval_controls : {};
+  const persistence = isRecord(root.persistence_result) ? root.persistence_result : {};
+  const manifest = isRecord(persistence.manifest) ? persistence.manifest : {};
+  const memwal = isRecord(persistence.memwal) ? persistence.memwal : {};
+  const walrus = isRecord(persistence.walrus) ? persistence.walrus : {};
+
+  const documents = readArray(root.documents).map((document, index): AgentDocumentReview => {
+    const row = isRecord(document) ? document : {};
+    const classification = isRecord(row.classification) ? row.classification : {};
+    const metadata = isRecord(row.metadata) ? row.metadata : {};
+    const mapping = isRecord(row.assertion_mapping) ? row.assertion_mapping : {};
+    const sourceConfidence = isRecord(row.source_confidence) ? row.source_confidence : {};
+    const evidenceRef = isRecord(row.evidence_ref) ? row.evidence_ref : {};
+
+    return {
+      id: readString(row.document_id) ?? `document-${index + 1}`,
+      filename: readString(row.filename) ?? readString(classification.filename) ?? `Document ${index + 1}`,
+      evidenceId: readString(evidenceRef.evidence_id),
+      documentType: readString(classification.document_type) ?? "unclassified",
+      confidence: readNumber(classification.confidence),
+      classificationRationale: readString(classification.rationale),
+      classificationLimitations: readStringArray(classification.limitations),
+      sourceConfidence: readString(sourceConfidence.source_confidence) ?? readString(classification.source_confidence),
+      sourceReason: readString(sourceConfidence.source_confidence_reason) ?? readString(classification.source_confidence_reason),
+      sourceCaveats: [
+        ...readStringArray(sourceConfidence.caveats),
+        ...readStringArray(sourceConfidence.upgrade_path).map((item) => `Upgrade: ${item}`),
+      ],
+      mappedAssertions: readArray(mapping.mapped_assertions).map((assertion) => {
+        const item = isRecord(assertion) ? assertion : {};
+        return {
+          label: readString(item.assertion_label) ?? "Assertion",
+          coverage: readString(item.coverage) ?? "unknown",
+          confidence: readNumber(item.confidence),
+          rationale: readString(item.rationale),
+        };
+      }),
+      metadataSummary: buildMetadataSummary(metadata),
+    };
+  });
+
+  const findings = readArray(root.findings).map((finding, index): AgentFindingReview => {
+    const row = isRecord(finding) ? finding : {};
+    return {
+      id: readString(row.finding_id) ?? `finding-${index + 1}`,
+      title: readString(row.title) ?? readString(row.condition) ?? `Draft finding ${index + 1}`,
+      severity: readString(row.severity) ?? "unrated",
+      status: readString(row.status) ?? "draft",
+      condition: readString(row.condition),
+      criteria: readString(row.criteria),
+      cause: readString(row.cause),
+      effect: readString(row.effect),
+      recommendation: readString(row.recommendation),
+      missingAssertions: readStringArray(row.missing_assertion_labels),
+      citationCount: readArray(row.citations).length,
+    };
+  });
+
+  return {
+    documents,
+    findings,
+    gapSummary: {
+      readinessScore: readNumber(gap.readiness_score),
+      coveredLabels: readStringArray(gap.covered_labels),
+      missingLabels: readStringArray(gap.missing_labels),
+      recommendations: readStringArray(gap.recommendations),
+    },
+    approval: {
+      requiresHumanApproval: readBoolean(approvalControls.requires_human_approval) ?? true,
+      chainWriteReady: readBoolean(approvalControls.chain_write_ready) ?? false,
+      outputHashes: readStringArray(approvalControls.output_hashes),
+      nextSteps: readStringArray(approvalControls.next_steps),
+    },
+    persistence: {
+      memoryNamespace: readString(persistence.memory_namespace),
+      memwalStatus: readString(memwal.status),
+      walrusStatus: readString(walrus.status),
+      manifestBlobId: readString(walrus.manifest_blob_id),
+      artifactBlobId: readString(walrus.artifact_blob_id),
+      linkedDocuments: readNumber(manifest.linked_documents),
+      totalDocuments: readNumber(manifest.total_documents),
+    },
+  };
+}
+
+export default function WorkspacePage() {
+  const wallet = useWalletBridge();
+  const addDocumentInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [role, setRole] = useState<WorkspaceRole>("company");
+  const [activeRailPanel, setActiveRailPanel] = useState<RailPanel>("explorer");
+  const [activeItemId, setActiveItemId] = useState("folder:evidence");
+  const [bottomTab, setBottomTab] = useState<BottomTab>("details");
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  const [auditPack, setAuditPack] = useState<AuditPackDraft>({ status: "not-created" });
+  const [localDocuments, setLocalDocuments] = useState<LocalDocument[]>([]);
+  const [registry, setRegistry] = useState<EvidenceRecord[]>([]);
+  const [selectedLocalDocumentIds, setSelectedLocalDocumentIds] = useState<string[]>([]);
+
+  const [regFile, setRegFile] = useState<File | null>(null);
+  const [regDocType, setRegDocType] = useState("Bank Statement");
+  const [regSource, setRegSource] = useState("Company Upload (L2)");
+  const [regDesc, setRegDesc] = useState("");
+  const [regAssertions, setRegAssertions] = useState<string[]>(["Existence"]);
+  const [activeLocalDocumentId, setActiveLocalDocumentId] = useState<string | undefined>();
+  const [draftSaveMessage, setDraftSaveMessage] = useState<string | null>(null);
+
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isBatchRegistering, setIsBatchRegistering] = useState(false);
+  const [batchSummary, setBatchSummary] = useState<BatchRegistrationSummary | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registerResult, setRegisterResult] = useState<RegisterResult | null>(null);
+
+  const [verifyRecordId, setVerifyRecordId] = useState("");
+  const [verifyFile, setVerifyFile] = useState<File | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<{
+    status: "idle" | "success" | "tampered";
+    message: string;
+    computedHash?: string;
+    expectedHash?: string;
+    checkedFileLabel?: string;
+  }>({ status: "idle", message: "" });
+  const [lastVerificationSession, setLastVerificationSession] =
+    useState<VerificationSession | null>(null);
+
+  const [attestRecordId, setAttestRecordId] = useState("");
+  const [attestNotes, setAttestNotes] = useState("");
+  const [attestType, setAttestType] = useState("HashConfirmed");
+  const [isAttesting, setIsAttesting] = useState(false);
+  const [attestError, setAttestError] = useState<string | null>(null);
+  const [attestResult, setAttestResult] = useState<{
+    attestationId: string;
+    txDigest: string;
+    evidenceId: string;
+    reviewer: string;
+    action: string;
+    createdAt: string;
+  } | null>(null);
+
+  const [operationProgress, setOperationProgress] = useState<{
+    type: OperationType;
+    steps: ProgressStep[];
+  } | null>(null);
+  const [proofSnapshot, setProofSnapshot] = useState<ProofArtifactsSnapshot | null>(null);
+  const [agentRun, setAgentRun] = useState<AgentRunState>(DEFAULT_AGENT_STATE);
+  const [agentInstruction, setAgentInstruction] = useState("");
+  const [memoryReload, setMemoryReload] = useState<WalrusMemoryReloadState>(DEFAULT_MEMORY_RELOAD_STATE);
+  const [agentActionLog, setAgentActionLog] = useState<AgentActionLogState>(DEFAULT_AGENT_ACTION_LOG_STATE);
+  const [demoEngagement, setDemoEngagement] = useState<DemoEngagementState>(DEFAULT_DEMO_ENGAGEMENT_STATE);
+  const [engagementInput, setEngagementInput] = useState("");
+  const [exportMessage, setExportMessage] = useState("Generate or copy a compliance export summary after evidence and proof actions exist.");
+
+  const signerAddress = wallet.address ?? "";
+  const signTransaction = wallet.signTransaction;
+
+  const selectedLocalDocument = useMemo(
+    () => activeItemId.startsWith("local:")
+      ? localDocuments.find((item) => item.id === activeItemId.replace("local:", ""))
+      : undefined,
+    [activeItemId, localDocuments],
+  );
+
+  const selectedRecord = useMemo(
+    () => activeItemId.startsWith("record:")
+      ? registry.find((item) => item.id === activeItemId.replace("record:", ""))
+      : undefined,
+    [activeItemId, registry],
+  );
+
+  const selectedRecordVerified =
+    lastVerificationSession?.evidenceId === attestRecordId &&
+    lastVerificationSession.status === "success";
+  const selectedRecordTampered =
+    lastVerificationSession?.evidenceId === attestRecordId &&
+    lastVerificationSession.status === "tampered";
+
+  const visibleLocalDocuments = useMemo(
+    () => localDocuments.filter((document) => document.status !== "registered" || !document.evidenceId),
+    [localDocuments],
+  );
+
+  const readableEvidenceCount = useMemo(
+    () =>
+      [
+        ...visibleLocalDocuments.map((item) => item.file),
+        ...registry.map((item) => item.sourceFile).filter((file): file is File => Boolean(file)),
+      ].filter((file) => isAgentProcessableFile(file)).length,
+    [registry, visibleLocalDocuments],
+  );
+
+  const selectableLocalDocuments = useMemo(
+    () => localDocuments.filter((document) => document.status !== "registered" && !document.evidenceId),
+    [localDocuments],
+  );
+
+  const selectedBatchDocuments = useMemo(
+    () => selectableLocalDocuments.filter((document) => selectedLocalDocumentIds.includes(document.id)),
+    [selectableLocalDocuments, selectedLocalDocumentIds],
+  );
+
+  const incompleteSelectedBatchDocuments = useMemo(
+    () => selectedBatchDocuments.filter((document) => !isLocalDocumentReady(document)),
+    [selectedBatchDocuments],
+  );
+
+  const selectedBatchReady =
+    selectedBatchDocuments.length > 0 && incompleteSelectedBatchDocuments.length === 0;
+
+  const agentReview = useMemo(
+    () => parseAgentWorkspaceReview(agentRun.raw),
+    [agentRun.raw],
+  );
+
+  const companyWalletMatches = !demoEngagement.companyWallet || signerAddress === demoEngagement.companyWallet;
+  const auditorWalletMatches = !demoEngagement.auditorWallet || signerAddress === demoEngagement.auditorWallet;
+
+  const verifierExport = useMemo<VerifierExport>(() => ({
+    schema: "linow_demo_verifier_export",
+    version: "1.0.0",
+    generatedAt: new Date().toISOString(),
+    engagement: {
+      id: demoEngagement.id,
+      companyWallet: demoEngagement.companyWallet,
+      auditorWallet: demoEngagement.auditorWallet,
+    },
+    chain: {
+      packageId: PACKAGE_ID,
+      auditPackId: auditPack.id ?? proofSnapshot?.auditPackId,
+    },
+    evidence: registry.map((record) => ({
+      evidenceId: record.id,
+      fileName: record.fileName,
+      documentType: record.type,
+      source: record.source,
+      commitment: record.commitment,
+      walrusBlobId: record.blobId,
+      auditPackId: record.auditPackId,
+      assertions: record.assertions,
+      status: record.latestAttestation ? "attested" : record.status.toLowerCase(),
+      latestAttestation: record.latestAttestation,
+      demoStoragePath: record.demoStoragePath,
+    })),
+    memory: {
+      memwalStatus: agentReview.persistence.memwalStatus,
+      walrusStatus: agentReview.persistence.walrusStatus,
+      namespace: agentReview.persistence.memoryNamespace,
+      manifestBlobId: agentReview.persistence.manifestBlobId,
+      artifactBlobId: agentReview.persistence.artifactBlobId,
+      reloadStatus: memoryReload.status,
+    },
+    agentActions: agentActionLog.logs.map((log) => ({
+      packId: log.packId,
+      evidenceId: log.evidenceId,
+      actionType: log.actionType,
+      outputHash: log.outputHash,
+      txDigest: log.txDigest,
+      eventType: log.event?.type,
+      eventSeq: log.event?.id?.eventSeq,
+      signer: log.signer,
+      loggedAt: log.loggedAt,
+    })),
+    verification: {
+      latestStatus: verificationResult.status,
+      checkedFileLabel: verificationResult.checkedFileLabel,
+      computedHash: verificationResult.computedHash,
+      expectedHash: verificationResult.expectedHash,
+    },
+    limitations: [
+      "This export proves commitments, lifecycle events, and reviewer attestations visible to this workspace.",
+      "It does not prove document truth, source authenticity, business-event validity, or audit sufficiency.",
+      "Source confidence is claimed or derived unless a connector-verified source is explicitly shown.",
+      "Synthetic demo files may be stored in shared web PoC storage for cross-browser review.",
+      "Raw evidence bytes are not included in this export.",
+    ],
+  }), [
+    agentActionLog.logs,
+    agentReview.persistence.artifactBlobId,
+    agentReview.persistence.manifestBlobId,
+    agentReview.persistence.memwalStatus,
+    agentReview.persistence.memoryNamespace,
+    agentReview.persistence.walrusStatus,
+    auditPack.id,
+    demoEngagement.auditorWallet,
+    demoEngagement.companyWallet,
+    demoEngagement.id,
+    memoryReload.status,
+    proofSnapshot?.auditPackId,
+    registry,
+    verificationResult.checkedFileLabel,
+    verificationResult.computedHash,
+    verificationResult.expectedHash,
+    verificationResult.status,
+  ]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 1100px)");
+
+    const syncSidebar = (matchesCompact: boolean) => {
+      setIsCompactViewport(matchesCompact);
+      setIsSidebarOpen(!matchesCompact);
+    };
+
+    syncSidebar(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => syncSidebar(event.matches);
+    mediaQuery.addEventListener("change", handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange);
+    };
+  }, []);
+
+  const persistDemoEvidenceDocument = async (document: LocalDocument) => {
+    if (!demoEngagement.id || !isDemoStoreConfigured()) return;
+
+    try {
+      const rowId = document.demoEvidenceRowId ?? document.id;
+      const upload = document.demoStoragePath
+        ? { bucket: "demo-evidence", path: document.demoStoragePath }
+        : await uploadDemoEvidenceFile({
+          engagementId: demoEngagement.id,
+          evidenceRowId: rowId,
+          file: document.file,
+        });
+      const row = await upsertDemoEvidence(
+        toDemoEvidenceRow({
+          engagementId: demoEngagement.id,
+          document: { ...document, demoEvidenceRowId: rowId, demoStoragePath: upload.path },
+          bucket: upload.bucket,
+          path: upload.path,
+        }),
+      );
+
+      setLocalDocuments((prev) =>
+        prev.map((item) =>
+          item.id === document.id
+            ? { ...item, demoEvidenceRowId: row.id, demoStoragePath: row.storage_path ?? upload.path }
+            : item,
+        ),
+      );
+      setDemoEngagement((prev) => ({
+        ...prev,
+        status: "ready",
+        message: `Synced ${document.fileName} to shared demo engagement.`,
+      }));
+    } catch (error) {
+      setDemoEngagement((prev) => ({
+        ...prev,
+        status: "error",
+        message: getErrorMessage(error, `Could not sync ${document.fileName} to Supabase demo storage.`),
+      }));
+    }
+  };
+
+  const persistRegisteredDemoEvidence = async (
+    artifacts: RegisteredEvidenceArtifacts[],
+    engagementId = demoEngagement.id,
+  ) => {
+    if (!engagementId || !isDemoStoreConfigured()) return;
+
+    const documentsById = new Map(localDocuments.map((document) => [document.id, document]));
+
+    try {
+      await Promise.all(
+        artifacts.map((artifact) => {
+          const document = artifact.localDocumentId ? documentsById.get(artifact.localDocumentId) : undefined;
+          if (!document) return Promise.resolve(undefined);
+
+          return upsertDemoEvidence(
+            toDemoEvidenceRow({
+              engagementId,
+              document,
+              record: artifact.record,
+              signerAddress,
+            }),
+          );
+        }),
+      );
+      setDemoEngagement((prev) => ({
+        ...prev,
+        status: "ready",
+        message: "Registered evidence metadata synced to shared demo engagement.",
+      }));
+    } catch (error) {
+      setDemoEngagement((prev) => ({
+        ...prev,
+        status: "error",
+        message: getErrorMessage(error, "Registered evidence was created locally but could not be synced to Supabase."),
+      }));
+    }
+  };
+
+  const applyLoadedDemoEngagement = async (engagementId: string) => {
+    if (!isDemoStoreConfigured()) return;
+
+    setDemoEngagement((prev) => ({
+      ...prev,
+      id: engagementId,
+      status: "loading",
+      message: "Loading shared demo engagement.",
+    }));
+
+    try {
+      const bundle = await loadDemoEngagement(engagementId);
+      const filesByRowId = new Map<string, File>();
+
+      await Promise.all(
+        bundle.evidence.map(async (row) => {
+          try {
+            const file = await downloadDemoEvidenceFile(row);
+            if (file) filesByRowId.set(row.id, file);
+          } catch {
+            // Metadata should still load if a demo file is missing or inaccessible.
+          }
+        }),
+      );
+
+      const latestAttestationByEvidenceId = new Map<string, AttestationSummary>();
+      for (const row of bundle.attestations) {
+        latestAttestationByEvidenceId.set(row.evidence_id, {
+          id: row.attestation_id,
+          action: row.action,
+          reviewer: row.reviewer_wallet,
+          note: row.note ?? "",
+          txDigest: row.tx_digest ?? "n/a",
+          createdAt: row.created_at?.replace("T", " ").substring(0, 16) ?? nowLabel(),
+        });
+      }
+
+      const loadedLocalDocuments = bundle.evidence
+        .map((row) => {
+          const file = filesByRowId.get(row.id);
+          return file ? createLocalDocumentFromDemoEvidence(row, file) : undefined;
+        })
+        .filter((document): document is LocalDocument => Boolean(document));
+      const loadedRegistry = bundle.evidence
+        .map((row) =>
+          createEvidenceRecordFromDemoEvidence(
+            row,
+            filesByRowId.get(row.id),
+            row.evidence_id ? latestAttestationByEvidenceId.get(row.evidence_id) : undefined,
+          ),
+        )
+        .filter((record): record is EvidenceRecord => Boolean(record));
+
+      setLocalDocuments(loadedLocalDocuments);
+      setSelectedLocalDocumentIds(loadedLocalDocuments.filter((document) => !document.evidenceId).map((document) => document.id));
+      setRegistry(loadedRegistry);
+      setAuditPack((prev) => ({
+        ...prev,
+        id: bundle.engagement.audit_pack_id ?? prev.id,
+        owner: bundle.engagement.company_wallet ?? prev.owner,
+        status: bundle.engagement.audit_pack_id ? "created" : prev.status,
+      }));
+      setAgentActionLog((prev) => ({
+        ...prev,
+        logs: bundle.agentActions.map((action) => ({
+          key: [
+            action.pack_id,
+            "loaded",
+            action.evidence_id ?? "no-evidence",
+            action.action_type,
+            action.output_hash,
+          ].join("|"),
+          packId: action.pack_id,
+          evidenceId: action.evidence_id ?? undefined,
+          actionType: action.action_type,
+          outputHash: action.output_hash,
+          signer: action.signer_wallet,
+          txDigest: action.tx_digest ?? undefined,
+          eventCount: action.event_type ? 1 : 0,
+          objectChangeCount: 0,
+          event: action.event_type
+            ? {
+              type: action.event_type,
+              id: { eventSeq: action.event_seq ?? undefined },
+            }
+            : undefined,
+          loggedAt: action.created_at?.replace("T", " ").substring(0, 16) ?? nowLabel(),
+        })),
+      }));
+      setEngagementInput(engagementId);
+      setDemoEngagement({
+        id: bundle.engagement.id,
+        companyWallet: bundle.engagement.company_wallet ?? undefined,
+        auditorWallet: bundle.engagement.auditor_wallet ?? undefined,
+        status: "ready",
+        message: `Loaded shared demo engagement with ${bundle.evidence.length} evidence file(s).`,
+      });
+      if (bundle.engagement.audit_pack_id || loadedRegistry[0]) {
+        setProofSnapshot((prev) => ({
+          auditPackId: bundle.engagement.audit_pack_id ?? loadedRegistry[0]?.auditPackId ?? prev?.auditPackId,
+          evidenceId: loadedRegistry[0]?.id ?? prev?.evidenceId,
+          txDigest: prev?.txDigest,
+          packageId: PACKAGE_ID,
+          commitment: loadedRegistry[0]?.commitment ?? prev?.commitment,
+          blobReference: loadedRegistry[0]?.blobId ?? prev?.blobReference,
+          attestationId: loadedRegistry[0]?.latestAttestation?.id ?? prev?.attestationId,
+          verificationStatus: prev?.verificationStatus,
+          checkedFileLabel: prev?.checkedFileLabel,
+          memoryStatus: prev?.memoryStatus,
+          agentActionTxDigest: bundle.agentActions[0]?.tx_digest ?? prev?.agentActionTxDigest,
+          agentActionEventType: bundle.agentActions[0]?.event_type ?? prev?.agentActionEventType,
+          agentActionEventSeq: bundle.agentActions[0]?.event_seq ?? prev?.agentActionEventSeq,
+          agentActionOutputHash: bundle.agentActions[0]?.output_hash ?? prev?.agentActionOutputHash,
+          updatedAt: nowLabel(),
+        }));
+      }
+      setActiveItemId("folder:evidence");
+    } catch (error) {
+      setDemoEngagement((prev) => ({
+        ...prev,
+        status: "error",
+        message: getErrorMessage(error, "Could not load shared demo engagement."),
+      }));
+    }
+  };
+
+  useEffect(() => {
+    if (!isDemoStoreConfigured()) return;
+    const engagementId = new URLSearchParams(window.location.search).get("engagement");
+    if (engagementId) void applyLoadedDemoEngagement(engagementId);
+  }, []);
+
+  const updateLocalDocumentDraft = (documentId: string, patch: Partial<Pick<LocalDocument, "documentType" | "source" | "description" | "assertions">>) => {
+    setLocalDocuments((prev) =>
+      prev.map((document) => document.id === documentId ? { ...document, ...patch } : document),
+    );
+  };
+
+  const handleSaveDraft = (documentId: string) => {
+    const patch = {
+      documentType: regDocType,
+      source: regSource,
+      description: regDesc,
+      assertions: regAssertions,
+    };
+    updateLocalDocumentDraft(documentId, patch);
+    setDraftSaveMessage("Draft saved for batch registration.");
+    const document = localDocuments.find((item) => item.id === documentId);
+    if (document) void persistDemoEvidenceDocument({ ...document, ...patch });
+  };
+
+  const handleToggleAssertion = (assertion: string) => {
+    setRegAssertions((prev) => {
+      const next = prev.includes(assertion)
+        ? prev.filter((item) => item !== assertion)
+        : [...prev, assertion];
+
+      if (activeLocalDocumentId) {
+        updateLocalDocumentDraft(activeLocalDocumentId, { assertions: next });
+      }
+
+      return next;
+    });
+  };
+
+  const handleAddDocuments = (files: FileList | null) => {
+    if (!files?.length) return;
+
+    const nextDocuments = Array.from(files).map(createLocalDocument);
+    setLocalDocuments((prev) => [...prev, ...nextDocuments]);
+    setSelectedLocalDocumentIds((prev) => [...prev, ...nextDocuments.map((document) => document.id)]);
+    setActiveItemId("folder:evidence");
+    setActiveLocalDocumentId(undefined);
+    void Promise.all(nextDocuments.map(persistDemoEvidenceDocument));
+  };
+
+  const toggleBatchSelection = (documentId: string) => {
+    setSelectedLocalDocumentIds((prev) =>
+      prev.includes(documentId)
+        ? prev.filter((id) => id !== documentId)
+        : [...prev, documentId],
+    );
+  };
+
+  const selectAllBatchDocuments = () => {
+    setSelectedLocalDocumentIds(selectableLocalDocuments.map((document) => document.id));
+  };
+
+  const clearBatchSelection = () => {
+    setSelectedLocalDocumentIds([]);
+  };
+
+  const handleCreateDemoEngagement = async () => {
+    if (!isDemoStoreConfigured()) return;
+
+    setDemoEngagement((prev) => ({
+      ...prev,
+      status: "loading",
+      message: "Creating shared demo engagement.",
+    }));
+
+    try {
+      const engagement = await createDemoEngagement({
+        audit_pack_id: auditPack.id ?? null,
+        company_wallet: signerAddress || undefined,
+      });
+
+      setDemoEngagement({
+        id: engagement.id,
+        companyWallet: engagement.company_wallet ?? undefined,
+        auditorWallet: engagement.auditor_wallet ?? undefined,
+        status: "ready",
+        message: "Shared demo engagement created. Open this link in the auditor browser.",
+      });
+      setEngagementInput(engagement.id);
+      window.history.replaceState(null, "", `/workspace?engagement=${engagement.id}`);
+    } catch (error) {
+      setDemoEngagement((prev) => ({
+        ...prev,
+        status: "error",
+        message: getErrorMessage(error, "Could not create shared demo engagement."),
+      }));
+    }
+  };
+
+  const handleLoadDemoEngagement = async () => {
+    const id = engagementInput.trim();
+    if (!id) return;
+    window.history.replaceState(null, "", `/workspace?engagement=${id}`);
+    await applyLoadedDemoEngagement(id);
+  };
+
+  const handleAssignDemoWallet = async (kind: "company" | "auditor") => {
+    if (!demoEngagement.id || !signerAddress || !isDemoStoreConfigured()) return;
+
+    const patch = kind === "company"
+      ? { company_wallet: signerAddress }
+      : { auditor_wallet: signerAddress };
+
+    try {
+      const updated = await updateDemoEngagement(demoEngagement.id, patch);
+      setDemoEngagement((prev) => ({
+        ...prev,
+        companyWallet: updated.company_wallet ?? prev.companyWallet,
+        auditorWallet: updated.auditor_wallet ?? prev.auditorWallet,
+        status: "ready",
+        message: `${kind === "company" ? "Company" : "Auditor"} wallet assigned for this demo engagement.`,
+      }));
+    } catch (error) {
+      setDemoEngagement((prev) => ({
+        ...prev,
+        status: "error",
+        message: getErrorMessage(error, "Could not assign wallet in shared demo engagement."),
+      }));
+    }
+  };
+
+  const getVerifierExportJson = () => JSON.stringify(verifierExport, null, 2);
+
+  const handleCopyVerifierExport = async () => {
+    try {
+      await navigator.clipboard.writeText(getVerifierExportJson());
+      setExportMessage("Compliance export summary copied to clipboard.");
+    } catch (error) {
+      setExportMessage(getErrorMessage(error, "Could not copy compliance export summary."));
+    }
+  };
+
+  const handleDownloadVerifierExport = () => {
+    const blob = new Blob([getVerifierExportJson()], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `linow-compliance-export-${demoEngagement.id ?? "local"}-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setExportMessage("Compliance export summary downloaded as JSON.");
+  };
+
+  const getEvidenceVerificationState = (recordId: string) => {
+    if (lastVerificationSession?.evidenceId !== recordId) {
+      return {
+        label: "Not checked in this session",
+        tone: "idle",
+      };
+    }
+
+    return lastVerificationSession.status === "success"
+      ? {
+          label: "Commitment match",
+          tone: "success",
+        }
+      : {
+          label: "Mismatch detected",
+          tone: "error",
+        };
+  };
+
+  const prepareLocalDocument = (document: LocalDocument) => {
+    setActiveItemId(`local:${document.id}`);
+    setActiveLocalDocumentId(document.id);
+    setRegFile(document.file);
+    setRegDocType(document.documentType);
+    setRegSource(document.source);
+    setRegDesc(document.description);
+    setRegAssertions(document.assertions);
+    setRegisterError(null);
+    setRegisterResult(null);
+    setDraftSaveMessage(null);
+    if (isCompactViewport) setIsSidebarOpen(false);
+  };
+
+  const createAuditPackDraft = async (): Promise<CreatedAuditPackArtifacts> => {
+    const encryptionKey = await generateEncryptionKey();
+    const encryptedDetails = await encryptJson(
+      {
+        engagementName: "Q2 2026 Audit Readiness",
+        createdBy: signerAddress,
+        purpose: "Sui Overflow demo AuditPack",
+        note: "Encrypted client-side before on-chain registration.",
+      },
+      encryptionKey,
+    );
+    const encryptedBytes = new TextEncoder().encode(JSON.stringify(serializeEncryptedPayload(encryptedDetails)));
+
+    const createAuditPack = createAuditPackFlow({
+      packageId: PACKAGE_ID,
+      signerAddress,
+      signTransaction,
+      tatum: serverTatumExecute,
+    });
+    const result = await createAuditPack({
+      encryptedDetails: encryptedBytes,
+      signerAddress,
+    });
+
+    return {
+      id: result.pack.id,
+      txDigest: result.transactionDigest,
+      owner: result.pack.owner,
+      createdAt: result.pack.createdAt,
+    };
+  };
+
+  const applyCreatedAuditPack = (createdPack: CreatedAuditPackArtifacts) => {
+    const createdAtLabel = createdPack.createdAt.replace("T", " ").substring(0, 16);
+    setAuditPack({
+      id: createdPack.id,
+      txDigest: createdPack.txDigest,
+      owner: createdPack.owner,
+      createdAt: createdAtLabel,
+      status: "created",
+    });
+    setProofSnapshot({
+      auditPackId: createdPack.id,
+      txDigest: createdPack.txDigest,
+      packageId: PACKAGE_ID,
+      updatedAt: createdAtLabel,
+    });
+    setActiveItemId("folder:evidence");
+    if (demoEngagement.id && isDemoStoreConfigured()) {
+      void updateDemoEngagement(demoEngagement.id, {
+        audit_pack_id: createdPack.id,
+        company_wallet: createdPack.owner,
+      }).then((updated) => {
+        setDemoEngagement((prev) => ({
+          ...prev,
+          companyWallet: updated.company_wallet ?? prev.companyWallet,
+          status: "ready",
+          message: "AuditPack linked to shared demo engagement.",
+        }));
+      }).catch((error) => {
+        setDemoEngagement((prev) => ({
+          ...prev,
+          status: "error",
+          message: getErrorMessage(error, "AuditPack was created but could not be synced to Supabase."),
+        }));
+      });
+    }
+  };
+
+  const registerEvidenceDraft = async (
+    draft: RegisterEvidenceDraft,
+    auditPackIdOverride?: string,
+  ): Promise<RegisteredEvidenceArtifacts> => {
+    const sourceLabel = toSourceLabel(draft.source);
+    const activeAuditPackId = auditPackIdOverride ?? auditPack.id;
+    const metadata = {
+      fileName: draft.file.name,
+      mediaType: draft.file.type || "application/octet-stream",
+      documentType: draft.documentType,
+      description: draft.description || undefined,
+      claimedSource: sourceLabel,
+    };
+
+    const encryptionKey = await generateEncryptionKey();
+    const registerEvidence = createRegisterEvidenceFlow({
+      packageId: PACKAGE_ID,
+      signerAddress,
+      signTransaction,
+      encryptionKey,
+      tatum: serverTatumExecute,
+      walrusNetwork: "testnet",
+      walrusPublisherUrl: process.env.NEXT_PUBLIC_WALRUS_PUBLISHER_URL,
+      walrusAggregatorUrl: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL,
+    });
+
+    const result = await registerEvidence({
+      content: draft.file,
+      metadata,
+      assertions: draft.assertions.map(toAssertionId),
+      signerAddress,
+      auditPackId: activeAuditPackId,
+    });
+    const commitment = result.evidence.commitment;
+    const blobId = result.evidence.blobId ?? result.evidence.proof?.walrusBlobId ?? "n/a";
+    const objectId = result.evidence.id;
+    const txDigest = result.transactionDigest ?? result.evidence.proof?.transactionDigest ?? "n/a";
+    const registeredAt = result.evidence.registeredAt ?? new Date().toISOString();
+    const registeredAtLabel = registeredAt.replace("T", " ").substring(0, 16);
+
+    return {
+      localDocumentId: draft.localDocumentId,
+      record: {
+        id: objectId,
+        date: registeredAtLabel,
+        type: draft.documentType,
+        source: sourceLabel,
+        commitment,
+        status: "Registered",
+        blobId,
+        assertions: draft.assertions,
+        reviewer: "n/a",
+        notes: draft.description || "No description provided.",
+        fileName: draft.file.name,
+        fileSize: formatMegabytes(draft.file.size),
+        sourceFile: draft.file,
+        auditPackId: activeAuditPackId,
+      },
+      result: {
+        objectId,
+        txDigest,
+        blobId,
+        commitment,
+        encryptedFileSize: `${result.artifacts.encryptedFile.ciphertext.length} B`,
+        encryptedMetadataSize: `${result.artifacts.encryptedMetadata.ciphertext.length} B`,
+        sourceConfidence: "L2 - Company Upload",
+      },
+    };
+  };
+
+  const registerEvidenceBatchDrafts = async (
+    drafts: RegisterEvidenceDraft[],
+    auditPackIdOverride: string,
+  ): Promise<RegisteredEvidenceArtifacts[]> => {
+    const draftsById = new Map(drafts.map((draft) => [draft.localDocumentId ?? draft.file.name, draft]));
+    const encryptionKey = await generateEncryptionKey();
+    const registerEvidenceBatch = createBatchRegisterEvidenceFlow({
+      packageId: PACKAGE_ID,
+      signerAddress,
+      signTransaction,
+      encryptionKey,
+      tatum: serverTatumExecute,
+      walrusNetwork: "testnet",
+      walrusPublisherUrl: process.env.NEXT_PUBLIC_WALRUS_PUBLISHER_URL,
+      walrusAggregatorUrl: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL,
+    });
+
+    const result = await registerEvidenceBatch({
+      auditPackId: auditPackIdOverride,
+      signerAddress,
+      items: drafts.map((draft) => {
+        const sourceLabel = toSourceLabel(draft.source);
+        return {
+          clientId: draft.localDocumentId ?? draft.file.name,
+          content: draft.file,
+          metadata: {
+            fileName: draft.file.name,
+            mediaType: draft.file.type || "application/octet-stream",
+            documentType: draft.documentType,
+            description: draft.description || undefined,
+            claimedSource: sourceLabel,
+          },
+          assertions: draft.assertions.map(toAssertionId),
+          signerAddress,
+        };
+      }),
+    });
+
+    return result.items.map((item) => {
+      const draft = draftsById.get(item.clientId ?? "");
+      if (!draft) {
+        throw new Error("Batch registration result did not match a selected local document.");
+      }
+
+      const sourceLabel = toSourceLabel(draft.source);
+      const commitment = item.evidence.commitment;
+      const blobId = item.evidence.blobId ?? item.evidence.proof?.walrusBlobId ?? "n/a";
+      const objectId = item.evidence.id;
+      const txDigest = item.transactionDigest ?? result.transactionDigest ?? item.evidence.proof?.transactionDigest ?? "n/a";
+      const registeredAt = item.evidence.registeredAt ?? new Date().toISOString();
+      const registeredAtLabel = registeredAt.replace("T", " ").substring(0, 16);
+
+      return {
+        localDocumentId: draft.localDocumentId,
+        record: {
+          id: objectId,
+          date: registeredAtLabel,
+          type: draft.documentType,
+          source: sourceLabel,
+          commitment,
+          status: "Registered",
+          blobId,
+          assertions: draft.assertions,
+          reviewer: "n/a",
+          notes: draft.description || "No description provided.",
+          fileName: draft.file.name,
+          fileSize: formatMegabytes(draft.file.size),
+          sourceFile: draft.file,
+          auditPackId: auditPackIdOverride,
+        },
+        result: {
+          objectId,
+          txDigest,
+          blobId,
+          commitment,
+          encryptedFileSize: `${item.artifacts.encryptedFile.ciphertext.length} B`,
+          encryptedMetadataSize: `${item.artifacts.encryptedMetadata.ciphertext.length} B`,
+          sourceConfidence: "L2 - Company Upload",
+        },
+      };
+    });
+  };
+
+  const handleRegister = async (override?: RegisterDraftOverride) => {
+    if (isRegistering) return;
+
+    const draft: RegisterEvidenceDraft = {
+      file: override?.file ?? regFile as File,
+      documentType: override?.documentType ?? regDocType,
+      source: override?.source ?? regSource,
+      description: override?.description ?? regDesc,
+      assertions: override?.assertions ?? regAssertions,
+      localDocumentId: override?.localDocumentId ?? activeLocalDocumentId,
+    };
+
+    if (role !== "company") {
+      setRegisterError("Switch to the Company role before registering uploaded evidence.");
+      return;
+    }
+    if (!signerAddress) {
+      setRegisterError("Connect a Sui wallet before registering evidence.");
+      return;
+    }
+    if (!companyWalletMatches) {
+      setRegisterError("Connect the assigned company wallet before registering evidence in this shared engagement.");
+      return;
+    }
+    if (!draft.file) {
+      setRegisterError("Select a document before preparing the registration flow.");
+      return;
+    }
+    if (draft.assertions.length === 0) {
+      setRegisterError("Select at least one ISA assertion for this evidence item.");
+      return;
+    }
+
+    setIsRegistering(true);
+    setRegisterError(null);
+    setRegisterResult(null);
+    let activeAuditPackId = auditPack.id;
+    if (draft.localDocumentId) {
+      setLocalDocuments((prev) =>
+        prev.map((item) => item.id === draft.localDocumentId ? { ...item, status: "registering" } : item),
+      );
+    }
+
+    const steps: ProgressStep[] = [
+      {
+        label: activeAuditPackId ? "Reuse Audit Pack" : "Create Audit Pack",
+        status: "pending",
+        detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Needed for evidence link",
+      },
+      { label: "Computing SHA-256 hash", status: "pending" },
+      { label: "Encrypting file and metadata", status: "pending" },
+      { label: "Uploading encrypted payload to secure storage", status: "pending" },
+      { label: "Signing and submitting Sui registration", status: "pending" },
+    ];
+
+    try {
+      if (!activeAuditPackId) {
+        steps[0].status = "running";
+        setOperationProgress({ type: "register", steps: [...steps] });
+        const createdPack = await createAuditPackDraft();
+        activeAuditPackId = createdPack.id;
+        applyCreatedAuditPack(createdPack);
+        steps[0] = {
+          ...steps[0],
+          status: "done",
+          detail: truncateValue(createdPack.id, 18),
+        };
+      } else {
+        steps[0].status = "done";
+      }
+
+      steps[1].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      steps[1] = { ...steps[1], status: "done", detail: "Prepared locally" };
+      steps[2].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      steps[2] = { ...steps[2], status: "done", detail: "AES-GCM ready" };
+
+      steps[3].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      const { record, result } = await registerEvidenceDraft(draft, activeAuditPackId);
+
+      steps[3] = { ...steps[3], status: "done", detail: truncateValue(result.blobId, 22) };
+      steps[4].status = "running";
+      setOperationProgress({ type: "register", steps: [...steps] });
+      steps[4] = { ...steps[4], status: "done", detail: result.txDigest };
+      setOperationProgress({ type: "register", steps: [...steps] });
+
+      setRegistry((prev) => [record, ...prev]);
+      setVerifyRecordId(record.id);
+      setAttestRecordId(record.id);
+      setActiveItemId(`record:${record.id}`);
+
+      if (draft.localDocumentId) {
+        setLocalDocuments((prev) =>
+          prev.map((item) =>
+            item.id === draft.localDocumentId
+              ? { ...item, status: "registered", evidenceId: record.id, warning: undefined }
+              : item,
+          ),
+        );
+        setSelectedLocalDocumentIds((prev) => prev.filter((id) => id !== draft.localDocumentId));
+      }
+
+      setRegisterResult(result);
+      void persistRegisteredDemoEvidence([{ record, result, localDocumentId: draft.localDocumentId }]);
+      setProofSnapshot({
+        auditPackId: activeAuditPackId,
+        evidenceId: record.id,
+        txDigest: result.txDigest,
+        packageId: PACKAGE_ID,
+        commitment: result.commitment,
+        blobReference: result.blobId,
+        updatedAt: record.date,
+      });
+      setBottomTab("chain");
+    } catch (error) {
+      const message = getErrorMessage(error, "Registration failed while calling live infrastructure.");
+      setRegisterError(message);
+      setOperationProgress(null);
+      if (draft.localDocumentId) {
+        setLocalDocuments((prev) =>
+          prev.map((item) =>
+            item.id === draft.localDocumentId ? { ...item, status: "flagged", warning: message } : item,
+          ),
+        );
+      }
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  const handleBatchRegister = async () => {
+    if (isBatchRegistering || isRegistering) return;
+    if (role !== "company") {
+      setRegisterError("Switch to the Company role before registering selected evidence.");
+      return;
+    }
+    if (!signerAddress) {
+      setRegisterError("Connect a Sui wallet before registering evidence.");
+      return;
+    }
+    if (!companyWalletMatches) {
+      setRegisterError("Connect the assigned company wallet before registering selected evidence in this shared engagement.");
+      return;
+    }
+    if (selectedBatchDocuments.length === 0) {
+      setRegisterError("Select at least one local file that has not been registered.");
+      return;
+    }
+    if (incompleteSelectedBatchDocuments.length > 0) {
+      setRegisterError(
+        `Complete type, source, description, and assertions for: ${incompleteSelectedBatchDocuments
+          .map((document) => document.fileName)
+          .join(", ")}`,
+      );
+      return;
+    }
+
+    const totalDocuments = selectedBatchDocuments.length;
+    let activeAuditPackId = auditPack.id;
+
+    setIsBatchRegistering(true);
+    setRegisterError(null);
+    setBatchSummary({
+      total: totalDocuments,
+      completed: 0,
+      failed: 0,
+    });
+    setLocalDocuments((prev) =>
+      prev.map((document) =>
+        selectedLocalDocumentIds.includes(document.id) && document.status !== "registered"
+          ? { ...document, status: "queued", warning: undefined }
+          : document,
+      ),
+    );
+
+    const steps: ProgressStep[] = [
+      {
+        label: activeAuditPackId ? "Reuse Audit Pack" : "Create Audit Pack",
+        status: "pending",
+        detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Needed for batch link",
+      },
+      { label: "Validate selected evidence drafts", status: "pending", detail: `${totalDocuments} ready` },
+      { label: "Encrypt and upload selected files", status: "pending" },
+      { label: "Sign one Sui batch registration", status: "pending" },
+      {
+        label: "Link each record to Audit Pack",
+        status: "pending",
+        detail: activeAuditPackId ? truncateValue(activeAuditPackId, 18) : "Pending",
+      },
+    ];
+
+    try {
+      if (!activeAuditPackId) {
+        steps[0].status = "running";
+        setOperationProgress({ type: "batch", steps: [...steps] });
+        const createdPack = await createAuditPackDraft();
+        activeAuditPackId = createdPack.id;
+        applyCreatedAuditPack(createdPack);
+        steps[0] = {
+          ...steps[0],
+          status: "done",
+          detail: truncateValue(createdPack.id, 18),
+        };
+      } else {
+        steps[0].status = "done";
+      }
+    } catch (error) {
+      setRegisterError(getErrorMessage(error, "AuditPack creation failed before batch registration."));
+      setOperationProgress(null);
+      setIsBatchRegistering(false);
+      return;
+    }
+
+    steps[1].status = "done";
+    steps[4].detail = truncateValue(activeAuditPackId, 18);
+    setOperationProgress({ type: "batch", steps: [...steps] });
+
+    try {
+      const drafts = selectedBatchDocuments.map((document) => ({
+        file: document.file,
+        documentType: document.documentType,
+        source: document.source,
+        description: document.description,
+        assertions: document.assertions,
+        localDocumentId: document.id,
+      }));
+      setBatchSummary({
+        total: totalDocuments,
+        completed: 0,
+        failed: 0,
+        currentFile: `${totalDocuments} selected file(s)`,
+      });
+      setLocalDocuments((prev) =>
+        prev.map((item) =>
+          selectedLocalDocumentIds.includes(item.id) ? { ...item, status: "registering", warning: undefined } : item,
+        ),
+      );
+
+      steps[2].status = "running";
+      setOperationProgress({ type: "batch", steps: [...steps] });
+      const registeredArtifacts = await registerEvidenceBatchDrafts(drafts, activeAuditPackId);
+      steps[2] = {
+        ...steps[2],
+        status: "done",
+        detail: `${registeredArtifacts.length} blob(s) uploaded`,
+      };
+      steps[3].status = "done";
+      steps[3].detail = truncateValue(registeredArtifacts[0]?.result.txDigest ?? "tx pending", 22);
+      steps[4].status = "done";
+      steps[4].detail = `${registeredArtifacts.length} linked`;
+      setOperationProgress({ type: "batch", steps: [...steps] });
+
+      const createdRecords = registeredArtifacts.map((artifact) => artifact.record);
+      const latestResult = registeredArtifacts[0]?.result ?? null;
+      setRegistry((prev) => [...createdRecords, ...prev]);
+      setLocalDocuments((prev) =>
+        prev.map((item) => {
+          const artifact = registeredArtifacts.find((registered) => registered.localDocumentId === item.id);
+          return artifact
+            ? { ...item, status: "registered", evidenceId: artifact.record.id, warning: undefined }
+            : item;
+        }),
+      );
+      setSelectedLocalDocumentIds((prev) =>
+        prev.filter((id) => !selectedBatchDocuments.some((document) => document.id === id)),
+      );
+      setBatchSummary({
+        total: totalDocuments,
+        completed: registeredArtifacts.length,
+        failed: 0,
+      });
+      void persistRegisteredDemoEvidence(registeredArtifacts, demoEngagement.id);
+
+      if (latestResult && createdRecords[0]) {
+        setRegisterResult(latestResult);
+        setVerifyRecordId(createdRecords[0].id);
+        setAttestRecordId(createdRecords[0].id);
+        setActiveItemId(`record:${createdRecords[0].id}`);
+        setProofSnapshot({
+          auditPackId: activeAuditPackId,
+          evidenceId: createdRecords[0].id,
+          txDigest: latestResult.txDigest,
+          packageId: PACKAGE_ID,
+          commitment: latestResult.commitment,
+          blobReference: latestResult.blobId,
+          updatedAt: createdRecords[0].date,
+        });
+        setBottomTab("chain");
+      }
+    } catch (error) {
+      const message = getErrorMessage(error, "Batch registration failed while calling live infrastructure.");
+      steps[2].status = steps[2].status === "done" ? "done" : "error";
+      steps[3].status = "error";
+      steps[4].status = "error";
+      setOperationProgress({ type: "batch", steps: [...steps] });
+      setRegisterError(message);
+      setBatchSummary({
+        total: totalDocuments,
+        completed: 0,
+        failed: totalDocuments,
+        lastError: message,
+      });
+      setLocalDocuments((prev) =>
+        prev.map((item) =>
+          selectedLocalDocumentIds.includes(item.id) ? { ...item, status: "flagged", warning: message } : item,
+        ),
+      );
+    } finally {
+      setIsBatchRegistering(false);
+    }
+  };
+
+  const handleVerify = async (recordId = verifyRecordId) => {
+    if (!recordId || isVerifying) return;
+
+    setIsVerifying(true);
+    setVerificationResult({ status: "idle", message: "" });
+
+    const record = registry.find((item) => item.id === recordId);
+    if (!record) {
+      setIsVerifying(false);
+      return;
+    }
+
+    const sourceContent = verifyFile ?? record.sourceFile;
+    if (!sourceContent) {
+      setVerificationResult({
+        status: "tampered",
+        message: "Load the original evidence file before running live verification for this record.",
+      });
+      setIsVerifying(false);
+      return;
+    }
+
+    const steps: ProgressStep[] = [
+      { label: "Fetching on-chain EvidenceRecord", status: "pending" },
+      { label: "Preparing verification file", status: "pending" },
+      { label: "Computing comparison hash", status: "pending" },
+    ];
+
+    try {
+      steps[0].status = "running";
+      setOperationProgress({ type: "verify", steps: [...steps] });
+      const verifyEvidence = createVerifyEvidenceFlow({
+        tatum: serverTatumRead,
+        packageId: PACKAGE_ID,
+      });
+
+      steps[0] = { ...steps[0], status: "done", detail: truncateValue(record.id, 14) };
+      steps[1].status = "running";
+      setOperationProgress({ type: "verify", steps: [...steps] });
+      const checkedFileLabel = sourceContent.name || record.fileName || "Evidence file";
+      steps[1] = { ...steps[1], status: "done", detail: checkedFileLabel };
+
+      steps[2].status = "running";
+      setOperationProgress({ type: "verify", steps: [...steps] });
+      const result = await verifyEvidence({
+        evidenceId: recordId,
+        content: sourceContent,
+      });
+      const checkedAt = result.checkedAt.replace("T", " ").substring(0, 16);
+
+      if (result.isMatch) {
+        steps[2] = { ...steps[2], status: "done", detail: "Hash matches" };
+        setOperationProgress({ type: "verify", steps: [...steps] });
+        setVerificationResult({
+          status: "success",
+          message: "Hash matches the recorded Sui commitment. This proves integrity, not source truth.",
+          computedHash: result.actualCommitment,
+          expectedHash: result.expectedCommitment,
+          checkedFileLabel,
+        });
+        setLastVerificationSession({
+          evidenceId: recordId,
+          status: "success",
+          checkedFileLabel,
+          checkedAt,
+        });
+        setProofSnapshot((prev) => ({
+          auditPackId: record.auditPackId ?? prev?.auditPackId,
+          evidenceId: recordId,
+          txDigest: prev?.txDigest,
+          packageId: PACKAGE_ID,
+          commitment: result.expectedCommitment,
+          blobReference: result.evidence?.blobId ?? record.blobId,
+          attestationId: prev?.attestationId,
+          verificationStatus: "success",
+          checkedFileLabel,
+          memoryStatus: prev?.memoryStatus,
+          updatedAt: checkedAt,
+        }));
+        setAttestRecordId(recordId);
+      } else {
+        steps[2] = { ...steps[2], status: "error", detail: "Tamper detected" };
+        setOperationProgress({ type: "verify", steps: [...steps] });
+        setVerificationResult({
+          status: "tampered",
+          message: "Tamper detected. The supplied file does not match the recorded Sui commitment.",
+          computedHash: result.actualCommitment,
+          expectedHash: result.expectedCommitment,
+          checkedFileLabel,
+        });
+        setLastVerificationSession({
+          evidenceId: recordId,
+          status: "tampered",
+          checkedFileLabel,
+          checkedAt,
+        });
+        setProofSnapshot((prev) => ({
+          auditPackId: record.auditPackId ?? prev?.auditPackId,
+          evidenceId: recordId,
+          txDigest: prev?.txDigest,
+          packageId: PACKAGE_ID,
+          commitment: result.expectedCommitment,
+          blobReference: result.evidence?.blobId ?? record.blobId,
+          attestationId: prev?.attestationId,
+          verificationStatus: "tampered",
+          checkedFileLabel,
+          memoryStatus: prev?.memoryStatus,
+          updatedAt: checkedAt,
+        }));
+      }
+      setBottomTab("chain");
+    } catch (error) {
+      steps[2] = { ...steps[2], status: "error", detail: "Verification failed" };
+      setOperationProgress({ type: "verify", steps: [...steps] });
+      setVerificationResult({
+        status: "tampered",
+        message: getErrorMessage(error, "Verification failed while calling live infrastructure."),
+        expectedHash: record.commitment,
+      });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleAttest = async (recordId = attestRecordId) => {
+    if (!recordId || isAttesting) return;
+    if (!signerAddress) {
+      setAttestError("Connect a Sui wallet before creating an attestation.");
+      return;
+    }
+    if (!auditorWalletMatches) {
+      setAttestError("Connect the assigned auditor wallet before creating a reviewer attestation.");
+      return;
+    }
+    if (
+      !lastVerificationSession ||
+      lastVerificationSession.evidenceId !== recordId ||
+      lastVerificationSession.status !== "success"
+    ) {
+      setAttestError("Run a successful verification for this evidence item before attesting.");
+      return;
+    }
+
+    setIsAttesting(true);
+    setAttestError(null);
+    setAttestResult(null);
+
+    const steps: ProgressStep[] = [
+      { label: "Preparing reviewer statement", status: "pending" },
+      { label: "Signing attestation proof", status: "pending" },
+    ];
+
+    try {
+      steps[0].status = "running";
+      setOperationProgress({ type: "attest", steps: [...steps] });
+      const encryptionKey = await generateEncryptionKey();
+      const createAttestation = createAttestationFlow({
+        packageId: PACKAGE_ID,
+        signerAddress,
+        signTransaction,
+        encryptionKey,
+        tatum: serverTatumExecute,
+      });
+      const attestationType = toAttestationType(attestType);
+      steps[0] = { ...steps[0], status: "done", detail: toAttestationLabel(attestationType) };
+
+      steps[1].status = "running";
+      setOperationProgress({ type: "attest", steps: [...steps] });
+      const result = await createAttestation({
+        evidenceId: recordId,
+        reviewerAddress: signerAddress,
+        attestationType,
+        sourceConfidence: "L3" satisfies SourceConfidenceLevel,
+        note: attestNotes || "Attested via Linow Workspace.",
+      });
+      const attestationId = result.attestation.id;
+      const txDigest = result.attestation.transactionDigest ?? "n/a";
+      const createdAt = result.attestation.createdAt.replace("T", " ").substring(0, 16);
+
+      steps[1] = { ...steps[1], status: "done", detail: txDigest };
+      setOperationProgress({ type: "attest", steps: [...steps] });
+
+      setRegistry((prev) =>
+        prev.map((record) =>
+          record.id === recordId
+            ? {
+              ...record,
+              reviewer: signerAddress,
+              notes: attestNotes || "Attested via Linow Workspace.",
+              latestAttestation: {
+                id: attestationId,
+                action: toAttestationLabel(attestationType),
+                reviewer: signerAddress,
+                note: attestNotes || "Attested via Linow Workspace.",
+                txDigest,
+                createdAt,
+              },
+            }
+            : record,
+        ),
+      );
+
+      setAttestResult({
+        attestationId,
+        txDigest,
+        evidenceId: recordId,
+        reviewer: signerAddress,
+        action: toAttestationLabel(attestationType),
+        createdAt,
+      });
+      if (demoEngagement.id && isDemoStoreConfigured()) {
+        void insertDemoAttestation({
+          id: `${recordId}-${attestationId}`,
+          engagement_id: demoEngagement.id,
+          evidence_id: recordId,
+          attestation_id: attestationId,
+          tx_digest: txDigest,
+          reviewer_wallet: signerAddress,
+          action: toAttestationLabel(attestationType),
+          note: attestNotes || "Attested via Linow Workspace.",
+        }).then(() => {
+          setDemoEngagement((prev) => ({
+            ...prev,
+            status: "ready",
+            message: "Reviewer attestation synced to shared demo engagement.",
+          }));
+        }).catch((error) => {
+          setDemoEngagement((prev) => ({
+            ...prev,
+            status: "error",
+            message: getErrorMessage(error, "Attestation recorded on-chain but could not be synced to Supabase."),
+          }));
+        });
+      }
+      const attestedRecord = registry.find((record) => record.id === recordId);
+      setProofSnapshot((prev) => ({
+        auditPackId: attestedRecord?.auditPackId ?? prev?.auditPackId,
+        evidenceId: recordId,
+        txDigest,
+        packageId: PACKAGE_ID,
+        commitment: attestedRecord?.commitment || prev?.commitment,
+        blobReference: attestedRecord?.blobId || prev?.blobReference,
+        attestationId,
+        verificationStatus: prev?.verificationStatus,
+        checkedFileLabel: prev?.checkedFileLabel,
+        memoryStatus: prev?.memoryStatus,
+        updatedAt: createdAt,
+      }));
+      setBottomTab("chain");
+    } catch (error) {
+      setAttestError(getErrorMessage(error, "Attestation failed while calling live infrastructure."));
+      setOperationProgress(null);
+    } finally {
+      setIsAttesting(false);
+    }
+  };
+
+  const handleRunAgent = async () => {
+    if (agentRun.status === "running") return;
+
+    const packId = auditPack.id ?? "local-demo-pack";
+    const traceSeed: AgentTraceEntry[] = [];
+    const appendTrace = (entry: AgentTraceEntry) => {
+      traceSeed.push(entry);
+      setAgentRun((prev) => ({
+        ...prev,
+        trace: [...traceSeed],
+      }));
+    };
+    setAgentRun({
+      ...DEFAULT_AGENT_STATE,
+      status: "running",
+      message: "Preparing local evidence and calling the agent orchestration route.",
+    });
+    appendTrace({
+      id: "trace-start",
+      title: "Starting agent run",
+      detail: "Preparing selected evidence for backend audit analysis.",
+      tone: "info",
+    });
+
+    const steps: ProgressStep[] = [
+      { label: "Preparing evidence files", status: "pending" },
+      { label: "Running agent orchestration", status: "pending" },
+      { label: "Persisting memory when configured", status: "pending" },
+    ];
+
+    try {
+      steps[0].status = "running";
+      setOperationProgress({ type: "agent", steps: [...steps] });
+
+      const documents: Array<Record<string, unknown>> = [];
+      const warnings: string[] = [];
+      const sourceDocuments = [
+        ...visibleLocalDocuments.map((document) => ({
+          id: document.id,
+          file: document.file,
+          fileName: document.fileName,
+          documentType: document.documentType,
+          source: document.source,
+          evidenceRef: undefined as EvidenceRecord | undefined,
+        })),
+        ...registry.map((record) => ({
+          id: record.id,
+          file: record.sourceFile,
+          fileName: record.fileName ?? record.id,
+          documentType: record.type,
+          source: record.source,
+          evidenceRef: record,
+        })),
+      ];
+
+      for (const [index, item] of sourceDocuments.entries()) {
+        if (!item.file) continue;
+        steps[0].detail = `${index + 1}/${sourceDocuments.length} ${item.fileName}`;
+        setOperationProgress({ type: "agent", steps: [...steps] });
+        appendTrace({
+          id: `trace-prepare-${item.id}`,
+          title: `Opening ${item.fileName}`,
+          detail: `Preparing ${item.file.type || getFileExtension(item.file.name) || "file"} for agent ingestion.`,
+          tone: "info",
+          fileName: item.fileName,
+        });
+
+        const extension = getFileExtension(item.file.name);
+        const isTextLike = item.file.type.startsWith("text/") || TEXT_AGENT_EXTENSIONS.has(extension);
+
+        if (isTextLike) {
+          const { text, warning } = await readAgentText(item.file);
+          if (warning) warnings.push(`${item.fileName}: ${warning}`);
+          if (!text) continue;
+
+          documents.push({
+            documentId: item.id,
+            documentName: item.fileName,
+            documentText: text,
+            notes: item.evidenceRef
+              ? [`Registered evidence ${item.evidenceRef.id}`, `Source confidence ${item.source}`]
+              : [`Local session file. ${item.source}`],
+            context: {
+              engagementName: "Q2 2026 Audit Readiness",
+              documentTypeHint: item.documentType,
+              uploaderLabel: item.source,
+              auditArea: "Audit readiness",
+            },
+            evidence_ref: item.evidenceRef
+              ? {
+                evidence_id: item.evidenceRef.id,
+                walrus_blob_id: item.evidenceRef.blobId,
+                commitment: item.evidenceRef.commitment,
+              }
+              : undefined,
+          });
+          appendTrace({
+            id: `trace-text-ready-${item.id}`,
+            title: `Prepared inline text for ${item.fileName}`,
+            detail: `${text.length} characters are ready for orchestration.`,
+            tone: "success",
+            fileName: item.fileName,
+          });
+          continue;
+        }
+
+        if (!isAgentProcessableFile(item.file)) {
+          warnings.push(`${item.fileName}: Unsupported file format for workspace agent analysis.`);
+          appendTrace({
+            id: `trace-unsupported-${item.id}`,
+            title: `Skipped ${item.fileName}`,
+            detail: "This file type is not currently supported by the workspace agent uploader.",
+            tone: "warning",
+            fileName: item.fileName,
+          });
+          continue;
+        }
+
+        const staged = await stageAgentFile(item.file);
+        warnings.push(...(staged.warnings ?? []).map((warning) => `${item.fileName}: ${warning}`));
+        documents.push({
+          documentId: item.id,
+          documentName: item.fileName,
+          filePath: staged.filePath,
+          notes: item.evidenceRef
+            ? [`Registered evidence ${item.evidenceRef.id}`, `Source confidence ${item.source}`]
+            : [`Local session file. ${item.source}`],
+          context: {
+            engagementName: "Q2 2026 Audit Readiness",
+            documentTypeHint: item.documentType,
+            uploaderLabel: item.source,
+            auditArea: "Audit readiness",
+            filePath: staged.filePath,
+          },
+          evidence_ref: item.evidenceRef
+            ? {
+                evidence_id: item.evidenceRef.id,
+                walrus_blob_id: item.evidenceRef.blobId,
+                commitment: item.evidenceRef.commitment,
+              }
+            : undefined,
+        });
+        appendTrace({
+          id: `trace-stage-${item.id}`,
+          title: `Staged ${item.fileName} on the server`,
+          detail: `${staged.ingestion?.format ?? "binary"} evidence uploaded for backend extraction${typeof staged.extracted_characters === "number" ? ` (${staged.extracted_characters} chars extracted).` : "."}`,
+          tone: "success",
+          fileName: item.fileName,
+        });
+      }
+
+      if (documents.length === 0) {
+        throw new Error(
+          warnings[0] ??
+          "No supported local evidence is available. Add CSV, TXT, JSON, MD, TSV, PDF, DOCX, XLSX, or image evidence for the web agent panel.",
+        );
+      }
+
+      steps[0] = { ...steps[0], status: "done", detail: `${documents.length} readable` };
+      steps[1].status = "running";
+      setOperationProgress({ type: "agent", steps: [...steps] });
+      appendTrace({
+        id: "trace-orchestrate-start",
+        title: "Submitting evidence pack to the agent",
+        detail: `${documents.length} document(s) prepared for orchestration.`,
+        tone: "info",
+      });
+
+      const packNotes = [
+        auditPack.id
+          ? "AuditPack exists on Sui testnet. Evidence may include on-chain proof references."
+          : "No AuditPack has been created yet; this is a local workspace analysis run.",
+        agentInstruction.trim()
+          ? `User audit instruction: ${agentInstruction.trim()}`
+          : undefined,
+      ].filter((note): note is string => Boolean(note));
+
+      const result = await postJson<unknown>("/api/agent/orchestrate", {
+        provider: WORKSPACE_AGENT_PROVIDER,
+        response_mode: "workspace",
+        profile: "balanced",
+        pack_id: packId,
+        engagement_name: "Q2 2026 Audit Readiness",
+        audit_area: "Audit readiness",
+        stage: "fieldwork",
+        pack_owner_address: auditPack.owner ?? signerAddress,
+        documents,
+        pack_notes: packNotes,
+      });
+
+      const root = isRecord(result) ? result : {};
+      const gap = isRecord(root.gap_analysis) ? root.gap_analysis : {};
+      const summary = isRecord(root.audit_pack_summary) ? root.audit_pack_summary : {};
+      const approvalControls = isRecord(root.approval_controls) ? root.approval_controls : {};
+      const persistence = isRecord(root.persistence_result) ? root.persistence_result : {};
+      const memwal = isRecord(persistence.memwal) ? persistence.memwal : {};
+      const walrus = isRecord(persistence.walrus) ? persistence.walrus : {};
+      const sui = isRecord(persistence.sui) ? persistence.sui : {};
+      const reviewBundle = isRecord(root.review_bundle) ? root.review_bundle : {};
+
+      const actionCandidates = readArray(
+        readArray(approvalControls.action_candidates).length > 0 ? approvalControls.action_candidates : sui.action_candidates,
+      ).map((candidate) => {
+        const row = isRecord(candidate) ? candidate : {};
+        return {
+          packId: readString(row.pack_id),
+          actionType: readString(row.action_type) ?? "agent_action",
+          outputHash: readString(row.agent_output_hash) ?? "hash unavailable",
+          targetKind: readString(row.target_kind),
+          targetId: readString(row.target_id),
+          evidenceId: readString(row.evidence_id),
+          documentId: readString(row.document_id),
+          findingId: readString(row.finding_id),
+          requiresHumanApproval: row.requires_human_approval !== false,
+        };
+      });
+
+      const findings = readArray(root.findings).map((finding, index) => {
+        const row = isRecord(finding) ? finding : {};
+        return {
+          id: readString(row.finding_id) ?? `finding-${index + 1}`,
+          title: readString(row.title) ?? readString(row.condition) ?? `Draft finding ${index + 1}`,
+          severity: readString(row.severity) ?? "Unrated",
+          status: "draft" as const,
+        };
+      });
+
+      steps[1] = { ...steps[1], status: "done", detail: `${findings.length} findings` };
+      steps[2] = {
+        ...steps[2],
+        status: "done",
+        detail: readString(memwal.status) ?? readString(walrus.status) ?? "checked",
+      };
+      setOperationProgress({ type: "agent", steps: [...steps] });
+
+      const memoryStatus = [
+        readString(memwal.status) ? `MemWal ${readString(memwal.status)}` : null,
+        readString(walrus.status) ? `Walrus ${readString(walrus.status)}` : null,
+      ].filter(Boolean).join(" / ") || "memory status unavailable";
+
+      setAgentRun({
+        status: "success",
+        message:
+          warnings.length > 0
+            ? `Agent run completed with ${warnings.length} web-ingestion limitation(s).`
+            : "Agent run completed. Outputs still require human approval before any chain action.",
+        recalledPriorCount: readNumber(root.recalled_prior_memory_count),
+        readinessScore: readNumber(gap.readiness_score) ?? readNumber(summary.readiness_score),
+        documentsAnalyzed: readNumber(summary.evidence_count) ?? documents.length,
+        findings,
+        actionCandidates,
+        memoryStatus,
+        trace: [...traceSeed, ...buildAgentTraceFromResult(root, warnings)],
+        raw: {
+          documents: root.documents,
+          gap_analysis: root.gap_analysis,
+          findings: root.findings,
+          audit_pack_summary: root.audit_pack_summary,
+          progress_trace: root.progress_trace,
+          approval_controls: root.approval_controls,
+          review_bundle: reviewBundle,
+          persistence_result: root.persistence_result,
+          pack_notes: packNotes,
+          warnings,
+        },
+      });
+      setProofSnapshot((prev) => ({
+        auditPackId: auditPack.id ?? prev?.auditPackId,
+        evidenceId: prev?.evidenceId,
+        txDigest: prev?.txDigest,
+        packageId: PACKAGE_ID,
+        commitment: prev?.commitment,
+        blobReference: prev?.blobReference,
+        attestationId: prev?.attestationId,
+        verificationStatus: prev?.verificationStatus,
+        checkedFileLabel: prev?.checkedFileLabel,
+        memoryStatus,
+        updatedAt: nowLabel(),
+      }));
+      setBottomTab("agent");
+    } catch (error) {
+      steps[0].status = steps[0].status === "running" ? "error" : steps[0].status;
+      steps[1].status = steps[1].status === "running" ? "error" : steps[1].status;
+      setOperationProgress({ type: "agent", steps: [...steps] });
+      setAgentRun({
+        ...DEFAULT_AGENT_STATE,
+        status: "error",
+        message: getErrorMessage(error, "Agent orchestration failed."),
+      });
+    }
+  };
+
+  const getAgentActionCandidateKey = (candidate: AgentActionCandidate) =>
+    [
+      candidate.packId ?? auditPack.id ?? "no-pack",
+      candidate.targetKind ?? "target",
+      candidate.targetId ?? "no-target",
+      candidate.actionType,
+      candidate.outputHash,
+    ].join("|");
+
+  const isAgentActionLogged = (candidate: AgentActionCandidate) => {
+    const key = getAgentActionCandidateKey(candidate);
+    return agentActionLog.logs.some((log) => log.key === key);
+  };
+
+  const handleApproveAgentAction = async (candidate: AgentActionCandidate) => {
+    const key = getAgentActionCandidateKey(candidate);
+    const packId = candidate.packId ?? auditPack.id;
+
+    if (!signerAddress) {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: "Connect a Sui wallet before approving an AgentAction.",
+      }));
+      return;
+    }
+
+    if (!auditorWalletMatches) {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: "Connect the assigned auditor wallet before approving an AgentAction.",
+      }));
+      return;
+    }
+
+    if (!isSuiObjectId(packId)) {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: "AgentAction approval needs a real Sui AuditPack object ID. Create the AuditPack before logging agent actions.",
+      }));
+      return;
+    }
+
+    if (!/^[0-9a-fA-F]+$/.test(candidate.outputHash) || candidate.outputHash === "hash unavailable") {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: "AgentAction approval needs a valid hex output hash.",
+      }));
+      return;
+    }
+
+    setAgentActionLog((prev) => ({
+      ...prev,
+      status: "signing",
+      activeKey: key,
+      message: "Waiting for wallet approval to log the AgentAction hash on Sui.",
+    }));
+
+    try {
+      const emitAgentAction = createEmitAgentActionFlow({
+        packageId: PACKAGE_ID,
+        signerAddress,
+        signTransaction,
+        tatum: serverTatumExecute,
+        tatumNetwork: "testnet",
+      });
+      const result = await emitAgentAction({
+        packId,
+        evidenceId: candidate.evidenceId,
+        actionType: candidate.actionType,
+        agentOutputHash: candidate.outputHash,
+      });
+      const loggedAt = nowLabel();
+      const loggedAction: LoggedAgentAction = {
+        key,
+        packId,
+        evidenceId: candidate.evidenceId,
+        actionType: candidate.actionType,
+        outputHash: candidate.outputHash,
+        targetKind: candidate.targetKind,
+        targetId: candidate.targetId,
+        signer: signerAddress,
+        txDigest: result.transactionDigest,
+        packageId: result.packageId,
+        eventCount: result.eventCount,
+        objectChangeCount: result.objectChangeCount,
+        event: result.agentActionEvent,
+        loggedAt,
+      };
+
+      setAgentActionLog((prev) => ({
+        status: "success",
+        activeKey: key,
+        message: "AgentAction logged on Sui. Only the approved output hash and lifecycle event were written.",
+        logs: [loggedAction, ...prev.logs.filter((log) => log.key !== key)],
+      }));
+      if (candidate.findingId) {
+        setAgentRun((prev) => ({
+          ...prev,
+          findings: prev.findings.map((finding) =>
+            finding.id === candidate.findingId ? { ...finding, status: "logged" } : finding,
+          ),
+        }));
+      }
+      setProofSnapshot((prev) => ({
+        auditPackId: packId,
+        evidenceId: candidate.evidenceId ?? prev?.evidenceId,
+        txDigest: result.transactionDigest ?? prev?.txDigest,
+        packageId: result.packageId ?? PACKAGE_ID,
+        commitment: prev?.commitment,
+        blobReference: prev?.blobReference,
+        attestationId: prev?.attestationId,
+        verificationStatus: prev?.verificationStatus,
+        checkedFileLabel: prev?.checkedFileLabel,
+        memoryStatus: prev?.memoryStatus,
+        agentActionTxDigest: result.transactionDigest,
+        agentActionEventType: result.agentActionEvent?.type,
+        agentActionEventSeq: result.agentActionEvent?.id?.eventSeq,
+        agentActionOutputHash: candidate.outputHash,
+        updatedAt: loggedAt,
+      }));
+      if (demoEngagement.id && isDemoStoreConfigured()) {
+        void insertDemoAgentAction({
+          id: `${key}-${result.transactionDigest ?? loggedAt}`.replace(/[^\w.-]+/g, "_"),
+          engagement_id: demoEngagement.id,
+          pack_id: packId,
+          evidence_id: candidate.evidenceId ?? null,
+          action_type: candidate.actionType,
+          output_hash: candidate.outputHash,
+          tx_digest: result.transactionDigest ?? null,
+          event_type: result.agentActionEvent?.type ?? null,
+          event_seq: result.agentActionEvent?.id?.eventSeq ?? null,
+          signer_wallet: signerAddress,
+        }).then(() => {
+          setDemoEngagement((prev) => ({
+            ...prev,
+            status: "ready",
+            message: "AgentAction proof synced to shared demo engagement.",
+          }));
+        }).catch((error) => {
+          setDemoEngagement((prev) => ({
+            ...prev,
+            status: "error",
+            message: getErrorMessage(error, "AgentAction logged on-chain but could not be synced to Supabase."),
+          }));
+        });
+      }
+      setBottomTab("chain");
+    } catch (error) {
+      setAgentActionLog((prev) => ({
+        ...prev,
+        status: "error",
+        activeKey: key,
+        message: getErrorMessage(error, "AgentAction logging failed."),
+      }));
+    }
+  };
+
+  const handleReloadWalrusMemory = async () => {
+    const manifestBlobId = agentReview.persistence.manifestBlobId;
+    const artifactBlobId = agentReview.persistence.artifactBlobId;
+
+    if (!manifestBlobId || !artifactBlobId) {
+      setMemoryReload({
+        status: "error",
+        message: "No direct Walrus memory artifact is available yet. Run agent analysis with LINOW_AGENT_MEMORY_ENCRYPTION_KEY configured.",
+      });
+      setBottomTab("memory");
+      return;
+    }
+
+    setMemoryReload({
+      status: "loading",
+      message: "Reloading encrypted Walrus memory manifest and agent artifact.",
+    });
+
+    try {
+      const result = await postJson<WalrusMemoryReloadResult>("/api/walrus/memory/reload", {
+        manifestBlobId,
+        artifactBlobId,
+      });
+
+      setMemoryReload({
+        status: "success",
+        message: "Encrypted Walrus memory artifact reloaded and decrypted server-side.",
+        result,
+      });
+      setProofSnapshot((prev) => ({
+        auditPackId: auditPack.id ?? result.manifest.packId ?? prev?.auditPackId,
+        evidenceId: prev?.evidenceId,
+        txDigest: prev?.txDigest,
+        packageId: PACKAGE_ID,
+        commitment: prev?.commitment,
+        blobReference: result.artifactBlobId,
+        attestationId: prev?.attestationId,
+        verificationStatus: prev?.verificationStatus,
+        checkedFileLabel: prev?.checkedFileLabel,
+        memoryStatus: `Walrus memory reloaded (${result.network})`,
+        updatedAt: nowLabel(),
+      }));
+      setBottomTab("memory");
+    } catch (error) {
+      setMemoryReload({
+        status: "error",
+        message: getErrorMessage(error, "Walrus memory reload failed."),
+      });
+      setBottomTab("memory");
+    }
+  };
+
+  const renderSteps = (type: OperationType) => {
+    if (!operationProgress || operationProgress.type !== type) return null;
+
+    return (
+      <div className="ide-progress">
+        {operationProgress.steps.map((step, index) => (
+          <div key={`${step.label}-${index}`} className="ide-progress-step">
+            <span className={`ide-progress-dot ${step.status}`} />
+            <span>{step.label}</span>
+            {step.detail && <code>{step.detail}</code>}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderStatusDot = (status: LocalDocumentStatus | "registered-record" | "attested-record" | "tampered") => {
+    const className =
+      status === "local"
+        ? "status-local"
+        : status === "queued" || status === "registering"
+          ? "status-pending"
+          : status === "registered" || status === "registered-record"
+            ? "status-registered"
+            : status === "attested-record"
+              ? "status-approved"
+              : "status-flagged";
+
+    return <span className={`tree-status ${className}`} />;
+  };
+
+  const findAgentDocumentReview = (input: { fileName?: string; evidenceId?: string; localId?: string }) =>
+    agentReview.documents.find((document) =>
+      (input.evidenceId && document.evidenceId === input.evidenceId) ||
+      (input.localId && document.id === input.localId) ||
+      (input.fileName && document.filename === input.fileName),
+    );
+
+  const renderAgentDocumentReview = (review?: AgentDocumentReview) => (
+    <div className="card">
+      <div className="card-section-title">Agent Document Review</div>
+      {review ? (
+        <div className="agent-review-card">
+          <div className="agent-review-head">
+            <div>
+              <strong>{review.documentType}</strong>
+              <span>{review.filename}</span>
+            </div>
+            <code>{review.sourceConfidence ?? "L?"}</code>
+          </div>
+          <p>{review.classificationRationale ?? "No classification rationale returned."}</p>
+          <div className="agent-review-grid">
+            <div>
+              <span>Classification confidence</span>
+              <strong>{formatPercent(review.confidence)}</strong>
+            </div>
+            <div>
+              <span>Evidence proof</span>
+              <strong>{review.evidenceId ? "linked" : "local only"}</strong>
+            </div>
+          </div>
+          {review.metadataSummary.length > 0 && (
+            <div className="agent-chip-row">
+              {review.metadataSummary.map((item) => <span key={item}>{item}</span>)}
+            </div>
+          )}
+          {review.mappedAssertions.length > 0 && (
+            <div className="agent-assertion-list">
+              {review.mappedAssertions.slice(0, 6).map((assertion) => (
+                <div key={`${assertion.label}-${assertion.coverage}`}>
+                  <strong>{assertion.label}</strong>
+                  <span>{assertion.coverage}{assertion.confidence !== undefined ? ` / ${formatPercent(assertion.confidence)}` : ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {(review.sourceReason || review.sourceCaveats.length > 0 || review.classificationLimitations.length > 0) && (
+            <p className="ide-muted">
+              {[
+                review.sourceReason,
+                ...review.sourceCaveats,
+                ...review.classificationLimitations,
+              ].filter(Boolean).slice(0, 3).join(" ")}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="ide-muted">Run the agent to populate classification, source confidence, metadata, and assertion mapping for this evidence.</p>
+      )}
+    </div>
+  );
+
+  const renderMainContent = () => {
+    if (activeRailPanel === "export" && activeItemId === "proof-dashboard") {
+      return renderVerifierProofDashboard();
+    }
+
+    if (activeRailPanel === "export" || activeItemId === "export") {
+      return renderExportPanel();
+    }
+
+    if (activeRailPanel === "settings" || activeItemId === "settings") {
+      return renderSettingsPanel();
+    }
+
+    if (selectedLocalDocument) {
+      return renderLocalDocument(selectedLocalDocument);
+    }
+
+    if (selectedRecord) {
+      return renderRegisteredRecord(selectedRecord);
+    }
+
+    if (activeItemId === "folder:findings") {
+      return renderFindingsFolder();
+    }
+
+    if (activeItemId === "folder:proof") {
+      return renderProofFolder();
+    }
+
+
+    if (selectedLocalDocument) {
+      return renderLocalDocument(selectedLocalDocument);
+    }
+
+    if (selectedRecord) {
+      return renderRegisteredRecord(selectedRecord);
+    }
+
+    if (activeItemId === "folder:findings") {
+      return renderFindingsFolder();
+    }
+
+    if (activeItemId === "folder:proof") {
+      return renderProofFolder();
+    }
+
+    return renderEvidenceFolder();
+  };
+
+  const renderEvidenceFolder = () => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Explorer</span>
+          <h1 className="workspace-title">Audit Evidence Pack</h1>
+          <p className="workspace-desc">
+            Upload and prepare local documents. Once registered, secure cryptographic proofs are written to the Sui blockchain registry, allowing reviewers to verify and attest to them.
+          </p>
+        </div>
+        <div className="ide-panel-actions">
+          <button className="btn-secondary" type="button" onClick={() => addDocumentInputRef.current?.click()}>
+            Add document
+          </button>
+          <div className={`ide-auditpack-status${auditPack.id ? " ready" : ""}`} title={auditPack.id ?? "No active Audit Pack"}>
+            {auditPack.id ? `Audit Pack: ${truncateValue(auditPack.id, 18)}` : "No active Audit Pack"}
+          </div>
+          <button
+            className="btn-primary"
+            type="button"
+            disabled={
+              role !== "company" ||
+              isBatchRegistering ||
+              isRegistering ||
+              !signerAddress ||
+              !companyWalletMatches ||
+              selectedBatchDocuments.length === 0
+            }
+            onClick={handleBatchRegister}
+          >
+            {isBatchRegistering ? "Registering batch..." : `Register selected (${selectedBatchDocuments.length})`}
+          </button>
+        </div>
+      </div>
+
+      <div className="ide-evidence-section">
+        <div className="ide-batch-toolbar">
+        <div>
+          <strong>{selectedBatchDocuments.length}</strong>
+          <span> local file(s) selected for this AuditPack</span>
+          {selectedBatchDocuments.length > 0 && (
+            <span> - {selectedBatchReady ? "all ready" : `${selectedBatchDocuments.length - incompleteSelectedBatchDocuments.length}/${selectedBatchDocuments.length} ready`}</span>
+          )}
+        </div>
+        <div className="ide-batch-actions">
+          <button className="btn-secondary" type="button" disabled={selectableLocalDocuments.length === 0 || isBatchRegistering} onClick={selectAllBatchDocuments}>
+            Select all local
+          </button>
+          <button className="btn-secondary" type="button" disabled={selectedLocalDocumentIds.length === 0 || isBatchRegistering} onClick={clearBatchSelection}>
+            Clear selection
+          </button>
+        </div>
+      </div>
+
+      {registerError && (
+        <div className="result-card error">
+          <div className="result-title error">Registration blocked</div>
+          <p className="result-message">{registerError}</p>
+        </div>
+      )}
+
+      {incompleteSelectedBatchDocuments.length > 0 && (
+        <p className="ide-section-note warning">
+          Complete type, source, description, and assertions for: {incompleteSelectedBatchDocuments.map((document) => document.fileName).join(", ")}.
+        </p>
+      )}
+
+      {!auditPack.id && selectableLocalDocuments.length > 0 && (
+        <p className="ide-section-note warning">
+          Batch registration will create an Audit Pack on-chain first, then register each selected evidence record against that active package reference.
+        </p>
+      )}
+
+      {batchSummary && (
+        <div className={`ide-batch-summary ${batchSummary.failed > 0 ? "error" : "success"}`}>
+          <div className="ide-batch-summary-title">Batch registration {isBatchRegistering ? "running" : "finished"}</div>
+          <p>
+            {batchSummary.completed}/{batchSummary.total} registered
+            {batchSummary.failed > 0 ? `, ${batchSummary.failed} failed` : ""}
+            {batchSummary.currentFile ? ` - current: ${batchSummary.currentFile}` : ""}
+          </p>
+          {batchSummary.lastError && <p>{batchSummary.lastError}</p>}
+        </div>
+      )}
+
+      {renderSteps("batch")}
+
+      <div className="ide-folder-grid">
+        {[...visibleLocalDocuments, ...registry].length === 0 ? (
+          <div className="ide-empty">
+            <div className="empty-state-title">No documents in local memory yet</div>
+            <p>Add a document from the explorer sidebar. The web workspace keeps the source file in browser memory for this session.</p>
+          </div>
+        ) : (
+          <>
+            {visibleLocalDocuments.map((document) => (
+              <div
+                key={document.id}
+                className="ide-file-row"
+                onClick={() => prepareLocalDocument(document)}
+              >
+                <input
+                  type="checkbox"
+                  className="ide-file-checkbox"
+                  checked={selectedLocalDocumentIds.includes(document.id)}
+                  disabled={document.status === "registered" || isBatchRegistering}
+                  aria-label={`Select ${document.fileName} for batch registration`}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={() => toggleBatchSelection(document.id)}
+                />
+                <span className="ide-file-name">{document.fileName}</span>
+                <span className="ide-file-meta">{document.fileSize}</span>
+                <span className="ide-file-state">
+                  {renderStatusDot(document.status)}
+                  {document.status === "registered"
+                    ? "Registered"
+                    : document.status === "flagged"
+                      ? "Failed"
+                      : document.status === "queued"
+                        ? "Queued"
+                        : selectedLocalDocumentIds.includes(document.id) && !isLocalDocumentReady(document)
+                          ? "Needs details"
+                          : "Local session"}
+                </span>
+              </div>
+            ))}
+            {registry.map((record) => (
+              <button
+                key={record.id}
+                className="ide-file-row"
+                type="button"
+                onClick={() => {
+                  setActiveItemId(`record:${record.id}`);
+                  setVerifyRecordId(record.id);
+                  setAttestRecordId(record.id);
+                }}
+              >
+                {renderStatusDot(record.latestAttestation ? "attested-record" : "registered-record")}
+                <span className="ide-file-name">{record.fileName ?? record.id}</span>
+                <span className="ide-file-meta">{truncateValue(record.id, 14)}</span>
+                <span className="ide-file-state">{record.latestAttestation ? "Attested" : "Registered"}</span>
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+
+        <p className="ide-section-note">
+          Batch registration runs sequentially through the same hash, encrypt, Walrus upload, wallet signature, and Sui submission path as single-file registration. Partial failures stay visible as red local files.
+        </p>
+      </div>
+    </div>
+  );
+
+  const renderLocalDocument = (document: LocalDocument) => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Local Session Document</span>
+          <h1 className="workspace-title">{document.fileName}</h1>
+          <p className="workspace-desc">
+            This document is stored locally in your browser. Registration calculates cryptographic commitments locally, encrypts the file before uploading to decentralized storage, and records only secure, privacy-safe metadata on-chain.
+          </p>
+        </div>
+        <span className="ide-state-pill">{document.status}</span>
+      </div>
+
+      <div className="card">
+        <div className="draft-section-header">
+          <div className="card-section-title">Document Metadata & Assertions</div>
+          <button
+            className="draft-save-button"
+            type="button"
+            onClick={() => handleSaveDraft(document.id)}
+          >
+            Save draft
+          </button>
+        </div>
+        {draftSaveMessage && <p className="draft-save-message">{draftSaveMessage}</p>}
+        <div className="form-grid">
+          <div className="field">
+            <label className="field-label">Document Type</label>
+            <select
+              className="field-select"
+              value={regDocType}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRegDocType(value);
+                updateLocalDocumentDraft(document.id, { documentType: value });
+              }}
+            >
+              <option>Audit Evidence</option>
+              <option>Bank Statement</option>
+              <option>Vendor Contract</option>
+              <option>Sales Invoice</option>
+              <option>ERP Ledger Export</option>
+              <option>Board Resolution</option>
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label">Claimed Source</label>
+            <input
+              className="field-input"
+              value={regSource}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRegSource(value);
+                updateLocalDocumentDraft(document.id, { source: value });
+              }}
+            />
+          </div>
+          <div className="field form-full">
+            <label className="field-label">Description / Audit Objective</label>
+            <textarea
+              className="field-textarea"
+              rows={3}
+              value={regDesc}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRegDesc(value);
+                updateLocalDocumentDraft(document.id, { description: value });
+              }}
+              placeholder="Describe the audit purpose or scope limitation."
+            />
+          </div>
+          <div className="field form-full">
+            <label className="field-label">ISA Assertions Covered</label>
+            <div className="assertions-grid">
+              {ISA_ASSERTIONS.map((assertion) => (
+                <button
+                  key={assertion}
+                  type="button"
+                  className={`assertion-chip${regAssertions.includes(assertion) ? " selected" : ""}`}
+                  onClick={() => handleToggleAssertion(assertion)}
+                >
+                  {assertion}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="btn-actions">
+          <button
+            className="btn-primary"
+            disabled={role !== "company" || isRegistering || !signerAddress || !companyWalletMatches || regAssertions.length === 0}
+            onClick={() =>
+              handleRegister({
+                file: document.file,
+                documentType: regDocType,
+                source: regSource,
+                description: regDesc,
+                assertions: regAssertions,
+                localDocumentId: document.id,
+              })
+            }
+          >
+            {isRegistering ? "Registering..." : auditPack.id ? "Register into AuditPack" : "Register Evidence"}
+          </button>
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() => setActiveItemId("folder:evidence")}
+          >
+            Back to folder
+          </button>
+        </div>
+      </div>
+
+      {registerError && (
+        <div className="result-card error">
+          <div className="result-title error">Registration blocked</div>
+          <p className="result-message">{registerError}</p>
+        </div>
+      )}
+      {renderAgentDocumentReview(findAgentDocumentReview({ localId: document.id, fileName: document.fileName }))}
+      {renderSteps("register")}
+      {registerResult && renderRegisterResult()}
+    </div>
+  );
+
+  const renderRegisteredRecord = (record: EvidenceRecord) => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Registered Document</span>
+          <h1 className="workspace-title">{record.fileName ?? record.type}</h1>
+          <p className="workspace-desc">
+            This document has a cryptographic proof recorded on-chain. You can verify its integrity at any time or check reviewer attestations.
+          </p>
+        </div>
+        <span className="ide-state-pill">{record.latestAttestation ? "attested" : "registered"}</span>
+      </div>
+
+      <div className="ide-record-grid">
+        <section className="card">
+          <div className="card-section-title">On-Chain Verification</div>
+          <div className="proof-grid">
+            <div className="proof-row">
+              <span className="proof-label">Evidence ID</span>
+              <span className="proof-value">{truncateValue(record.id, 32)}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Commitment</span>
+              <span className="proof-value">{truncateValue(record.commitment, 32)}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Walrus Blob</span>
+              <span className="proof-value">{truncateValue(record.blobId, 32)}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">AuditPack</span>
+              <span className="proof-value">{record.auditPackId ? truncateValue(record.auditPackId, 32) : "not linked"}</span>
+            </div>
+          </div>
+
+          <div className="field" style={{ marginTop: "1rem" }}>
+            <label className="field-label">Comparison File</label>
+            <div className={`file-upload${verifyFile ? " has-file" : ""}`}>
+              <div className="file-upload-text">
+                <div className="file-upload-name">{verifyFile ? verifyFile.name : "Use session file or load a comparison file"}</div>
+                <div className="file-upload-hint">Use a tampered copy to prove mismatch detection.</div>
+              </div>
+              <input
+                type="file"
+                className="file-upload-input"
+                onChange={(event) => {
+                  if (event.target.files?.[0]) setVerifyFile(event.target.files[0]);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="btn-actions">
+            <button
+              className="btn-primary"
+              disabled={isVerifying}
+              onClick={() => {
+                setVerifyRecordId(record.id);
+                handleVerify(record.id);
+              }}
+            >
+              {isVerifying ? "Verifying..." : "Verify hash"}
+            </button>
+          </div>
+
+          {renderSteps("verify")}
+          {verificationResult.status !== "idle" && record.id === (verifyRecordId || record.id) && (
+            <div className={`result-card ${verificationResult.status === "success" ? "success" : "error"}`}>
+              <div className={`result-title ${verificationResult.status === "success" ? "success" : "error"}`}>
+                {verificationResult.status === "success" ? "Hash matches" : "Tamper detected"}
+              </div>
+              <p className="result-message">{verificationResult.message}</p>
+            </div>
+          )}
+        </section>
+
+        <section className="card">
+          <div className="card-section-title">Reviewer Sign-off</div>
+          <div className="tamper-toggle">
+            <div className="tamper-info">
+              <div className="tamper-title">Reviewer Attestation Gate</div>
+              <div className="tamper-desc">
+                {selectedRecordVerified
+                  ? `Ready to attest. ${lastVerificationSession?.checkedFileLabel ?? "Selected file"} matched the commitment.`
+                  : selectedRecordTampered
+                    ? "Attestation is blocked because the latest verification detected tampering."
+                    : "Run a successful verification before creating a reviewer attestation."}
+              </div>
+            </div>
+          </div>
+
+          <div className="form-grid">
+            <div className="field">
+              <label className="field-label">Reviewer Wallet</label>
+              <div className="field-input mono field-display">{signerAddress ? truncateValue(signerAddress, 34) : "Connect wallet"}</div>
+            </div>
+            <div className="field">
+              <label className="field-label">Action</label>
+              <select className="field-select" value={attestType} onChange={(event) => setAttestType(event.target.value)}>
+                <option value="HashConfirmed">Hash confirmed</option>
+                <option value="EvidenceReviewed">Evidence reviewed</option>
+                <option value="IssueFlagged">Issue flagged</option>
+              </select>
+            </div>
+            <div className="field form-full">
+              <label className="field-label">Reviewer Notes</label>
+              <textarea
+                className="field-textarea"
+                rows={3}
+                value={attestNotes}
+                onChange={(event) => setAttestNotes(event.target.value)}
+                placeholder="Optional reviewer note or limitation."
+              />
+            </div>
+          </div>
+
+          <div className="btn-actions">
+            <button
+              className="btn-primary"
+              disabled={role === "company" || isAttesting || !signerAddress || !auditorWalletMatches || !selectedRecordVerified}
+              onClick={() => {
+                setAttestRecordId(record.id);
+                handleAttest(record.id);
+              }}
+            >
+              {isAttesting ? "Signing..." : "Review and sign"}
+            </button>
+          </div>
+
+          {attestError && (
+            <div className="result-card error">
+              <div className="result-title error">Attestation blocked</div>
+              <p className="result-message">{attestError}</p>
+            </div>
+          )}
+          {renderSteps("attest")}
+          {attestResult && attestResult.evidenceId === record.id && (
+            <div className="result-card success">
+              <div className="result-title success">Attestation recorded</div>
+              <p className="result-message">Reviewer action was signed by the active wallet and submitted through the live SDK flow.</p>
+            </div>
+          )}
+        </section>
+      </div>
+      {renderAgentDocumentReview(findAgentDocumentReview({ evidenceId: record.id, fileName: record.fileName }))}
+    </div>
+  );
+
+  const renderFindingsFolder = () => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Findings</span>
+          <h1 className="workspace-title">AI Co-Auditor Findings</h1>
+          <p className="workspace-desc">
+            AI-generated compliance draft findings. Review and approve findings to secure them as audit evidence on the blockchain.
+          </p>
+        </div>
+        <button className="btn-primary" type="button" disabled={agentRun.status === "running"} onClick={handleRunAgent}>
+          {agentRun.status === "running" ? "Running..." : "Run agent"}
+        </button>
+      </div>
+      {renderSteps("agent")}
+      <div className="agent-gap-card">
+        <div className="agent-gap-metrics">
+          <div>
+            <span>Readiness</span>
+            <strong>
+              {agentReview.gapSummary.readinessScore !== undefined
+                ? `${agentReview.gapSummary.readinessScore}/100`
+                : agentRun.readinessScore !== undefined
+                  ? `${agentRun.readinessScore}/100`
+                  : "n/a"}
+            </strong>
+          </div>
+          <div>
+            <span>Covered</span>
+            <strong>{agentReview.gapSummary.coveredLabels.length}</strong>
+          </div>
+          <div>
+            <span>Missing</span>
+            <strong>{agentReview.gapSummary.missingLabels.length}</strong>
+          </div>
+        </div>
+        <div className="agent-chip-row">
+          {agentReview.gapSummary.coveredLabels.slice(0, 6).map((label) => (
+            <span key={`covered-${label}`} className="covered">{label}</span>
+          ))}
+          {agentReview.gapSummary.missingLabels.slice(0, 6).map((label) => (
+            <span key={`missing-${label}`} className="missing">{label}</span>
+          ))}
+          {agentReview.gapSummary.coveredLabels.length === 0 && agentReview.gapSummary.missingLabels.length === 0 && (
+            <span>No assertion coverage returned yet</span>
+          )}
+        </div>
+        {agentReview.gapSummary.recommendations.length > 0 && (
+          <div className="agent-recommendations">
+            {agentReview.gapSummary.recommendations.slice(0, 3).map((recommendation) => (
+              <p key={recommendation}>{recommendation}</p>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="ide-folder-grid">
+        {agentReview.findings.length > 0 ? (
+          agentReview.findings.map((finding) => (
+            <article key={finding.id} className="agent-finding-card">
+              <div className="agent-finding-head">
+                {renderStatusDot(finding.status === "blocked" ? "tampered" : finding.status === "approved" ? "attested-record" : "registering")}
+                <div>
+                  <strong>{finding.title}</strong>
+                  <span>{finding.severity} / {finding.status} / {finding.citationCount} citation(s)</span>
+                </div>
+              </div>
+              <div className="agent-finding-body">
+                {finding.condition && (
+                  <div>
+                    <span>Condition</span>
+                    <p>{finding.condition}</p>
+                  </div>
+                )}
+                {finding.criteria && (
+                  <div>
+                    <span>Criteria</span>
+                    <p>{finding.criteria}</p>
+                  </div>
+                )}
+                {finding.cause && (
+                  <div>
+                    <span>Cause</span>
+                    <p>{finding.cause}</p>
+                  </div>
+                )}
+                {finding.effect && (
+                  <div>
+                    <span>Effect</span>
+                    <p>{finding.effect}</p>
+                  </div>
+                )}
+                {finding.recommendation && (
+                  <div>
+                    <span>Recommendation</span>
+                    <p>{finding.recommendation}</p>
+                  </div>
+                )}
+              </div>
+              {finding.missingAssertions.length > 0 && (
+                <div className="agent-chip-row">
+                  {finding.missingAssertions.map((assertion) => (
+                    <span key={`${finding.id}-${assertion}`} className="missing">{assertion}</span>
+                  ))}
+                </div>
+              )}
+            </article>
+          ))
+        ) : (
+          <div className="ide-empty">
+            <div className="empty-state-title">No agent findings yet</div>
+            <p>Run the agent after adding readable evidence. PDF/DOCX/XLSX browser extraction is not wired yet.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderProofFolder = () => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Proofs</span>
+          <h1 className="workspace-title">Integrity Proof Dashboard</h1>
+          <p className="workspace-desc">
+            Verifiable audit trail for packages, evidence uploads, secure memory, and attestations. This proves mathematical integrity and chain of custody.
+          </p>
+        </div>
+      </div>
+      {proofSnapshot ? renderProofSnapshot() : (
+        <div className="ide-empty">
+          <div className="empty-state-title">No proof action has run yet</div>
+          <p>Create an AuditPack, register evidence, verify a hash, or run agent memory to populate this dashboard.</p>
+        </div>
+      )}
+      <div className="card">
+        <div className="card-section-title">Linked Evidence Registry</div>
+        {registry.length > 0 ? (
+          <div className="ide-proof-list">
+            {registry.map((record) => (
+              <div key={record.id} className="ide-proof-item">
+                <div>
+                  <strong>{record.fileName ?? record.type}</strong>
+                  <span>{record.auditPackId ? `Linked to ${truncateValue(record.auditPackId, 18)}` : "No AuditPack link"}</span>
+                </div>
+                <code>{truncateValue(record.id, 22)}</code>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="ide-muted">No registered evidence records yet.</p>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderVerifierProofDashboard = () => {
+    const attestedCount = registry.filter((record) => record.latestAttestation).length;
+    const memoryReady = Boolean(agentReview.persistence.manifestBlobId && agentReview.persistence.artifactBlobId);
+    const latestAgentAction = agentActionLog.logs[0];
+
+    return (
+      <div className="ide-main-stack">
+        <div className="ide-panel-header">
+          <div>
+            <span className="workspace-eyebrow">Verification Panel</span>
+            <h1 className="workspace-title">Compliance Verification Summary</h1>
+            <p className="workspace-desc">
+              Verifiable register of all evidence upload commitments, reviewer attestations, and AI signatures recorded on the Sui blockchain.
+            </p>
+          </div>
+        </div>
+
+        <div className="export-summary-grid">
+          <div>
+            <span>AuditPack</span>
+            <strong>{auditPack.id ? "ready" : "pending"}</strong>
+          </div>
+          <div>
+            <span>Evidence</span>
+            <strong>{registry.length}</strong>
+          </div>
+          <div>
+            <span>Attested</span>
+            <strong>{attestedCount}</strong>
+          </div>
+          <div>
+            <span>AgentActions</span>
+            <strong>{agentActionLog.logs.length}</strong>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Chain Anchor</div>
+          <div className="proof-grid">
+            <div className="proof-row">
+              <span className="proof-label">Package ID</span>
+              <span className="proof-value">{truncateValue(PACKAGE_ID, 42)}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">AuditPack ID</span>
+              <span className="proof-value">{auditPack.id ? truncateValue(auditPack.id, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">AuditPack Tx</span>
+              <span className="proof-value">{auditPack.txDigest ? truncateValue(auditPack.txDigest, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Engagement</span>
+              <span className="proof-value">{demoEngagement.id ? truncateValue(demoEngagement.id, 42) : "local workspace"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Company Wallet</span>
+              <span className="proof-value">{demoEngagement.companyWallet ? truncateValue(demoEngagement.companyWallet, 42) : "unassigned"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Auditor Wallet</span>
+              <span className="proof-value">{demoEngagement.auditorWallet ? truncateValue(demoEngagement.auditorWallet, 42) : "unassigned"}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">On-Chain Evidence Registry</div>
+          {registry.length > 0 ? (
+            <div className="proof-dashboard-list">
+              {registry.map((record) => {
+                const verificationState = getEvidenceVerificationState(record.id);
+
+                return (
+                  <div key={record.id} className="proof-dashboard-item">
+                    <div className="proof-dashboard-item-header">
+                      <div>
+                        <strong>{record.fileName ?? record.type}</strong>
+                        <span>{record.type} / {record.source}</span>
+                      </div>
+                      <span className={`proof-status-pill ${verificationState.tone}`}>{verificationState.label}</span>
+                    </div>
+                    <div className="proof-dashboard-grid">
+                      <div>
+                        <span>EvidenceRecord</span>
+                        <code>{truncateValue(record.id, 32)}</code>
+                      </div>
+                      <div>
+                        <span>Commitment</span>
+                        <code>{truncateValue(record.commitment, 32)}</code>
+                      </div>
+                      <div>
+                        <span>Walrus Blob</span>
+                        <code>{truncateValue(record.blobId, 32)}</code>
+                      </div>
+                      <div>
+                        <span>Audit Pack Link</span>
+                        <code>{record.auditPackId ? truncateValue(record.auditPackId, 32) : "pending"}</code>
+                      </div>
+                      <div>
+                        <span>Attestation</span>
+                        <code>{record.latestAttestation ? truncateValue(record.latestAttestation.id, 32) : "not attested"}</code>
+                      </div>
+                      <div>
+                        <span>Attestation Tx</span>
+                        <code>{record.latestAttestation ? truncateValue(record.latestAttestation.txDigest, 32) : "pending"}</code>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="ide-muted">No registered evidence records yet.</p>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">On-Chain Audit Actions</div>
+          {agentActionLog.logs.length > 0 ? (
+            <div className="proof-dashboard-list">
+              {agentActionLog.logs.map((log) => (
+                <div key={log.key} className="proof-dashboard-item">
+                  <div className="proof-dashboard-item-header">
+                    <div>
+                      <strong>{log.actionType}</strong>
+                      <span>{log.evidenceId ? `Evidence ${truncateValue(log.evidenceId, 20)}` : `Pack ${truncateValue(log.packId, 20)}`}</span>
+                    </div>
+                    <span className="proof-status-pill success">Human signed</span>
+                  </div>
+                  <div className="proof-dashboard-grid">
+                    <div>
+                      <span>Output Hash</span>
+                      <code>{truncateValue(log.outputHash, 32)}</code>
+                    </div>
+                    <div>
+                      <span>Tx Digest</span>
+                      <code>{log.txDigest ? truncateValue(log.txDigest, 32) : "pending"}</code>
+                    </div>
+                    <div>
+                      <span>Event Type</span>
+                      <code>{log.event?.type ? truncateValue(log.event.type, 32) : "pending"}</code>
+                    </div>
+                    <div>
+                      <span>Event Seq</span>
+                      <code>{log.event?.id?.eventSeq ?? "pending"}</code>
+                    </div>
+                    <div>
+                      <span>Signer</span>
+                      <code>{truncateValue(log.signer, 32)}</code>
+                    </div>
+                    <div>
+                      <span>Events / Objects</span>
+                      <code>{log.eventCount}/{log.objectChangeCount}</code>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="ide-muted">No approved AgentAction has been logged yet.</p>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Audit Memory Integrity Proofs</div>
+          <div className="proof-grid">
+            <div className="proof-row">
+              <span className="proof-label">Auditor Memory Index</span>
+              <span className="proof-value">{agentReview.persistence.memwalStatus ?? "not run"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Storage Backup Status</span>
+              <span className="proof-value">{agentReview.persistence.walrusStatus ?? "not run"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Audit Domain Namespace</span>
+              <span className="proof-value">{agentReview.persistence.memoryNamespace ?? "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Index Reference</span>
+              <span className="proof-value">{agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Evidence Bundle Reference</span>
+              <span className="proof-value">{agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 42) : "pending"}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Reload Check</span>
+              <span className="proof-value">{memoryReady ? memoryReload.status : "pending"}</span>
+            </div>
+          </div>
+          {memoryReload.result && (
+            <div className="proof-dashboard-grid compact">
+              <div>
+                <span>Evidence Refs</span>
+                <code>{memoryReload.result.manifest.evidenceRefCount}</code>
+              </div>
+              <div>
+                <span>Output Hashes</span>
+                <code>{memoryReload.result.manifest.agentOutputHashCount}</code>
+              </div>
+              <div>
+                <span>Finding Hashes</span>
+                <code>{memoryReload.result.manifest.findingHashCount}</code>
+              </div>
+              <div>
+                <span>Documents / Findings</span>
+                <code>{memoryReload.result.artifact.documentCount}/{memoryReload.result.artifact.findingCount}</code>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Privacy &amp; Access</div>
+          <div className="privacy-status-list">
+            <div className="privacy-status-row active">
+              <span className="privacy-status-icon">✅</span>
+              <div>
+                <strong>Evidence encrypted before Walrus upload</strong>
+                <span>AES-256-GCM · random IV per file · ciphertext stored on Walrus</span>
+              </div>
+            </div>
+            <div className="privacy-status-row active">
+              <span className="privacy-status-icon">✅</span>
+              <div>
+                <strong>Agent memory encrypted by default</strong>
+                <span>MemWal uses Seal for memory encryption · agent reasoning is private</span>
+              </div>
+            </div>
+            <div className="privacy-status-row active">
+              <span className="privacy-status-icon">✅</span>
+              <div>
+                <strong>No plaintext on-chain</strong>
+                <span>Sui stores commitments and output hashes only · raw evidence never touches the chain</span>
+              </div>
+            </div>
+            <div className="privacy-status-row roadmap">
+              <span className="privacy-status-icon">⏳</span>
+              <div>
+                <strong>Access-gated decryption via Seal policy</strong>
+                <span>Roadmap · Move seal_approve policy will grant decrypt to pack.owner or pack.auditor · currently owner holds AES key</span>
+              </div>
+            </div>
+          </div>
+          <p className="ide-muted" style={{ marginTop: '0.65rem' }}>
+            Seal is Sui&apos;s on-chain access-gated decryption layer. Full integration is deferred pending SDK stabilization and key server configuration maturity. Current demo uses AES-encrypted Walrus blobs and MemWal/Seal-encrypted agent memory. This decision is documented and intentional.
+          </p>
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Walrus Storage &amp; Retention</div>
+          <div className="proof-grid">
+            <div className="proof-row">
+              <span className="proof-label">Network</span>
+              <span className="proof-value">Walrus Testnet</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Retention</span>
+              <span className="proof-value">Epoch-based (testnet)</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Evidence Blobs</span>
+              <span className="proof-value">{registry.filter((r) => r.blobId).length}</span>
+            </div>
+            <div className="proof-row">
+              <span className="proof-label">Memory Artifacts</span>
+              <span className="proof-value">{[agentReview.persistence.manifestBlobId, agentReview.persistence.artifactBlobId].filter(Boolean).length}</span>
+            </div>
+          </div>
+          <p className="ide-muted" style={{ marginTop: '0.65rem' }}>
+            Walrus testnet blobs use epoch-based retention that is not guaranteed for production. Stored data may be pruned after the testnet retention window. Production deployments should use certified Walrus storage with explicit retention periods.
+          </p>
+        </div>
+
+        <div className="card">
+          <div className="card-section-title">Proof Limits</div>
+          <div className="export-limitations">
+            <p>Hash match means the checked file bytes matched the registered commitment in this browser session.</p>
+            <p>Reviewer attestation means a reviewer wallet signed an attestation; it is not an automatic claim that the document is true or audit-sufficient.</p>
+            <p>AgentAction proofs contain approved output hashes and event metadata only. The agent does not sign transactions.</p>
+            <p>The current workspace stores only the latest verification session, so records not checked in this session are labeled that way.</p>
+          </div>
+        </div>
+
+        {latestAgentAction && (
+          <p className="ide-section-note">
+            Latest AgentAction tx: {latestAgentAction.txDigest ? truncateValue(latestAgentAction.txDigest, 36) : "pending"}.
+          </p>
+        )}
+      </div>
+
+  );
+  };
+
+  const renderExportPanel = () => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Compliance Summary</span>
+          <h1 className="workspace-title">Verify and Export Compliance Report</h1>
+          <p className="workspace-desc">
+            Generate a portable JSON report containing all secure blockchain proofs, reviewer signatures, and AI verification references for independent third-party verification.
+          </p>
+        </div>
+        <div className="ide-panel-actions">
+          <button className="btn-secondary" type="button" onClick={handleCopyVerifierExport}>
+            Copy JSON
+          </button>
+          <button className="btn-primary" type="button" onClick={handleDownloadVerifierExport}>
+            Download JSON
+          </button>
+        </div>
+      </div>
+
+      <div className="export-summary-grid">
+        <div>
+          <span>Evidence</span>
+          <strong>{verifierExport.evidence.length}</strong>
+        </div>
+        <div>
+          <span>Attestations</span>
+          <strong>{verifierExport.evidence.filter((record) => record.latestAttestation).length}</strong>
+        </div>
+        <div>
+          <span>AgentActions</span>
+          <strong>{verifierExport.agentActions.length}</strong>
+        </div>
+        <div>
+          <span>Memory Artifacts</span>
+          <strong>{verifierExport.memory.manifestBlobId && verifierExport.memory.artifactBlobId ? "ready" : "pending"}</strong>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-section-title">Export Status</div>
+        <div className="proof-grid">
+          <div className="proof-row">
+            <span className="proof-label">Engagement</span>
+            <span className="proof-value">{verifierExport.engagement.id ? truncateValue(verifierExport.engagement.id, 36) : "local workspace"}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">AuditPack</span>
+            <span className="proof-value">{verifierExport.chain.auditPackId ? truncateValue(verifierExport.chain.auditPackId, 36) : "pending"}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">Package</span>
+            <span className="proof-value">{truncateValue(verifierExport.chain.packageId, 36)}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">Latest Verification</span>
+            <span className="proof-value">{verifierExport.verification.latestStatus}</span>
+          </div>
+        </div>
+        <p className="ide-section-note">{exportMessage}</p>
+      </div>
+
+      <div className="card">
+        <div className="card-section-title">Export Limitations</div>
+        <div className="export-limitations">
+          {verifierExport.limitations.map((limitation) => (
+            <p key={limitation}>{limitation}</p>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-section-title">JSON Preview</div>
+        <pre className="ide-raw export-json-preview">{getVerifierExportJson()}</pre>
+      </div>
+    </div>
+  );
+
+  const renderSettingsPanel = () => (
+    <div className="ide-main-stack">
+      <div className="ide-panel-header">
+        <div>
+          <span className="workspace-eyebrow">Configuration</span>
+          <h1 className="workspace-title">Audit Workspace Settings</h1>
+          <p className="workspace-desc">Manage active roles, project wallet connections, and Sui blockchain configuration.</p>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-section-title">Shared Demo Engagement</div>
+        <div className="demo-engagement-panel">
+          <div className={`demo-engagement-status ${demoEngagement.status}`}>
+            <strong>{demoEngagement.id ? truncateValue(demoEngagement.id, 28) : "No shared engagement loaded"}</strong>
+            <span>{demoEngagement.message}</span>
+          </div>
+          <div className="form-grid">
+            <div className="field form-full">
+              <label className="field-label">Engagement ID</label>
+              <input
+                className="field-input mono"
+                value={engagementInput}
+                onChange={(event) => setEngagementInput(event.target.value)}
+                placeholder="Paste shared engagement ID"
+                disabled={!isDemoStoreConfigured()}
+              />
+            </div>
+          </div>
+          <div className="btn-actions">
+            <button
+              className="btn-secondary"
+              type="button"
+              disabled={!isDemoStoreConfigured() || demoEngagement.status === "loading"}
+              onClick={handleCreateDemoEngagement}
+            >
+              Create engagement
+            </button>
+            <button
+              className="btn-secondary"
+              type="button"
+              disabled={!isDemoStoreConfigured() || demoEngagement.status === "loading" || !engagementInput.trim()}
+              onClick={handleLoadDemoEngagement}
+            >
+              Load engagement
+            </button>
+          </div>
+          <div className="demo-wallet-grid">
+            <div>
+              <span>Company wallet</span>
+              <code>{demoEngagement.companyWallet ? truncateValue(demoEngagement.companyWallet, 28) : "unassigned"}</code>
+              <button
+                className="btn-secondary"
+                type="button"
+                disabled={!demoEngagement.id || !signerAddress}
+                onClick={() => handleAssignDemoWallet("company")}
+              >
+                Use current wallet
+              </button>
+            </div>
+            <div>
+              <span>Auditor wallet</span>
+              <code>{demoEngagement.auditorWallet ? truncateValue(demoEngagement.auditorWallet, 28) : "unassigned"}</code>
+              <button
+                className="btn-secondary"
+                type="button"
+                disabled={!demoEngagement.id || !signerAddress}
+                onClick={() => handleAssignDemoWallet("auditor")}
+              >
+                Use current wallet
+              </button>
+            </div>
+          </div>
+          {demoEngagement.id && (
+            <p className="ide-section-note">
+              Shared link: `/workspace?engagement={demoEngagement.id}`. This stores synthetic demo files and proof metadata for the web PoC.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-section-title">Role</div>
+        <div className="ide-role-grid">
+          {(["company", "auditor", "verifier"] as WorkspaceRole[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={`ide-role-option${role === item ? " active" : ""}`}
+              onClick={() => setRole(item)}
+            >
+              <strong>{item}</strong>
+              <span>
+                {item === "company"
+                  ? "Upload, register, run agent"
+                  : item === "auditor"
+                    ? "Verify and attest"
+                    : "Read proof only"}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-section-title">Infrastructure</div>
+        <div className="proof-grid">
+          <div className="proof-row">
+            <span className="proof-label">Package ID</span>
+            <span className="proof-value">{truncateValue(PACKAGE_ID, 42)}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">Wallet</span>
+            <span className="proof-value">{signerAddress ? truncateValue(signerAddress, 42) : "not connected"}</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">Walrus</span>
+            <span className="proof-value">encrypted upload via SDK</span>
+          </div>
+          <div className="proof-row">
+            <span className="proof-label">MemWal</span>
+            <span className="proof-value">{agentRun.memoryStatus ?? "configured server-side when env is present"}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderRegisterResult = () => registerResult && (
+    <div className="result-card success">
+      <div className="result-title success">Evidence registered</div>
+      <p className="result-message">File hashing, encryption, Walrus storage, and Sui registration completed through the live SDK flow.</p>
+      <div className="proof-grid">
+        <div className="proof-row">
+          <span className="proof-label">Evidence ID</span>
+          <span className="proof-value">{truncateValue(registerResult.objectId, 28)}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Tx Digest</span>
+          <span className="proof-value">{registerResult.txDigest}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Walrus Blob</span>
+          <span className="proof-value">{truncateValue(registerResult.blobId, 28)}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Commitment</span>
+          <span className="proof-value">{truncateValue(registerResult.commitment, 28)}</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderProofSnapshot = () => proofSnapshot && (
+    <div className="card">
+      <div className="card-section-title">Blockchain Evidence Proofs</div>
+      <div className="proof-grid">
+        <div className="proof-row">
+          <span className="proof-label">AuditPack ID</span>
+          <span className="proof-value">{proofSnapshot.auditPackId ? truncateValue(proofSnapshot.auditPackId, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Evidence ID</span>
+          <span className="proof-value">{proofSnapshot.evidenceId ? truncateValue(proofSnapshot.evidenceId, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Tx Digest</span>
+          <span className="proof-value">{proofSnapshot.txDigest ?? "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Package ID</span>
+          <span className="proof-value">{truncateValue(proofSnapshot.packageId ?? PACKAGE_ID, 34)}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Commitment</span>
+          <span className="proof-value">{proofSnapshot.commitment ? truncateValue(proofSnapshot.commitment, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Blob</span>
+          <span className="proof-value">{proofSnapshot.blobReference ? truncateValue(proofSnapshot.blobReference, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Attestation</span>
+          <span className="proof-value">{proofSnapshot.attestationId ? truncateValue(proofSnapshot.attestationId, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Memory</span>
+          <span className="proof-value">{proofSnapshot.memoryStatus ?? "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">AgentAction Tx</span>
+          <span className="proof-value">{proofSnapshot.agentActionTxDigest ? truncateValue(proofSnapshot.agentActionTxDigest, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">AgentAction Event</span>
+          <span className="proof-value">{proofSnapshot.agentActionEventType ? truncateValue(proofSnapshot.agentActionEventType, 34) : "pending"}</span>
+        </div>
+        <div className="proof-row">
+          <span className="proof-label">Agent Output Hash</span>
+          <span className="proof-value">{proofSnapshot.agentActionOutputHash ? truncateValue(proofSnapshot.agentActionOutputHash, 34) : "pending"}</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderAgentTraceEntries = (entries: AgentTraceEntry[], emptyMessage: string) => {
+    if (entries.length === 0) {
+      return <p className="ide-section-note">{emptyMessage}</p>;
+    }
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+        {entries.map((entry) => (
+          <div
+            key={entry.id}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.18rem",
+              padding: "0.55rem 0.65rem",
+              borderRadius: "0.55rem",
+              border: "1px solid rgba(148, 163, 184, 0.22)",
+              background:
+                entry.tone === "warning"
+                  ? "rgba(245, 158, 11, 0.08)"
+                  : entry.tone === "success"
+                    ? "rgba(16, 185, 129, 0.07)"
+                    : "rgba(59, 130, 246, 0.05)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center" }}>
+              <strong style={{ fontSize: "0.75rem", color: "var(--text-high)" }}>{entry.title}</strong>
+              {(entry.stepMs !== undefined || entry.totalMs !== undefined) && (
+                <code style={{ fontSize: "0.64rem", color: "var(--text-secondary)" }}>
+                  {entry.stepMs !== undefined ? `+${entry.stepMs}ms` : ""}
+                  {entry.stepMs !== undefined && entry.totalMs !== undefined ? " · " : ""}
+                  {entry.totalMs !== undefined ? `${entry.totalMs}ms total` : ""}
+                </code>
+              )}
+            </div>
+            <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--text-secondary)" }}>{entry.detail}</p>
+            {entry.fileName && (
+              <small style={{ fontSize: "0.64rem", color: "var(--text-muted)" }}>{entry.fileName}</small>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderBottomPanel = () => {
+    const rawPayload = {
+      auditPack,
+      selected: activeItemId,
+      proofSnapshot,
+      registerResult,
+      batchSummary,
+      verificationResult,
+      attestResult,
+      memoryReload,
+      agentActionLog,
+      agentRun: agentRun.raw ?? {
+        status: agentRun.status,
+        message: agentRun.message,
+      },
+      agentInstruction: agentInstruction.trim() || undefined,
+    };
+
+    return (
+      <section className="ide-bottom-panel">
+        <div className="ide-bottom-tabs">
+          {(["details", "chain", "memory", "agent", "privacy", "raw"] as BottomTab[]).map((tab) => {
+            const labels: Record<BottomTab, string> = {
+              details: "Details Summary",
+              chain: "On-Chain Activity",
+              memory: "Auditor Memory",
+              agent: "Co-Auditor Status",
+              privacy: "Privacy & Compliance",
+              raw: "State JSON"
+            };
+            return (
+              <button
+                key={tab}
+                type="button"
+                className={bottomTab === tab ? "active" : ""}
+                onClick={() => setBottomTab(tab)}
+              >
+                {labels[tab]}
+              </button>
+            );
+          })}
+        </div>
+        <div className="ide-bottom-content">
+          {bottomTab === "details" && (
+            <div className="ide-status-line">
+              <span>Selected: {selectedLocalDocument?.fileName ?? selectedRecord?.fileName ?? activeItemId}</span>
+              <span>Role: {role}</span>
+              <span>Local docs: {localDocuments.length}</span>
+              <span>Selected for batch: {selectedBatchDocuments.length}</span>
+              <span>Registered: {registry.length}</span>
+              <span>Engagement: {demoEngagement.id ? truncateValue(demoEngagement.id, 18) : "local only"}</span>
+              <span>Wallet role: {demoEngagement.companyWallet === signerAddress ? "company" : demoEngagement.auditorWallet === signerAddress ? "auditor" : "unassigned"}</span>
+            </div>
+          )}
+          {bottomTab === "chain" && (
+            <div className="ide-chain-panel">
+              <div className="ide-status-line">
+                <span>Package {truncateValue(PACKAGE_ID, 28)}</span>
+                <span>Pack {auditPack.id ? truncateValue(auditPack.id, 20) : "not created"}</span>
+                <span>Pack evidence links: {registry.filter((record) => record.auditPackId === auditPack.id).length}</span>
+                <span>Tx {proofSnapshot?.txDigest ? truncateValue(proofSnapshot.txDigest, 24) : "pending"}</span>
+                <span>Attestation {proofSnapshot?.attestationId ? truncateValue(proofSnapshot.attestationId, 18) : "pending"}</span>
+              </div>
+              <div className={`ide-memory-result ${agentActionLog.status === "error" ? "error" : agentActionLog.status === "success" ? "success" : "idle"}`}>
+                <strong>AgentAction log</strong>
+                <p>{agentActionLog.message}</p>
+                {agentActionLog.logs[0] && (
+                  <div className="ide-memory-grid">
+                    <span>Tx</span>
+                    <code>{agentActionLog.logs[0].txDigest ? truncateValue(agentActionLog.logs[0].txDigest, 18) : "pending"}</code>
+                    <span>Event</span>
+                    <code>{agentActionLog.logs[0].event?.type ? truncateValue(agentActionLog.logs[0].event.type, 18) : "pending"}</code>
+                    <span>Seq</span>
+                    <code>{agentActionLog.logs[0].event?.id?.eventSeq ?? "pending"}</code>
+                    <span>Events/Objects</span>
+                    <code>{agentActionLog.logs[0].eventCount}/{agentActionLog.logs[0].objectChangeCount}</code>
+                    <span>Output hash</span>
+                    <code>{truncateValue(agentActionLog.logs[0].outputHash, 18)}</code>
+                    <span>Signer</span>
+                    <code>{truncateValue(agentActionLog.logs[0].signer, 18)}</code>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {bottomTab === "memory" && (
+            <div className="ide-memory-panel">
+              <div className="ide-status-line">
+                <span>{agentRun.memoryStatus ?? "No memory write has been observed in this workspace session."}</span>
+                <span>Namespace: {agentReview.persistence.memoryNamespace ?? "pending"}</span>
+                <span>Memory Index: {agentReview.persistence.memwalStatus ?? "pending"}</span>
+                <span>Storage: {agentReview.persistence.walrusStatus ?? "pending"}</span>
+                <span>Manifest: {agentReview.persistence.manifestBlobId ? truncateValue(agentReview.persistence.manifestBlobId, 18) : "pending"}</span>
+                <span>Artifact: {agentReview.persistence.artifactBlobId ? truncateValue(agentReview.persistence.artifactBlobId, 18) : "pending"}</span>
+              </div>
+              <div className="ide-memory-actions">
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  disabled={
+                    memoryReload.status === "loading" ||
+                    !agentReview.persistence.manifestBlobId ||
+                    !agentReview.persistence.artifactBlobId
+                  }
+                  onClick={handleReloadWalrusMemory}
+                >
+                  {memoryReload.status === "loading" ? "Reloading..." : "Reload secure memory"}
+                </button>
+                <span>
+                  {agentReview.persistence.manifestBlobId && agentReview.persistence.artifactBlobId
+                    ? "Reads encrypted decentralized storage backup artifacts and returns a safe summary."
+                    : "Secure memory reload needs stored manifest and artifact references."}
+                </span>
+              </div>
+              <div className={`ide-memory-result ${memoryReload.status}`}>
+                <strong>
+                  {memoryReload.status === "success"
+                    ? "Memory reload proof"
+                    : memoryReload.status === "error"
+                      ? "Memory reload blocked"
+                      : "Memory reload"}
+                </strong>
+                <p>{memoryReload.message}</p>
+                {memoryReload.result && (
+                  <div className="ide-memory-grid">
+                    <span>Pack</span>
+                    <code>{truncateValue(memoryReload.result.manifest.packId ?? "pending", 20)}</code>
+                    <span>Network</span>
+                    <code>{memoryReload.result.network}</code>
+                    <span>Evidence refs</span>
+                    <code>{memoryReload.result.manifest.evidenceRefCount}</code>
+                    <span>Output hashes</span>
+                    <code>{memoryReload.result.manifest.agentOutputHashCount}</code>
+                    <span>Finding hashes</span>
+                    <code>{memoryReload.result.manifest.findingHashCount}</code>
+                    <span>Bundle docs/findings</span>
+                    <code>{memoryReload.result.artifact.documentCount}/{memoryReload.result.artifact.findingCount}</code>
+                  </div>
+                )}
+              </div>
+              <p className="ide-section-note">
+                This reload verifies encrypted storage artifact availability and decryptability. It does not prove document truth or replace reviewer judgment.
+              </p>
+            </div>
+          )}
+          {bottomTab === "agent" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <div className="ide-status-line">
+                <span>{agentRun.message}</span>
+                <span>Supported docs: {readableEvidenceCount}</span>
+                <span>Reviewed docs: {agentReview.documents.length}</span>
+                <span>Findings: {agentReview.findings.length}</span>
+                <span>Action candidates: {agentRun.actionCandidates.length}</span>
+                <span>Chain write: {agentReview.approval.chainWriteReady ? "ready after approval" : "not submitted"}</span>
+              </div>
+              {renderAgentTraceEntries(
+                agentRun.trace,
+                "Run the co-auditor to populate a reasoning trace of what evidence was opened, how it was classified, and what the pack-level review concluded.",
+              )}
+            </div>
+          )}
+          {bottomTab === "privacy" && (
+            <div className="ide-status-line">
+              <span>{demoEngagement.id ? "Synthetic demo files sync through Supabase for web PoC review." : "Source files stay in browser memory."}</span>
+              <span>Walrus receives encrypted bytes.</span>
+              <span>Sui stores commitments and lifecycle objects, not raw evidence.</span>
+            </div>
+          )}
+          {bottomTab === "raw" && (
+            <pre className="ide-raw">{JSON.stringify(rawPayload, null, 2)}</pre>
+          )}
+        </div>
+      </section>
+    );
+  };
+
+  const renderAgentPanel = () => (
+    <aside className="ide-agent-panel">
+      <div className="ide-agent-header">
+        <div>
+          <span className="workspace-eyebrow">AI Co-Auditor</span>
+          <h2>Compliance Chat</h2>
+        </div>
+        <span className={`ide-agent-state ${agentRun.status}`}>{agentRun.status}</span>
+      </div>
+
+      <div className="agent-chat-feed">
+        <div className="chat-message">
+          <div className="chat-sender assistant">
+            <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+            <span>AI Co-Auditor</span>
+          </div>
+          <div className="chat-bubble assistant">
+            <p>Hello! I am your AI compliance co-auditor. I can scan uploaded PDFs, spreadsheets, DOCX files, images, and text evidence to match them against ISA assertions, evaluate readiness, and flag pack-level gaps.</p>
+            <p style={{ marginTop: '0.4rem' }}>Select evidence in the Explorer, then click the send icon below. I will show a safe reasoning trace of what I opened, what I classified, and which review steps are still waiting for human approval.</p>
+          </div>
+        </div>
+
+        {(selectedLocalDocument || selectedRecord) && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>System</span>
+            </div>
+            <div className="chat-bubble system">
+              {selectedLocalDocument ? (
+                <>Active context: <strong>{selectedLocalDocument.fileName}</strong> ({selectedLocalDocument.fileSize}). Ready for compliance evaluation.</>
+              ) : (
+                <>Active context: Registered record <strong>{selectedRecord?.fileName ?? truncateValue(selectedRecord?.id ?? "", 14)}</strong>. Ready for verification check.</>
+              )}
+            </div>
+          </div>
+        )}
+
+        {operationProgress && operationProgress.type === "agent" && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>Compliance Run Progress</span>
+            </div>
+            <div className="chat-bubble system" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', textAlign: 'left', alignItems: 'stretch' }}>
+              {operationProgress.steps.map((step, index) => (
+                <div key={`${step.label}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.72rem' }}>
+                  <span className={`ide-progress-dot ${step.status}`} />
+                  <span>{step.label}</span>
+                  {step.detail && <code style={{ marginLeft: 'auto', fontSize: '0.64rem', color: 'var(--accent)' }}>{step.detail}</code>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {agentRun.trace.length > 0 && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>Reasoning Trace</span>
+            </div>
+            <div className="chat-bubble system" style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', textAlign: 'left', alignItems: 'stretch' }}>
+              <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                This is a reviewer-safe execution trace, not hidden chain-of-thought. It shows the files opened, analysis steps completed, and why the pack moved to the next stage.
+              </p>
+              {renderAgentTraceEntries(
+                agentRun.status === "running" ? agentRun.trace.slice(-6) : agentRun.trace.slice(-10),
+                "The trace will appear here once the run starts.",
+              )}
+            </div>
+          </div>
+        )}
+
+        {agentRun.status === "success" && (
+          <div className="chat-message">
+            <div className="chat-sender assistant">
+              <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+              <span>AI Co-Auditor</span>
+            </div>
+            <div className="chat-bubble assistant">
+              <p>Analysis complete! Here is the compliance report for the active pack:</p>
+              <div className="ide-mini-grid">
+                <span>Documents Scanned</span>
+                <strong>{agentReview.documents.length || agentRun.documentsAnalyzed || 0}</strong>
+                <span>Readiness Index</span>
+                <strong>
+                  {agentReview.gapSummary.readinessScore !== undefined
+                    ? `${agentReview.gapSummary.readinessScore}/100`
+                    : agentRun.readinessScore !== undefined
+                      ? `${agentRun.readinessScore}/100`
+                      : "n/a"}
+                </strong>
+                <span>Compliance Findings</span>
+                <strong>{agentReview.findings.length}</strong>
+                <span>Secure Memory Proof</span>
+                <strong>{agentReview.persistence.manifestBlobId && agentReview.persistence.artifactBlobId ? "Created" : "None"}</strong>
+              </div>
+              {agentReview.approval.nextSteps.length > 0 && (
+                <div style={{ marginTop: '0.6rem', borderTop: '1px solid rgba(37,99,235,0.1)', paddingTop: '0.4rem' }}>
+                  <span style={{ fontSize: '0.64rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--accent)', opacity: 0.8 }}>Recommended Next Steps:</span>
+                  {agentReview.approval.nextSteps.slice(0, 3).map((step, idx) => (
+                    <p key={step} style={{ marginTop: '0.2rem', fontSize: '0.74rem' }}>{idx + 1}. {step}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {agentRun.status === "error" && (
+          <div className="chat-message">
+            <div className="chat-sender assistant">
+              <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+              <span>AI Co-Auditor</span>
+            </div>
+            <div className="chat-bubble assistant" style={{ borderColor: 'rgba(220, 38, 38, 0.2)', backgroundColor: 'rgba(220, 38, 38, 0.03)' }}>
+              <p style={{ color: '#dc2626', fontWeight: 600 }}>Compliance run failed</p>
+              <p style={{ fontSize: '0.74rem', marginTop: '0.2rem' }}>{agentRun.message}</p>
+            </div>
+          </div>
+        )}
+
+        {agentRun.actionCandidates.length > 0 && (
+          <div className="chat-message">
+            <div className="chat-sender assistant">
+              <Image className="chat-avatar" src="/mascot.png" alt="Linow mascot" width={15} height={15} />
+              <span>AI Co-Auditor</span>
+            </div>
+            <div className="chat-bubble action">
+              <strong style={{ display: 'block', marginBottom: '0.35rem', color: 'var(--text-high)', fontSize: '0.78rem' }}>On-Chain Verification Actions Prepared</strong>
+              <p style={{ fontSize: '0.74rem', marginBottom: '0.5rem' }}>I have prepared cryptographic hashes for human sign-off. Approving these records them securely on the Sui blockchain registry.</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {agentRun.actionCandidates.slice(0, 5).map((candidate, index) => {
+                  const key = getAgentActionCandidateKey(candidate);
+                  const logged = isAgentActionLogged(candidate);
+                  const signing = agentActionLog.status === "signing" && agentActionLog.activeKey === key;
+                  const hasPackObject = isSuiObjectId(candidate.packId ?? auditPack.id);
+
+                  return (
+                    <div key={`${candidate.outputHash}-${index}`} className="ide-action-candidate" style={{ borderBottom: '1px solid rgba(217, 119, 6, 0.1)', paddingBottom: '0.4rem' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>{candidate.actionType}</span>
+                      <small style={{ color: 'var(--text-secondary)', fontSize: '0.66rem' }}>
+                        {[
+                          candidate.targetKind,
+                          candidate.targetId ? truncateValue(candidate.targetId, 16) : undefined,
+                          candidate.evidenceId ? `evidence ${truncateValue(candidate.evidenceId, 14)}` : undefined,
+                          candidate.findingId ? `finding ${candidate.findingId}` : undefined,
+                        ].filter(Boolean).join(" / ") || "workspace action"}
+                      </small>
+                      <code style={{ fontSize: '0.64rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', marginTop: '0.1rem', wordBreak: 'break-all' }}>Hash: {truncateValue(candidate.outputHash, 18)}</code>
+                      <small style={{ display: 'block', marginTop: '0.1rem', fontSize: '0.64rem', color: logged ? 'var(--turquoise)' : 'var(--text-muted)' }}>
+                        {logged
+                          ? "✓ Logged on Sui"
+                          : !hasPackObject
+                            ? "⚠️ Create Audit Pack on-chain before signing"
+                            : candidate.requiresHumanApproval
+                              ? "Awaiting human review"
+                              : "Prepared; approval status returned false"}
+                      </small>
+                      <button
+                        className="btn-primary full-width"
+                        type="button"
+                        style={{ marginTop: '0.4rem', padding: '0.35rem 0.5rem', fontSize: '0.74rem', minHeight: 'auto' }}
+                        disabled={signing || logged || !signerAddress || !auditorWalletMatches || !hasPackObject}
+                        onClick={() => handleApproveAgentAction(candidate)}
+                      >
+                        {signing ? "Signing..." : logged ? "Logged" : "Review & Sign Action"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {agentActionLog.status !== "idle" && (
+          <div className="chat-message">
+            <div className="chat-sender system">
+              <span>System Log</span>
+            </div>
+            <div className={`chat-bubble ${agentActionLog.status === "success" ? "success" : "error"}`}>
+              <strong style={{ display: 'block', fontSize: '0.74rem' }}>
+                {agentActionLog.status === "success" ? "On-chain action recorded" : "Action signature blocked"}
+              </strong>
+              <p style={{ fontSize: '0.74rem', marginTop: '0.15rem' }}>{agentActionLog.message}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="chat-input-area">
+        <div className="chat-input-field">
+          <textarea
+            className="chat-textarea"
+            rows={2}
+            value={agentInstruction}
+            onChange={(event) => setAgentInstruction(event.target.value)}
+            placeholder="Type custom auditing rules or guidelines..."
+            disabled={agentRun.status === "running"}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (agentRun.status !== "running") handleRunAgent();
+              }
+            }}
+          />
+          <button
+            className="chat-send-btn"
+            type="button"
+            disabled={agentRun.status === "running" || readableEvidenceCount === 0}
+            onClick={handleRunAgent}
+            title="Run AI compliance analysis"
+          >
+            {agentRun.status === "running" ? (
+              <div className="spinner" style={{ width: '12.5px', height: '12.5px', borderWidth: '1.5px' }} />
+            ) : (
+              <svg viewBox="0 0 24 24">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+            )}
+          </button>
+        </div>
+        <span style={{ fontSize: '0.64rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+          Press Enter to run AI Co-Auditor analysis. Proposes proof actions only.
+        </span>
+      </div>
+    </aside>
+  );
+
+  return (
+    <main className="app-container">
+      <header className="topbar">
+        <div className="topbar-left">
+          <Image className="topbar-logo" src="/icon.png" alt="Linow logo" width={22} height={22} priority />
+          <div className="topbar-brand-block">
+            <span className="topbar-brand">Linow</span>
+            <span className="topbar-badge">AUDIT WORKSPACE</span>
+          </div>
+        </div>
+
+        <div className="topbar-right">
+          <div className="ide-role-switcher" aria-label="Workspace role">
+            {(["company", "auditor", "verifier"] as WorkspaceRole[]).map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={role === item ? "active" : ""}
+                onClick={() => setRole(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <div className="topbar-status">
+            <span className="status-dot" />
+            <span>{signerAddress ? `Connected ${truncateValue(signerAddress, 14)}` : "Connect wallet for live Sui proofs"}</span>
+          </div>
+          <div className="topbar-wallet">{wallet.connectButton}</div>
+        </div>
+      </header>
+
+      <div className={`ide-body${isCompactViewport ? " is-compact" : ""}${isSidebarOpen ? " sidebar-open" : " sidebar-collapsed"}`}>
+        {isCompactViewport && isSidebarOpen && (
+          <button
+            type="button"
+            className="sidebar-backdrop"
+            aria-label="Close navigation"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+        )}
+
+        <nav className="workspace-rail" aria-label="Workspace rail">
+          <button
+            type="button"
+            className={activeRailPanel === "explorer" ? "active" : ""}
+            title="Explorer"
+            aria-label="Explorer"
+            onClick={() => {
+              setActiveRailPanel("explorer");
+              setActiveItemId("folder:evidence");
+              setIsSidebarOpen(true);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={activeRailPanel === "settings" ? "active" : ""}
+            title="Settings"
+            aria-label="Settings"
+            onClick={() => {
+              setActiveRailPanel("settings");
+              setActiveItemId("settings");
+              setIsSidebarOpen(true);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.3.2.6.5.6 1h1a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={activeRailPanel === "export" ? "active" : ""}
+            title="Export"
+            aria-label="Export"
+            onClick={() => {
+              setActiveRailPanel("export");
+              setActiveItemId("proof-dashboard");
+              setIsSidebarOpen(true);
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 10l5 5 5-5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 21h14" />
+            </svg>
+          </button>
+        </nav>
+
+        <aside className="workspace-sidebar">
+          {activeRailPanel === "explorer" ? (
+            <>
+              <div className="sidebar-section">
+                <div className="sidebar-section-label">ACTIVE AUDIT PACK</div>
+
+                <div className="sidebar-folder-group">
+                  <button className={`tree-item folder${activeItemId === "folder:evidence" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:evidence")}>
+                    <span>Evidence Files</span>
+                    <small>{visibleLocalDocuments.length + registry.length}</small>
+                  </button>
+                  {visibleLocalDocuments.length + registry.length > 0 && (
+                    <div className="tree-group">
+                      {visibleLocalDocuments.map((document) => (
+                        <button
+                          key={document.id}
+                          className={`tree-item${activeItemId === `local:${document.id}` ? " active" : ""}`}
+                          type="button"
+                          onClick={() => prepareLocalDocument(document)}
+                        >
+                          {renderStatusDot(document.status)}
+                          <span>{document.fileName}</span>
+                        </button>
+                      ))}
+                      {registry.map((record) => (
+                        <button
+                          key={record.id}
+                          className={`tree-item${activeItemId === `record:${record.id}` ? " active" : ""}`}
+                          type="button"
+                          onClick={() => {
+                            setActiveItemId(`record:${record.id}`);
+                            setVerifyRecordId(record.id);
+                            setAttestRecordId(record.id);
+                          }}
+                        >
+                          {renderStatusDot(record.latestAttestation ? "attested-record" : "registered-record")}
+                          <span>{record.fileName ?? truncateValue(record.id, 12)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="sidebar-folder-group">
+                  <button className={`tree-item folder${activeItemId === "folder:findings" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:findings")}>
+                    <span>Findings</span>
+                    <small>{agentRun.findings.length}</small>
+                  </button>
+                </div>
+
+                <div className="sidebar-folder-group">
+                  <button className={`tree-item folder${activeItemId === "folder:proof" ? " active" : ""}`} type="button" onClick={() => setActiveItemId("folder:proof")}>
+                    <span>On-Chain Proofs</span>
+                    <small>{proofSnapshot ? "1" : "0"}</small>
+                  </button>
+                </div>
+              </div>
+
+              <div className="sidebar-footer">
+                <input
+                  ref={addDocumentInputRef}
+                  type="file"
+                  multiple
+                  className="visually-hidden"
+                  onChange={(event) => {
+                    handleAddDocuments(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+                <button className="btn-primary full-width" type="button" onClick={() => addDocumentInputRef.current?.click()}>
+                  Add document
+                </button>
+                <div className="guardrails-block">
+                  <div className="guardrails-title">VERIFICATION STATUS</div>
+                  <ul className="guardrails-list">
+                    <li>Gray: Local session file (draft)</li>
+                    <li>Blue: Registered on Sui blockchain</li>
+                    <li>Yellow: Awaiting human reviewer sign-off</li>
+                    <li>Green: Attested by human reviewer</li>
+                    <li>Red: Verification failed or mismatch</li>
+                  </ul>
+                </div>
+              </div>
+            </>
+          ) : activeRailPanel === "export" ? (
+            <div className="sidebar-section">
+              <div className="sidebar-section-label">COMPLIANCE REPORT</div>
+              <button
+                className={`tree-item folder${activeItemId === "proof-dashboard" ? " active" : ""}`}
+                type="button"
+                onClick={() => setActiveItemId("proof-dashboard")}
+              >
+                <span>Verification Dashboard</span>
+                <small>{registry.length}</small>
+              </button>
+              <button
+                className={`tree-item folder${activeItemId === "export" ? " active" : ""}`}
+                type="button"
+                onClick={() => setActiveItemId("export")}
+              >
+                <span>Audit Registry JSON</span>
+                <small>{verifierExport.evidence.length}</small>
+              </button>
+              <div className="guardrails-block">
+                <div className="guardrails-title">REPORT DETAILS</div>
+                <ul className="guardrails-list">
+                  <li>Evidence IDs & commitments</li>
+                  <li>Walrus blobs & memory references</li>
+                  <li>Reviewer attestations & AI signatures</li>
+                  <li>Excludes raw evidence (privacy-safe)</li>
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <div className="sidebar-section">
+              <div className="sidebar-section-label">Settings</div>
+              <button className="tree-item active" type="button" onClick={() => setActiveItemId("settings")}>
+                <span>Runtime</span>
+              </button>
+            </div>
+          )}
+        </aside>
+
+        <section className="ide-workspace">
+          <div className="ide-main-content">{renderMainContent()}</div>
+          {renderBottomPanel()}
+        </section>
+
+        {renderAgentPanel()}
+      </div>
+    </main>
+  );
+}

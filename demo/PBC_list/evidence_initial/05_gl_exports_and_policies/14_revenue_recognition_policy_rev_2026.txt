@@ -1,0 +1,14 @@
+Revenue Recognition Policy - PT Arunika Cloud Commerce
+Effective date: 2026-01-01
+Owner: Finance Controller
+
+Policy summary:
+1. SaaS subscription revenue is recognized over time when platform access is made available to the customer.
+2. Implementation revenue is recognized when the relevant milestone is accepted by the customer or when production readiness is formally confirmed.
+3. Contracts above IDR 750,000,000 require Commercial Committee approval before revenue can be recognized.
+4. Manual revenue journal entries above IDR 50,000,000 require CFO approval.
+5. Invoices issued in the last five business days of a reporting period must be supported by acceptance evidence, usage report, or delivery log.
+6. Company-prepared reports are not independent source evidence. They must be paired with contracts, invoices, bank evidence, and reviewer attestations.
+
+Testing implication for Linow:
+The agent should identify that C-ORION-2026-019 is above threshold and that JRN-2026-06-117 is above the manual JE approval threshold.

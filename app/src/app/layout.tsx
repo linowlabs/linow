@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { DM_Sans, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "./providers";
 import "./globals.css";
 
-const dmSans = DM_Sans({
-  variable: "--font-dm-sans",
+const geistSans = Geist({
+  variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
@@ -18,8 +18,8 @@ export const metadata: Metadata = {
   description:
     "Verifiable audit evidence on Sui — upload, verify, and attest documents with tamper-proof blockchain commitments.",
   icons: {
-    icon: "/mascot.png",
-    apple: "/mascot.png",
+    icon: "/icon.png",
+    apple: "/icon.png",
   },
 };
 
@@ -31,7 +31,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${dmSans.variable} ${geistMono.variable}`}
+      className={`${geistSans.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body suppressHydrationWarning>

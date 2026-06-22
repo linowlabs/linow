@@ -1,0 +1,36 @@
+{
+  "memory_events_expected": [
+    {
+      "event": "remember_classification",
+      "example": "Classified 10_invoice_INV-2026-0630.pdf as invoice. Assertions: Existence, Occurrence, Accuracy, Classification, Cut-off. Source confidence L2. Limitation: open at quarter-end and linked to cut-off exception."
+    },
+    {
+      "event": "remember_gap",
+      "example": "GAP-01 missing Commercial Committee minutes for material Orion contract."
+    },
+    {
+      "event": "recall_before_remediation",
+      "query": "What gaps remain for Orion Q2 revenue?",
+      "expected_recall": [
+        "GAP-01",
+        "GAP-02",
+        "GAP-03"
+      ]
+    },
+    {
+      "event": "recall_after_remediation",
+      "query": "Which approval gaps are now resolved?",
+      "expected_recall": [
+        "GAP-01 resolved by R01",
+        "GAP-02 resolved by R02",
+        "GAP-03 remains cut-off review item"
+      ]
+    }
+  ],
+  "on_chain_agent_action_hashes_to_log": [
+    "classification_summary_hash",
+    "gap_analysis_before_hash",
+    "ccer_findings_hash",
+    "gap_analysis_after_hash"
+  ]
+}

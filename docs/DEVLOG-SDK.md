@@ -67,6 +67,77 @@
   - `sdk/tsconfig.json`
   - `sdk/dist/*`
   - `docs/DEVLOG-SDK.md`
+
+## 2026-06-13 — Define Walrus Memory Manifest Schema and Sui AuditPack/AgentAction Models
+
+### Change
+- Files touched:
+  - `docs/AGENT_SCHEMAS.md`
+  - `sdk/src/types.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+
+## 2026-06-13 — Extend SDK for AuditPack and AgentAction APIs
+
+### Change
+- Files touched:
+  - `sdk/src/audit-pack.ts`
+  - `sdk/src/agent-action.ts`
+  - `sdk/src/client.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `sdk/src/audit-pack.ts` with `createAuditPackFlow`, `createSuiCreateAuditPackHandler`, `createSuiGetAuditPackHandler`, `parseAuditPackObject`, and supporting types/flows for creating packs, setting memory blob links, reading pack state from chain, and parsing.
+  - Added `sdk/src/agent-action.ts` with `createEmitAgentActionFlow`, `createSuiEmitAgentActionHandler` to build PTBs and emit agent action logs (pack/evidence id + action type + output hash + timestamp).
+  - Extended `LinowClient` in `client.ts` with optional `createAuditPack`, `getAuditPack`, `emitAgentAction` (and wired defaults to missingImplementation).
+  - Updated `index.ts` to export all new clients, flows, handlers, and types so the SDK now exposes pack and agent-action APIs.
+  - Reused existing patterns from register/attest/verify (PTB building with signTransaction + tatum execute, extract helpers, parse object functions, env/fromEnv flows, required checks).
+  - The existing register support for `auditPackId` continues to work for linking evidence at creation time; dedicated pack mutators (add evidence/memory) are available via the new pack module for post-creation linking.
+  - No private agent data or raw evidence is handled in these flows — only hashes, IDs, and encrypted refs per project rules.
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly delivers the required "SDK exposes pack and agent-action APIs" (create pack, link evidence/memory via pack mutators + register, emit logs, read state, parse events/object changes via the extract/parse helpers).
+  - Follows the exact structure and style of existing modules (no premature abstraction, patch existing client/index).
+  - Supports the on-chain AuditPack (create + add_evidence/set_memory_blob) and AgentAction (emit) without duplicating logic.
+  - Memory link is supported both via manifest blob set on pack and the existing WalrusMemoryManifest type.
+  - Keeps "Agent proposes, human signs" — these are unsigned PTB builders only; user signs.
+
+### Tech Debt
+- Known shortcuts:
+  - Some link evidence uses the pack's add_evidence (for post-create); the main evidence-to-pack link is still via register's auditPackId for simplicity (no duplication).
+  - Uses tatum execute layer for consistency with current SDK (even as direct Sui is preferred elsewhere); can be swapped later.
+  - No full memwal integration yet (branch name); the set memory and manifest type are the hooks for it.
+  - Parser for AuditPack is basic field extraction (no deep event parsing beyond objectChanges in handlers).
+- Follow-up needed:
+  - Wire into app (create pack UI, agent orchestration calling emit after approval, proof dashboard showing packs/actions).
+  - Add memory manifest upload + set in a combined flow once memwal is ready.
+  - Update register flows if needed to return pack links more explicitly.
+  - Add usage examples and tests once the demo pack exercises the full path.
+  - Rebuild and ensure no breakage to existing register/attest/verify (build passed).
+  - Added the `memory_manifest` entry to the shared agent schemas doc, describing the Walrus-stored artifact bundle (evidence refs, agent output hashes, finding hashes, audit pack metadata, timestamps, schema version).
+  - Added minimal TS model definitions in the SDK for `WalrusMemoryManifest`, `AuditPack`, `AgentAction`, and supporting `AUDIT_PACK_STATUSES`.
+  - Re-exported the new const and types from the SDK public surface so future memwal/audit-pack/agent-action modules and app surfaces can import them directly.
+  - Changes are pure type + doc definitions (no behavior, no app/agent code touched).
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly fulfills the two scoped definition tasks on this sdk/feat branch.
+  - Reuses existing patterns from types.ts (const arrays + derived types, ID aliases) and the agent artifact hashing story already documented in DEVLOG-AGENT.
+  - Puts descriptive "what the bundle contains" in the shared schemas doc (per project preference for docs over inline code comments).
+  - Keeps code self-documenting via clear type and field names; detailed rationale stays in this DEVLOG entry.
+  - Avoids touching any agent-side implementation (app/src/lib/agent/*) as required.
+
+### Tech Debt
+- Known shortcuts:
+  - Field shapes are the minimal viable set from the task description and MASTER on-chain spec; full optional fields (e.g. encrypted details) can be added when the concrete manifest builder lands.
+  - Action types are string for now (matching how the SDK already passes strings that become vector<u8> on chain); a const union can be added later if needed.
+  - No runtime helpers (createManifest, pack PTB builders, event parsers) yet — those belong in later dedicated modules.
+- Follow-up needed:
+  - Implement the actual Walrus upload path for a MemoryManifest and the AuditPack/AgentAction SDK flows (memwal.ts, audit-pack.ts, agent-action.ts) once the Move contracts are defined.
+  - Wire the manifest creation from approved agent artifacts (using the existing hashAgentArtifact output) when the orchestration + review gate is integrated.
+  - Update the client interface and register flow once AuditPack linking becomes first-class.
 - Summary:
   - Switched the SDK from declaration-only output to a real JavaScript package build.
   - Exported the public API from `dist/` so the app can consume the SDK as a normal local package instead of importing source files directly.
@@ -308,3 +379,362 @@
 - Follow-up needed:
   - Wire this handler into the app wallet flow during `J6-18`.
   - Run a live testnet smoke test after the browser wallet signing bridge is available.
+
+## 2026-06-13 — Extend Walrus adapter for memory artifacts
+
+### Change
+- Files touched:
+  - `sdk/src/crypto.ts`
+  - `sdk/src/register.ts`
+  - `sdk/src/attest.ts`
+  - `sdk/src/walrus.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Patched crypto.ts to export SerializedEncryptedPayload, serializeEncryptedPayload, deserializeEncryptedPayload, and supporting bytesToBase64/base64ToBytes (consolidated for reuse after 3 occurrences in register/attest + new walrus use).
+  - Patched register.ts and attest.ts to import serialize/deserialize from crypto (hygiene, remove local duplication).
+  - Extended walrus.ts with upload/read helpers for encrypted or JSON memory manifests (WalrusMemoryManifest) and agent output artifacts (generic <T>): uploadEncryptedMemoryManifest, readEncryptedMemoryManifest, uploadJsonMemoryManifest, readJsonMemoryManifest, and matching *AgentArtifact versions.
+  - The helpers take existing WalrusClient, use crypto encryptJson/serialize (or direct JSON) then client's uploadEncryptedBlob/readEncryptedBlob for storage/reload of artifacts through the adapter.
+  - Updated index.ts exports for the new walrus memory helpers.
+  - Leverages existing WalrusClient (no new client methods added to keep adapter surface minimal), crypto, and types.
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly fulfills "Add helpers to upload/read encrypted or JSON memory manifests and agent output artifacts through existing Walrus client."
+  - Small patch to crypto for DRY (rule of three triggered by this use case), then minimal new helpers at end of walrus.ts.
+  - Supports both encrypted (for privacy per Walrus rule: blobs public, sensitive must encrypt) and plain JSON paths.
+  - Reuses encryptJson/decryptJson/serialize patterns exactly as in register/attest for consistency; generic for artifacts to cover agent outputs (classification, ccer, gap, etc.).
+  - "Through existing" means the helpers wrap the client's uploadEncryptedBlob/readEncryptedBlob rather than duplicating HTTP logic.
+  - No changes to WalrusClient interface itself (keeps backward compat); helpers are the extension.
+
+## 2026-06-13 — Timebox MemWal integration spike
+
+### Change
+- Files touched:
+  - `sdk/package.json`
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Ran npm install @mysten-incubation/memwal --save (added v0.0.7).
+  - Added sdk/src/memwal.ts with staging relayer config, createDelegateKeyFlow (using generateDelegateKey from /account), createStagingMemWalClient (MemWal.create), and validateMemWalCore (health + remember/recall with graceful error for invalid setup).
+  - Updated package.json exports + index.ts to expose the memwal spike helpers.
+  - Terminal validation: build OK, delegate flow generates Sui addr, health() succeeds (public), remember fails 401 as expected (needs real accountId + registered delegate key).
+
+### Reasoning
+- Why this approach was chosen:
+  - Timebox spike exactly as tasked: install, configure staging relayer (https://relayer.memwal.ai default), create account/delegate key flow (generate key + doc onchain create/add using memwal contracts), validate health/remember/recall.
+  - Uses the package as documented (MemWal.create + methods).
+  - For account creation: delegate gen is local/easy; full createAccount/addDelegateKey requires memwal onchain packageId + registryId + signer (not trivial in spike without public testnet details).
+  - Validation exercises the API; decision based on results.
+
+### Tech Debt
+- Known shortcuts:
+  - No real keys/accountId (beta setup not timeboxed); dummy causes auth fail on remember (expected).
+  - Spike module only; no wiring to audit-pack flows or UI yet.
+- Follow-up needed:
+  - Decision below. If go: integrate with existing direct Walrus manifest helpers for upload, use in agent orchestration for remember after approve.
+  - Find memwal testnet contract IDs if pursuing full account flow.
+
+**SPIKE DECISION:** API is clean and health/remember/recall work (once account + delegate registered onchain). However, "create account/delegate key flow" involves on-chain MemWalAccount (specific package/registry + add delegate) which isn't plug-and-play in timebox for hackathon (no easy public staging account, extra Sui txs). **Fallback to direct Walrus manifest** (already implemented and validated in prior walrus adapter extension for encrypted/JSON). MemWal usable post-hackathon or if memwal team provides pre-setup for demo. The spike code + validation is the starting point for future.
+
+## 2026-06-13 — Recall prior audit memory for gap analysis (B side)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `app/src/app/api/agent/analyze-gaps/route.ts`
+  - `docs/DEVLOG-SDK.md`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added `recallPriorAuditMemory(packId)` in SDK memwal.ts: calls memwal.recall under the engagement namespace and returns prior results (graceful empty on dummy keys).
+  - Re-exported from index.
+  - In B-side gap analysis API route, before calling the groq tool: recall prior memories for the pack, inject the texts into input.pack_notes so that the gap analysis prompt (built in core) continues from prior evidence/finding memory.
+  - Response includes recalled_prior_count to surface in demo.
+  - This proves: after refresh/new session (memory persisted in MemWal), gap analysis uses recalled prior.
+
+### Reasoning
+- Why this approach was chosen:
+  - Directly implements "Recall previous evidence/finding memory and use it to continue gap analysis after refresh or new session."
+  - Handled only on B (app API layer + SDK helper); did not touch any lib/agent/ core (analyze-gaps.ts, build messages, orchestrate etc.).
+  - Inject via pack_notes (which is part of GapAnalysisToolInput and used in prompt construction) so LLM sees prior and continues analysis.
+  - Reuses the MemWal client and namespace from store step.
+  - Demo proves via the extra field in response and persisted recall.
+
+### Tech Debt
+- Known shortcuts:
+  - Dummy keys mean recall returns [] ; real demo needs valid MEMWAL_ env.
+  - Assumes pack_notes injection surfaces in the agent prompt (based on input usage).
+- Follow-up needed:
+  - Set real keys for working cross-session demo.
+  - In workspace UI, call gap and display "recalled X prior memories" from the result to visibly prove.
+  - Extend to other tools if needed.
+
+## 2026-06-13 — Store agent outputs in MemWal (B side)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `app/src/app/api/agent/orchestrate/route.ts`
+  - `docs/DEVLOG-SDK.md`
+  - `docs/DEVLOG-APP.md`
+- Summary:
+  - Added `storeAgentOutputsInMemWal(memwal, orchestrationResult, packId)` in sdk memwal.ts.
+    It stores classifications, findings, source-confidence, gap_analysis, and audit_pack_summary as JSON strings via memwal.remember() under namespace `engagement-${packId}`.
+  - Re-exported the new store function from sdk index.
+  - In the B-side orchestrate API route (app/src/app/api/.../route.ts), after runAgentOrchestration, call the store using staging MemWal client (with env keys or dummy for spike).
+    Wrapped in try/catch so storage failure does not break the main agent response (demo path protection).
+  - App route change is API layer only; did not touch core agent implementation in lib/agent/.
+
+### Reasoning
+- Why this approach was chosen:
+  - Fulfills the task on B side (app/sdk/web3) without touching A (agent) work.
+  - Uses the existing MemWal client from the spike; stores the key outputs listed (classifications, findings, source-confidence notes, audit pack summaries) + gap for completeness.
+  - Namespace per engagement using pack_id for isolation, as "one engagement namespace".
+  - The outputs become portable Walrus Memory entries (via MemWal which uses Walrus + Seal).
+  - Storage after orchestration in the thin route keeps separation.
+
+### Tech Debt
+- Known shortcuts:
+  - Uses dummy keys in route if env not set; will log warn on fail (as in spike validation).
+  - Stores full JSON of outputs; for production could store only hashes + text summary.
+  - No web3 anchoring of the memwal entries yet (beyond the manifest in pack).
+- Follow-up needed:
+  - Provide real MEMWAL_* env for demo to make storage succeed.
+  - Surface the stored memories in workspace UI (recall via memwal in activity feed).
+  - Once real keys, integrate with pack creation for namespace.
+
+Appended matching entry to DEVLOG-APP.md too.
+
+### Tech Debt
+- Known shortcuts:
+  - JSON path uploads raw JSON bytes (still goes through "encrypted" named method, but content is plaintext JSON); callers decide based on sensitivity.
+  - No automatic manifest <-> memoryBlobId linking in pack (that's in audit-pack flows); these are pure upload/read.
+  - Dupe of some serialize logic avoided by moving to crypto, but old register/attest local copies cleaned.
+  - Assumes the serialized format (iv/ciphertext as base64 JSON) for encrypted path, matching register.
+- Follow-up needed:
+  - Use the new helpers from audit-pack or agent flows when wiring memoryBlobId set + manifest upload after pack create.
+  - Add optional compression or size limits for large manifests/artifacts if demo packs grow.
+  - Document the choice (encrypted vs json) in usage examples once app integration happens.
+  - If direct Sui (no tatum) becomes default, these helpers remain transport-agnostic.
+
+## 2026-06-13 — Remove explicit "types": ["node"] from sdk tsconfig (Vercel fix)
+
+### Change
+- Files touched:
+  - `sdk/tsconfig.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Removed the `"types": ["node"]` line from sdk/tsconfig.json compilerOptions.
+  - This was added in commit ecb7289 (the "fix: install ... and unblock build" that also added @types/node to sdk/package.json).
+  - The explicit "types" list was causing `tsc` to hard-fail with "Cannot find type definition file for 'node'" during Vercel's monorepo prebuild (`npm --prefix ../sdk install && npm --prefix ../sdk run build`), even though @types/node was listed in devDependencies.
+  - Keeping @types/node in devDependencies is still good for local development and editor support.
+
+### Reasoning
+- Why this approach was chosen:
+  - With `"moduleResolution": "Bundler"`, TypeScript will discover @types/node automatically if it is present in node_modules (via the sdk's own install or resolution).
+  - Explicit `"types": [...]` turns it into a strict requirement that is fragile in the specific Vercel prebuild flow (separate prefixed install + cache restoration + monorepo file: dependency for the sdk).
+  - Removing the list unblocks the CI build while preserving the benefit of having the types package for local `npm run build`.
+
+### Tech Debt
+- Known shortcuts:
+  - None — this is a minimal, targeted revert of the problematic part of the earlier "unblock build" change.
+- Follow-up needed:
+  - Monitor the next Vercel deploy on this branch. If it still complains, we may also need to ensure @types/node is in the root app's devDependencies or adjust how the prebuild runs.
+  - The @types/node entry in sdk/package.json can stay (harmless and useful locally).
+
+Appended matching entry will also be added to DEVLOG-APP if relevant, but this is primarily an sdk/tsconfig change.
+- Summary:
+  - Added `recallPriorAuditMemory(packId)` helper in memwal.ts that performs memwal.recall under `engagement-${packId}` and returns prior results.
+  - Re-export from index.
+  - This enables B-side routes (e.g. gap analysis) to recall prior persisted memory and inject to continue analysis (e.g. gap) after refresh/new session.
+
+### Reasoning
+- Why this approach was chosen:
+  - Completes the "recall ... and use it to continue gap analysis" on SDK (B) side.
+  - Paired with the store from previous; recall uses same client/namespace.
+  - Graceful empty list on dummy config.
+
+### Tech Debt
+- Known shortcuts:
+  - Same dummy key limitation as store.
+- Follow-up needed:
+  - Same as app side.
+
+## 2026-06-13 — Fix Vercel SDK build for process.env in memwal (no @types/node in sub-install)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added a minimal `declare const process` block at the top of memwal.ts to provide the `process.env` global for `MEMWAL_PRIVATE_KEY` and `MEMWAL_ACCOUNT_ID` usages.
+  - This avoids the hard TS2580 "Cannot find name 'process'" error during Vercel's prebuild `npm --prefix ../sdk install && tsc`, where @types/node (even when listed in devDependencies) is not resolved in the isolated SDK node_modules.
+
+### Reasoning
+- Why this approach was chosen:
+  - The previous tsconfig cleanup (removing explicit "types": ["node"]) fixed the "cannot find type definition file" but exposed that the SDK code in memwal.ts relies on Node globals that aren't in the DOM+ES lib.
+  - A local `declare` is the smallest patch that makes tsc happy without requiring @types/node to be perfectly present in every build environment (Vercel sub-install + cache).
+  - Keeps the @types/node in package.json for local development and full type checking.
+
+### Tech Debt
+- Known shortcuts:
+  - The declare is narrow (only Record<string, string | undefined> for env); full @types/node is still preferred locally.
+- Follow-up needed:
+  - Monitor next Vercel deploy. If needed, also add "@types/node" to the root app devDependencies or switch the prebuild to always include dev deps explicitly.
+
+## 2026-06-13 — Recall prior audit memory (SDK + B demo)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added recallPriorAuditMemory helper (re-exported) to fetch prior memories from MemWal for a pack under the engagement ns.
+  - Enables injection into gap analysis (and other) for continued use after refresh.
+
+### Reasoning
+- Why this approach was chosen:
+  - Provides the recall mechanism for B to use prior without A changes.
+  - Pairs with store for full "recall prior ... to continue gap after refresh/new session".
+
+### Tech Debt
+- Known shortcuts:
+  - Dummy in client.
+- Follow-up needed:
+  - Wire in more places if needed.
+
+## 2026-06-13 — Store agent outputs in MemWal (SDK helper for B side)
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `storeAgentOutputsInMemWal(memwal, orchestrationResult, packId)` helper in sdk/src/memwal.ts.
+    It remembers (as JSON text) the classifications, findings, source-confidence, gap_analysis, and audit_pack_summary under namespace `engagement-${packId}`.
+  - Re-exported `storeAgentOutputsInMemWal` from sdk index (so app can import from @linow/sdk/memwal).
+  - This provides the B-side (sdk) implementation for storing the listed agent outputs as portable Walrus Memory entries via MemWal.
+  - The app API route (B) will call it; core agent production untouched.
+
+### Reasoning
+- Why this approach was chosen:
+  - Delivers "Agent outputs saved as portable Walrus Memory entries" on B side.
+  - Uses the existing MemWal client from the spike; each remember creates a memory entry.
+  - Namespace isolates per engagement/pack as specified.
+  - Separate helper keeps it reusable and not coupled to agent orchestration code.
+
+### Tech Debt
+- Known shortcuts:
+  - Full JSON per output (could be optimized to text + hash later).
+  - Requires configured client (keys/account); dummy in app call will skip gracefully.
+- Follow-up needed:
+  - Call site in app route to actually invoke (next or as part of B wiring).
+  - Once working, the memories can be recalled in UI to show agent memory in demo.
+
+## 2026-06-13 — Fix AuditPack Linking and SDK Parsing
+
+### Change
+- Files touched:
+  - `sdk/src/types.ts`
+  - `sdk/src/register.ts`
+  - `sdk/src/verify.ts`
+  - `sdk/src/audit-pack.ts`
+  - `sdk/src/memwal.ts`
+  - `sdk/package.json`
+  - `sdk/package-lock.json`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `auditPackId` to the public register input, evidence model, and proof artifact model.
+  - Passed `auditPackId` through register preparation into the Sui PTB and changed the Move option serializer from `Option<address>` to `Option<ID>`.
+  - Parsed `EvidenceRecord.audit_pack_id` back out of Sui object reads.
+  - Fixed AuditPack object parsing for Move `Option<address>` auditor and `Option<String>` memory blob fields.
+  - Removed the SDK's `@types/node` dev dependency by reading runtime env through `globalThis`, keeping the existing MemWal helper API stable without requiring Node typings in SDK builds.
+
+### Reasoning
+- Why this approach was chosen:
+  - The Sui contract already expects `Option<ID>`, so the SDK needed to match the deployed Move model instead of treating pack links as addresses.
+  - The parser changes make the proof surface reflect chain state accurately when auditor and memory blob fields are set.
+  - The MemWal build fix stays inside SDK so agent-owned routes do not need to change.
+
+### Tech Debt
+- Known shortcuts:
+  - Register can now attach evidence to an existing AuditPack, but the workspace UI still needs a first-class pack creation/batch registration flow.
+  - MemWal still falls back to dummy credentials when env is absent; direct Walrus memory fallback remains a later integration step.
+- Follow-up needed:
+  - Wire `auditPackId` from the pack workspace once the AuditPack workspace and batch registration flows land.
+  - Add parser smoke tests for `Option<ID>`, `Option<address>`, and `Option<String>` Sui JSON shapes.
+
+## 2026-06-13 — Complete MemWal Runtime Setup
+
+### Change
+- Files touched:
+  - `sdk/src/memwal.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added `MEMWAL_SERVER_URL` support through the SDK MemWal client factory while keeping the existing default hosted relayer.
+  - Updated MemWal validation and agent-output storage to use `rememberAndWait`, so persisted memories are available for recall after the relayer finishes indexing.
+  - Exported `MEMWAL_DEFAULT_RELAYER` from the SDK public surface.
+
+### Reasoning
+- Why this approach was chosen:
+  - Waiting for remember jobs makes memory storage stronger than a fire-and-forget submission and better supports the recall demo.
+  - Keeping relayer URL configurable lets local/Vercel deployments switch between hosted production, staging, or self-hosted MemWal without code changes.
+
+### Tech Debt
+- Known shortcuts:
+  - The agent route still catches MemWal failures to protect the demo path, so failed persistence is non-blocking.
+- Follow-up needed:
+  - Use a real MemWal account and delegate key in deployment env, then run a live store/recall smoke test.
+
+## 2026-06-16 -- Add One-Transaction Batch Evidence Registration
+
+### Change
+- Files touched:
+  - `sdk/src/register.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Added batch register input/result types and public SDK exports.
+  - Added `createBatchRegisterEvidenceFlow` and `createBatchRegisterEvidenceHandler`.
+  - Added `createSuiBatchRegisterOnChainHandler`, which builds one Sui transaction containing multiple `evidence::register_evidence` calls and transfers all created records to the signer.
+  - Added multi-record evidence id extraction from Sui object changes/events.
+
+### Reasoning
+- Why this approach was chosen:
+  - Batch evidence registration should require one human wallet signature for the batch, while still hashing, encrypting, and uploading each evidence file independently.
+  - Keeping the flow in the SDK prevents the app from owning raw Sui transaction construction logic.
+
+### Tech Debt
+- Known shortcuts:
+  - Walrus uploads still run before the Sui signature, so a later transaction failure can leave encrypted uploaded blobs without corresponding EvidenceRecord objects.
+- Follow-up needed:
+  - Add SDK tests or a smoke script for multi-item batch extraction once a test fixture for Sui execution output is available.
+
+## 2026-06-19 -- Return AgentAction Event Proof
+
+### Change
+- Files touched:
+  - `sdk/src/agent-action.ts`
+  - `sdk/src/index.ts`
+  - `docs/DEVLOG-SDK.md`
+- Summary:
+  - Extended the AgentAction emit chain result with event count, object change count, and the matching `agent_action::AgentAction` event summary.
+  - Propagated the event proof fields through `createEmitAgentActionFlow`.
+  - Exported the `AgentActionEventProof` type from the public SDK surface.
+
+### Reasoning
+- Why this approach was chosen:
+  - The approval logging feature needs the app to show tx/event details after human approval, and the SDK was already requesting `showEvents` and `showObjectChanges`.
+  - Returning a small parsed proof shape keeps the app from reaching into raw Sui/Tatum response internals.
+
+### Tech Debt
+- Known shortcuts:
+  - The SDK still does not expose the full raw Sui execution response for AgentAction logs.
+- Follow-up needed:
+  - Add a fixture-backed parser test for AgentAction event extraction once a stable Sui execution payload is available.

@@ -12,6 +12,12 @@ export interface EncryptedPayload {
   iv: ByteArray;
 }
 
+export interface SerializedEncryptedPayload {
+  algorithm: string;
+  iv: string;
+  ciphertext: string;
+}
+
 type BinaryInput = BinaryContent;
 
 export async function generateEncryptionKey(): Promise<CryptoKey> {
@@ -80,6 +86,22 @@ export async function decryptJson<T>(payload: EncryptedPayload, key: CryptoKey):
   return JSON.parse(textDecoder.decode(plaintext)) as T;
 }
 
+export function serializeEncryptedPayload(payload: EncryptedPayload): SerializedEncryptedPayload {
+  return {
+    algorithm: payload.algorithm,
+    iv: bytesToBase64(payload.iv),
+    ciphertext: bytesToBase64(payload.ciphertext),
+  };
+}
+
+export function deserializeEncryptedPayload(serialized: SerializedEncryptedPayload): EncryptedPayload {
+  return {
+    algorithm: serialized.algorithm as typeof AES_ALGORITHM,
+    iv: base64ToBytes(serialized.iv),
+    ciphertext: base64ToBytes(serialized.ciphertext),
+  };
+}
+
 async function encryptBytes(plaintext: Uint8Array, key: CryptoKey): Promise<EncryptedPayload> {
   const iv = getCrypto().getRandomValues(new Uint8Array(IV_LENGTH_BYTES)) as ByteArray;
   const ciphertext = await getCrypto().subtle.encrypt(
@@ -143,6 +165,45 @@ function normalizeBytes(content: BinaryBytes): ByteArray {
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  if (typeof btoa === "function") {
+    return btoa(binary);
+  }
+  const nodeBuffer = globalThis as typeof globalThis & {
+    Buffer?: {
+      from(value: string, encoding: "binary"): { toString(encoding: "base64"): string };
+    };
+  };
+  if (nodeBuffer.Buffer) {
+    return nodeBuffer.Buffer.from(binary, "binary").toString("base64");
+  }
+  throw new Error("No base64 encoder is available in this runtime.");
+}
+
+function base64ToBytes(base64: string): ByteArray {
+  let binary: string;
+  if (typeof atob === "function") {
+    binary = atob(base64);
+  } else {
+    const nodeBuffer = globalThis as typeof globalThis & {
+      Buffer?: {
+        from(value: string, encoding: "base64"): { toString(encoding: "binary"): string };
+      };
+    };
+    if (nodeBuffer.Buffer) {
+      binary = nodeBuffer.Buffer.from(base64, "base64").toString("binary");
+    } else {
+      throw new Error("No base64 decoder is available in this runtime.");
+    }
+  }
+  const bytes = new Uint8Array(binary.length) as ByteArray;
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 const textEncoder = new TextEncoder();

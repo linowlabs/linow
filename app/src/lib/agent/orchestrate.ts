@@ -1,0 +1,878 @@
+import { AGENT_CONFIG, type AgentOrchestrationProfile } from "@/lib/agent/config";
+import {
+  classifyDocumentWithAgent,
+  resolveAgentProvider,
+  runAgentJsonCompletion,
+  shouldUseDocumentAnalysisBundle,
+} from "@/lib/agent/provider";
+import { buildGeminiEvidenceAttachments } from "@/lib/agent/evidence-attachments";
+import {
+  readCachedDocumentAnalysis,
+  writeCachedDocumentAnalysis,
+} from "@/lib/agent/document-analysis-cache";
+import {
+  buildDocumentAnalysisMessages,
+  groqDocumentAnalysisBundleSchema,
+  isGroqDocumentAnalysisBundle,
+  normalizeDocumentAnalysisBundle,
+} from "@/lib/agent/analyze-document";
+import {
+  AGENT_SCHEMA_VERSION,
+  ASSERTION_CATALOG,
+  type AssertionId,
+  type AuditPackSummaryOutput,
+  type CcerFindingOutput,
+  type EvidenceClassificationOutput,
+  type GapAnalysisOutput,
+  type MetadataExtractionOutput,
+  type SourceConfidenceDistributionItem,
+} from "@/lib/agent/schemas";
+import {
+  buildAgentPersistencePlan,
+  buildAgentReviewBundle,
+  createArtifactCollector,
+  type AgentProgressTraceEntry,
+  type AgentDocumentProofReference,
+  type AgentOrchestrationResult,
+  type DocumentAnalysisResult,
+} from "@/lib/agent/orchestration-contract";
+import type { AgentProviderName, AgentUsageStats } from "@/lib/agent/provider-types";
+import {
+  AgentInputError,
+  isRecord,
+  parseOptionalStringArray,
+  readOptionalString,
+  readRequiredString,
+  resolveAgentDocumentInput,
+  type AgentDocumentInput,
+} from "@/lib/agent/common";
+import {
+  buildMetadataExtractionMessages,
+  groqMetadataExtractionSchema,
+  isAgentMetadataExtractionResult,
+  normalizeMetadataExtractionResult,
+} from "@/lib/agent/extract-metadata";
+import {
+  buildAssertionMappingMessages,
+  groqAssertionMappingBundleSchema,
+  isAssertionMappingBundle,
+  normalizeAssertionMappingBundle,
+} from "@/lib/agent/map-assertions";
+import {
+  buildGapAnalysisMessages,
+  groqGapAnalysisSchema,
+  isGroqGapAnalysisEnvelope,
+  normalizeGapAnalysisResult,
+  type GapAnalysisDocumentInput,
+  type GapAnalysisToolInput,
+} from "@/lib/agent/analyze-gaps";
+import {
+  buildCcerFindingMessages,
+  groqCcerFindingSchema,
+  isGroqDraftFindingResult,
+  normalizeCcerFindingResult,
+  type CcerFindingToolInput,
+} from "@/lib/agent/draft-finding";
+import { buildAgentMemoryPayload, buildAgentRecallSummary } from "@/lib/agent/agent-memory";
+import { hashAgentArtifact } from "@/lib/agent/artifacts";
+import { recallPriorAuditMemory } from "@linow/sdk/memwal";
+
+export interface OrchestrationDocumentInput extends AgentDocumentInput {
+  notes?: string[];
+  evidence_ref?: AgentDocumentProofReference;
+}
+
+export interface AgentOrchestrationInput {
+  provider: AgentProviderName;
+  profile: AgentOrchestrationProfile;
+  pack_id: string;
+  engagement_name: string;
+  audit_area?: string;
+  stage?: string;
+  pack_owner_address?: string;
+  auditor_address?: string;
+  documents: OrchestrationDocumentInput[];
+  pack_notes?: string[];
+}
+
+export interface AgentOrchestrationRunOptions {
+  skipFindingDrafting?: boolean;
+}
+
+export async function resolveAgentOrchestrationInput(value: unknown): Promise<AgentOrchestrationInput> {
+  if (!isRecord(value)) {
+    throw new AgentInputError("Request body must be a JSON object.");
+  }
+
+  const documentsValue = value.documents;
+
+  if (!Array.isArray(documentsValue) || documentsValue.length === 0) {
+    throw new AgentInputError("documents must be a non-empty array.");
+  }
+
+  if (documentsValue.length > AGENT_CONFIG.limits.maxPackDocuments) {
+    throw new AgentInputError(`documents must contain at most ${AGENT_CONFIG.limits.maxPackDocuments} items.`);
+  }
+
+  const profile = resolveOrchestrationProfile(value.profile);
+  const profileConfig = AGENT_CONFIG.orchestrationProfiles[profile];
+  const provider = resolveAgentProvider(value.provider);
+
+  return {
+    provider,
+    profile,
+    pack_id: readRequiredString(value.pack_id, "pack_id"),
+    engagement_name: readRequiredString(value.engagement_name, "engagement_name"),
+    audit_area: readOptionalString(value.audit_area, "audit_area"),
+    stage: readOptionalString(value.stage, "stage"),
+    pack_owner_address: readOptionalString(value.pack_owner_address, "pack_owner_address"),
+    auditor_address: readOptionalString(value.auditor_address, "auditor_address"),
+    documents: await Promise.all(
+      documentsValue.map((document, index) =>
+        parseOrchestrationDocumentInput(document, index, profileConfig.maxDocumentChars),
+      ),
+    ),
+    pack_notes: parseOptionalStringArray(value.pack_notes, "pack_notes"),
+  };
+}
+
+export async function runAgentOrchestration(
+  input: AgentOrchestrationInput,
+  options: AgentOrchestrationRunOptions = {},
+): Promise<AgentOrchestrationResult> {
+  const progress = createAgentProgressLogger();
+  progress.log("Starting orchestration", {
+    provider: input.provider,
+    profile: input.profile,
+    pack_id: input.pack_id,
+    documents: input.documents.length,
+    skip_finding_drafting: Boolean(options.skipFindingDrafting),
+  });
+  const documents: DocumentAnalysisResult[] = [];
+  const artifacts = createArtifactCollector(input.pack_id);
+  const documentNotesById = createDocumentNotesLookup(input.documents);
+  const usage = createUsageAccumulator();
+  const profileConfig = AGENT_CONFIG.orchestrationProfiles[input.profile];
+  const useDocumentAnalysisBundle = shouldUseDocumentAnalysisBundle(input.provider, profileConfig.combineDocumentPasses);
+  const recalledMemories = profileConfig.recallPriorMemory ? await recallPriorAuditMemory(input.pack_id) : [];
+  const recallSummary = buildAgentRecallSummary(input.pack_id, recalledMemories, profileConfig.maxPriorMemoryNotes);
+  const effectivePackNotes = mergePackNotes(input.pack_notes, recallSummary.notes);
+  let cachedDocumentCount = 0;
+  let model: string =
+    input.provider === "gemini" ? AGENT_CONFIG.gemini.defaultModel : AGENT_CONFIG.groq.defaultModel;
+
+  for (const document of input.documents) {
+    const analysisMode = useDocumentAnalysisBundle ? "compact" : "multi_pass";
+    progress.log("Analyzing evidence", {
+      document_id: document.documentId,
+      filename: document.documentName,
+      mode: analysisMode,
+    });
+    const analysis = await resolveDocumentAnalysis(input.provider, document, analysisMode);
+
+    if (analysis.analysisSource === "live") {
+      model = analysis.model;
+    }
+    addUsage(usage, analysis.usage);
+    if (analysis.analysisSource === "cache") {
+      cachedDocumentCount += 1;
+    }
+    const classificationHash = hashAgentArtifact(
+      analysis.classification,
+      `classification:${analysis.classification.document_id}`,
+    );
+    const metadataHash = hashAgentArtifact(analysis.metadata, `metadata:${analysis.metadata.document_id}`);
+    const assertionMappingHash = hashAgentArtifact(
+      analysis.assertionBundle.assertion_mapping,
+      `assertion_mapping:${analysis.assertionBundle.assertion_mapping.document_id}`,
+    );
+    const sourceConfidenceHash = hashAgentArtifact(
+      analysis.assertionBundle.source_confidence,
+      `source_confidence:${analysis.assertionBundle.source_confidence.document_id}`,
+    );
+
+    artifacts.add({
+      hash: classificationHash,
+      actionType: "classify",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
+    artifacts.add({
+      hash: metadataHash,
+      actionType: "extract",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
+    artifacts.add({
+      hash: assertionMappingHash,
+      actionType: "map_assert",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
+    artifacts.add({
+      hash: sourceConfidenceHash,
+      actionType: "map_assert",
+      targetKind: "document",
+      targetId: document.documentId,
+      documentId: document.documentId,
+    });
+    documents.push({
+      document_id: document.documentId,
+      filename: document.documentName,
+      evidence_ref: document.evidence_ref,
+      analysis_source: analysis.analysisSource,
+      cache_key: analysis.cacheKey,
+      classification: analysis.classification,
+      metadata: analysis.metadata,
+      assertion_mapping: analysis.assertionBundle.assertion_mapping,
+      source_confidence: analysis.assertionBundle.source_confidence,
+      hashes: {
+        classification: classificationHash,
+        metadata: metadataHash,
+        assertion_mapping: assertionMappingHash,
+        source_confidence: sourceConfidenceHash,
+      },
+      usage: {
+        classification: analysis.usageBreakdown.classification ?? null,
+        metadata: analysis.usageBreakdown.metadata ?? null,
+        assertion_mapping: analysis.usageBreakdown.assertion_mapping ?? null,
+        document_analysis_bundle: analysis.usageBreakdown.document_analysis_bundle ?? null,
+      },
+    });
+    progress.log("Evidence analysis complete", {
+      document_id: document.documentId,
+      document_type: analysis.classification.document_type,
+      source_confidence: analysis.classification.source_confidence,
+      source: analysis.analysisSource,
+      hash_count: artifacts.hashes.length,
+    });
+  }
+
+  progress.log("Running pack gap analysis", {
+    pack_id: input.pack_id,
+    analyzed_documents: documents.length,
+  });
+  const gapInput = buildGapInput(input, documents, effectivePackNotes);
+  const gapCompletion = await runAgentJsonCompletion({
+    provider: input.provider,
+    schemaName: AGENT_CONFIG.schemaNames.gapAnalysis,
+    schema: groqGapAnalysisSchema,
+    messages: buildGapAnalysisMessages(gapInput),
+    validate: isGroqGapAnalysisEnvelope,
+    responseMode: "json_object",
+  });
+  addUsage(usage, gapCompletion.usage);
+  const gapAnalysis = normalizeGapAnalysisResult(gapInput, gapCompletion.result);
+  const gapHash = hashAgentArtifact(gapAnalysis, `gap_analysis:${gapAnalysis.pack_id}`);
+  artifacts.add({
+    hash: gapHash,
+    actionType: "find_gaps",
+    targetKind: "pack",
+    targetId: input.pack_id,
+  });
+  progress.log("Gap analysis complete", {
+    readiness_score: gapAnalysis.readiness_score,
+    gaps: gapAnalysis.gaps.length,
+    hash_count: artifacts.hashes.length,
+  });
+
+  const findings: CcerFindingOutput[] = [];
+  const maxFindings = Math.min(profileConfig.maxFindingsPerPack, AGENT_CONFIG.limits.maxFindingsPerPack);
+  if (!options.skipFindingDrafting) {
+    for (const [index, gap] of gapAnalysis.gaps.slice(0, maxFindings).entries()) {
+      progress.log("Drafting finding", {
+        finding_index: index + 1,
+        title: gap.title,
+      });
+      const findingInput: CcerFindingToolInput = {
+        pack_id: input.pack_id,
+        engagement_name: input.engagement_name,
+        audit_area: input.audit_area,
+        stage: input.stage,
+        finding_id: `FND-${String(index + 1).padStart(3, "0")}`,
+        gap,
+        gap_analysis: gapAnalysis,
+        documents: documents.map((document) => ({
+          document_id: document.document_id,
+          filename: document.filename,
+          document_text: input.documents.find((item) => item.documentId === document.document_id)?.documentText,
+          context: input.documents.find((item) => item.documentId === document.document_id)?.context,
+          classification: document.classification,
+          metadata: document.metadata,
+          assertion_mapping: document.assertion_mapping,
+          source_confidence: document.source_confidence,
+          notes: documentNotesById.get(document.document_id),
+        })),
+        pack_notes: effectivePackNotes,
+      };
+
+      const findingCompletion = await runAgentJsonCompletion({
+        provider: input.provider,
+        schemaName: AGENT_CONFIG.schemaNames.ccerFinding,
+        schema: groqCcerFindingSchema,
+        messages: buildCcerFindingMessages(findingInput),
+        validate: isGroqDraftFindingResult,
+        responseMode: "json_object",
+      });
+      addUsage(usage, findingCompletion.usage);
+      const finding = normalizeCcerFindingResult(findingInput, findingCompletion.result);
+      findings.push(finding);
+      artifacts.add({
+        hash: hashAgentArtifact(finding, `ccer_finding:${finding.finding_id}`),
+        actionType: "draft_ccer",
+        targetKind: "finding",
+        targetId: finding.finding_id,
+        findingId: finding.finding_id,
+      });
+      progress.log("Finding draft complete", {
+        finding_id: finding.finding_id,
+        severity: finding.severity,
+        hash_count: artifacts.hashes.length,
+      });
+    }
+  }
+
+  progress.log("Building audit pack summary and hashes", {
+    pack_id: input.pack_id,
+  });
+  const auditPackSummary = buildAuditPackSummary(input, documents, gapAnalysis, findings);
+  const summaryHash = hashAgentArtifact(auditPackSummary, `audit_pack_summary:${auditPackSummary.pack_id}`);
+  artifacts.add({
+    hash: summaryHash,
+    actionType: "summarize_pack",
+    targetKind: "pack",
+    targetId: input.pack_id,
+  });
+  progress.log("Audit pack summary/hash complete", {
+    summary_hash_bytes: summaryHash.byte_length,
+    hash_count: artifacts.hashes.length,
+  });
+
+  progress.log("Building review and persistence plan", {
+    pack_id: input.pack_id,
+  });
+  const reviewBundle = buildAgentReviewBundle(input.pack_id, artifacts.hashes);
+  const persistence = buildAgentPersistencePlan({
+    packId: input.pack_id,
+    evidenceCount: documents.length,
+    findingCount: findings.length,
+    artifactCatalog: artifacts.artifactCatalog,
+  });
+  const flow = [
+    {
+      step: useDocumentAnalysisBundle ? "analyze_document_bundle" : "classify_extract_map",
+      artifact_count: documents.length * 4,
+      schema_names: ["evidence_classification", "metadata_extraction", "assertion_mapping", "source_confidence"],
+    },
+    {
+      step: "analyze_gaps",
+      artifact_count: 1,
+      schema_names: ["gap_analysis"],
+    },
+    {
+      step: "draft_findings",
+      artifact_count: findings.length,
+      schema_names: ["ccer_finding"],
+    },
+    {
+      step: "build_summary_and_hashes",
+      artifact_count: 1 + artifacts.hashes.length,
+      schema_names: ["audit_pack_summary"],
+    },
+  ] satisfies AgentOrchestrationResult["flow"];
+
+  const baseResult = {
+    provider: input.provider,
+    model,
+    profile: input.profile,
+    pack_id: input.pack_id,
+    engagement_name: input.engagement_name,
+    audit_area: input.audit_area,
+    stage: input.stage,
+    pack_owner_address: input.pack_owner_address,
+    auditor_address: input.auditor_address,
+    documents,
+    gap_analysis: gapAnalysis,
+    findings,
+    audit_pack_summary: auditPackSummary,
+    hashes: artifacts.hashes,
+    artifact_catalog: artifacts.artifactCatalog,
+    recall_summary: recallSummary,
+    review_bundle: reviewBundle,
+    persistence,
+    proposed_action: reviewBundle,
+    flow,
+    progress_trace: progress.entries,
+    recalled_prior_memory_count: recallSummary.recalled_count,
+    cached_document_count: cachedDocumentCount,
+    usage,
+  } satisfies Omit<AgentOrchestrationResult, "agent_memory_payload">;
+
+  const agentMemoryPayload = buildAgentMemoryPayload(baseResult);
+  progress.log("Orchestration complete", {
+    documents: documents.length,
+    gaps: gapAnalysis.gaps.length,
+    findings: findings.length,
+    hashes: artifacts.hashes.length,
+  });
+
+  return {
+    ...baseResult,
+    agent_memory_payload: agentMemoryPayload,
+  };
+}
+
+async function parseOrchestrationDocumentInput(
+  value: unknown,
+  index: number,
+  maxDocumentChars: number,
+): Promise<OrchestrationDocumentInput> {
+  if (!isRecord(value)) {
+    throw new AgentInputError(`documents[${index}] must be an object.`);
+  }
+
+  const startedAt = Date.now();
+  logAgentProgress(`Reading evidence ${index + 1}`, {
+    file:
+      readOptionalString(value.filePath, `documents[${index}].filePath`) ??
+      readOptionalString(value.documentName, `documents[${index}].documentName`) ??
+      "inline_document",
+  });
+  const parsedBase = await resolveAgentDocumentInput(value, maxDocumentChars);
+  logAgentProgress(`Evidence ${index + 1} ready`, {
+    document_id: parsedBase.documentId,
+    filename: parsedBase.documentName,
+    chars: parsedBase.documentText.length,
+    format: parsedBase.ingested_file?.format ?? "inline_text",
+    warnings: parsedBase.ingested_file?.warnings.length ?? 0,
+    duration_ms: Date.now() - startedAt,
+  });
+
+  return {
+    ...parsedBase,
+    notes: parseOptionalStringArray(value.notes, `documents[${index}].notes`),
+    evidence_ref: parseDocumentProofReference(value.evidence_ref, `documents[${index}].evidence_ref`),
+  };
+}
+
+function parseDocumentProofReference(
+  value: unknown,
+  fieldName: string,
+): AgentDocumentProofReference | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new AgentInputError(`${fieldName} must be an object when provided.`);
+  }
+
+  return {
+    evidence_id: readOptionalString(value.evidence_id, `${fieldName}.evidence_id`),
+    walrus_blob_id: readOptionalString(value.walrus_blob_id, `${fieldName}.walrus_blob_id`),
+    commitment: readOptionalString(value.commitment, `${fieldName}.commitment`),
+  };
+}
+
+function buildGapInput(
+  input: AgentOrchestrationInput,
+  documents: DocumentAnalysisResult[],
+  packNotes: string[] | undefined,
+): GapAnalysisToolInput {
+  const documentNotesById = createDocumentNotesLookup(input.documents);
+  const gapDocuments: GapAnalysisDocumentInput[] = documents.map((document) => ({
+    document_id: document.document_id,
+    filename: document.filename,
+    document_text: input.documents.find((item) => item.documentId === document.document_id)?.documentText,
+    context: input.documents.find((item) => item.documentId === document.document_id)?.context,
+    classification: document.classification,
+    metadata: document.metadata,
+    assertion_mapping: document.assertion_mapping,
+    source_confidence: document.source_confidence,
+    notes: documentNotesById.get(document.document_id),
+  }));
+
+  return {
+    pack_id: input.pack_id,
+    engagement_name: input.engagement_name,
+    audit_area: input.audit_area,
+    stage: input.stage,
+    documents: gapDocuments,
+    pack_notes: packNotes,
+  };
+}
+
+function buildAuditPackSummary(
+  input: AgentOrchestrationInput,
+  documents: DocumentAnalysisResult[],
+  gapAnalysis: GapAnalysisOutput,
+  findings: CcerFindingOutput[],
+): AuditPackSummaryOutput {
+  const documentTypes = Array.from(new Set(documents.map((document) => document.classification.document_type))).sort();
+  const confidenceDistributionMap = new Map<string, number>();
+
+  for (const document of documents) {
+    const level = document.source_confidence.source_confidence;
+    confidenceDistributionMap.set(level, (confidenceDistributionMap.get(level) ?? 0) + 1);
+  }
+
+  const sourceConfidenceDistribution: SourceConfidenceDistributionItem[] = Array.from(confidenceDistributionMap.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([level, count]) => ({ level: level as SourceConfidenceDistributionItem["level"], count }));
+
+  const missingLabels =
+    gapAnalysis.missing_labels.length > 0
+      ? gapAnalysis.missing_labels
+      : gapAnalysis.missing_assertions.map((assertionId) => getAssertionLabel(assertionId));
+
+  return {
+    schema_name: "audit_pack_summary",
+    schema_version: AGENT_SCHEMA_VERSION,
+    pack_id: input.pack_id,
+    engagement_name: input.engagement_name,
+    summary: buildPackSummaryText(input, documents, gapAnalysis, findings),
+    evidence_count: documents.length,
+    document_types: documentTypes,
+    readiness_score: gapAnalysis.readiness_score,
+    source_confidence_distribution: sourceConfidenceDistribution,
+    covered_assertions: [...gapAnalysis.covered_assertions],
+    covered_labels: [...gapAnalysis.covered_labels],
+    missing_assertions: [...gapAnalysis.missing_assertions],
+    missing_labels: missingLabels,
+    finding_ids: findings.map((finding) => finding.finding_id),
+    next_actions:
+      gapAnalysis.recommendations.length > 0
+        ? [...gapAnalysis.recommendations]
+        : [
+            "Review draft findings and approve any artifact that should be hashed for downstream proof logging.",
+          ],
+  };
+}
+
+function buildPackSummaryText(
+  input: AgentOrchestrationInput,
+  documents: DocumentAnalysisResult[],
+  gapAnalysis: GapAnalysisOutput,
+  findings: CcerFindingOutput[],
+): string {
+  const documentTypes = Array.from(new Set(documents.map((document) => document.classification.document_type))).sort();
+  const highestSeverityFinding = findings[0]?.severity;
+
+  return [
+    `${input.engagement_name} currently includes ${documents.length} analyzed evidence items across ${documentTypes.length} document types.`,
+    `Readiness is ${gapAnalysis.readiness_score}/100 with ${gapAnalysis.gaps.length} open gap(s) and ${findings.length} draft finding(s).`,
+    highestSeverityFinding ? `Highest draft finding severity: ${highestSeverityFinding}.` : "No draft findings were generated.",
+  ].join(" ");
+}
+
+function buildClassificationSummary(classification: EvidenceClassificationOutput): string {
+  return [
+    `Classified as ${classification.document_type}.`,
+    `Supported assertions: ${classification.assertion_labels.join(", ") || "none"}.`,
+    `Source confidence: ${classification.source_confidence}.`,
+  ].join(" ");
+}
+
+function buildMetadataSummary(metadata: MetadataExtractionOutput): string {
+  const fragments = [
+    metadata.document_date ? `Document date ${metadata.document_date}` : null,
+    metadata.period_start && metadata.period_end ? `Period ${metadata.period_start} to ${metadata.period_end}` : null,
+    metadata.parties.length > 0 ? `Parties ${metadata.parties.map((item) => item.name).join(", ")}` : null,
+    metadata.key_amounts.length > 0
+      ? `Amounts ${metadata.key_amounts.map((item) => `${item.label}: ${item.amount}${item.currency ? ` ${item.currency}` : ""}`).join("; ")}`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return fragments.join(". ");
+}
+
+function createDocumentNotesLookup(
+  documents: OrchestrationDocumentInput[],
+): Map<string, string[] | undefined> {
+  return new Map(
+    documents.map((document) => [document.documentId, document.notes] as const),
+  );
+}
+
+async function runCompactDocumentAnalysis(provider: AgentProviderName, document: OrchestrationDocumentInput) {
+  const completion = await runAgentJsonCompletion({
+    provider,
+    schemaName: AGENT_CONFIG.schemaNames.documentAnalysisBundle,
+    schema: groqDocumentAnalysisBundleSchema,
+    messages: buildDocumentAnalysisMessages(document),
+    validate: isGroqDocumentAnalysisBundle,
+    attachments: provider === "gemini" ? await buildGeminiEvidenceAttachments(document) : undefined,
+  });
+  const normalized = normalizeDocumentAnalysisBundle(
+    {
+      ...document,
+      frameworkReference: "ISA 500 evidence readiness",
+    },
+    completion.result,
+  );
+
+  return {
+    model: completion.model,
+    usage: completion.usage,
+    classification: normalized.classification,
+    metadata: normalized.metadata,
+    assertionBundle: normalized.assertion_bundle,
+    usageBreakdown: {
+      classification: null,
+      metadata: null,
+      assertion_mapping: null,
+      document_analysis_bundle: completion.usage ?? null,
+    },
+  };
+}
+
+async function runMultiPassDocumentAnalysis(provider: AgentProviderName, document: OrchestrationDocumentInput) {
+  const attachments = provider === "gemini" ? await buildGeminiEvidenceAttachments(document) : undefined;
+  const classificationResult = await classifyDocumentWithAgent(document, provider);
+  const metadataCompletion = await runAgentJsonCompletion({
+    provider,
+    schemaName: AGENT_CONFIG.schemaNames.metadataExtraction,
+    schema: groqMetadataExtractionSchema,
+    messages: buildMetadataExtractionMessages({
+      ...document,
+      classificationSummary: buildClassificationSummary(classificationResult.result),
+    }),
+    validate: isAgentMetadataExtractionResult,
+    attachments,
+  });
+  const metadata = normalizeMetadataExtractionResult(document, metadataCompletion.result);
+  const assertionMappingCompletion = await runAgentJsonCompletion({
+    provider,
+    schemaName: AGENT_CONFIG.schemaNames.assertionMappingBundle,
+    schema: groqAssertionMappingBundleSchema,
+    messages: buildAssertionMappingMessages({
+      ...document,
+      frameworkReference: "ISA 500 evidence readiness",
+      classificationSummary: buildClassificationSummary(classificationResult.result),
+      metadataSummary: buildMetadataSummary(metadata),
+    }),
+    validate: isAssertionMappingBundle,
+    attachments,
+  });
+  const assertionBundle = normalizeAssertionMappingBundle(
+    {
+      ...document,
+      frameworkReference: "ISA 500 evidence readiness",
+      classificationSummary: buildClassificationSummary(classificationResult.result),
+      metadataSummary: buildMetadataSummary(metadata),
+    },
+    assertionMappingCompletion.result,
+  );
+
+  return {
+    model: classificationResult.model,
+    usage: sumUsage(classificationResult.usage, metadataCompletion.usage, assertionMappingCompletion.usage),
+    classification: classificationResult.result,
+    metadata,
+    assertionBundle,
+    usageBreakdown: {
+      classification: classificationResult.usage ?? null,
+      metadata: metadataCompletion.usage ?? null,
+      assertion_mapping: assertionMappingCompletion.usage ?? null,
+      document_analysis_bundle: null,
+    },
+  };
+}
+
+async function resolveDocumentAnalysis(
+  provider: AgentProviderName,
+  document: OrchestrationDocumentInput,
+  mode: "compact" | "multi_pass",
+) {
+  const cached = await readCachedDocumentAnalysis({ provider, document, mode });
+
+  if (cached) {
+    return {
+      model: "cache",
+      usage: undefined,
+      classification: cached.classification,
+      metadata: cached.metadata,
+      assertionBundle: cached.assertionBundle,
+      usageBreakdown: {
+        classification: null,
+        metadata: null,
+        assertion_mapping: null,
+        document_analysis_bundle: null,
+      },
+      analysisSource: "cache" as const,
+      cacheKey: cached.cacheKey,
+    };
+  }
+
+  const analysis = await runPreferredDocumentAnalysis(provider, document, mode);
+
+  const cacheKey = await writeCachedDocumentAnalysis({
+    provider,
+    document,
+    mode,
+    classification: analysis.classification,
+    metadata: analysis.metadata,
+    assertionBundle: analysis.assertionBundle,
+  });
+
+  return {
+    ...analysis,
+    analysisSource: "live" as const,
+    cacheKey,
+  };
+}
+
+async function runPreferredDocumentAnalysis(
+  provider: AgentProviderName,
+  document: OrchestrationDocumentInput,
+  mode: "compact" | "multi_pass",
+) {
+  if (mode === "multi_pass") {
+    return runMultiPassDocumentAnalysis(provider, document);
+  }
+
+  try {
+    return await runCompactDocumentAnalysis(provider, document);
+  } catch (error) {
+    if (!isRecoverableCompactAnalysisError(error)) {
+      throw error;
+    }
+
+    return runMultiPassDocumentAnalysis(provider, document);
+  }
+}
+
+function mergePackNotes(packNotes: string[] | undefined, priorMemoryNotes: string[]): string[] | undefined {
+  const merged = [...(packNotes ?? []), ...priorMemoryNotes];
+  return merged.length > 0 ? merged : undefined;
+}
+
+function resolveOrchestrationProfile(value: unknown): AgentOrchestrationProfile {
+  if (value === undefined) {
+    return "cheap";
+  }
+
+  if (value === "cheap" || value === "balanced" || value === "full") {
+    return value;
+  }
+
+  throw new AgentInputError("profile must be one of: cheap, balanced, full.");
+}
+
+function sumUsage(...usageItems: Array<AgentUsageStats | undefined>): AgentUsageStats {
+  const total = createUsageAccumulator();
+
+  for (const usage of usageItems) {
+    addUsage(total, usage);
+  }
+
+  return total;
+}
+
+function createUsageAccumulator(): AgentUsageStats {
+  return {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  };
+}
+
+function addUsage(accumulator: AgentUsageStats, usage?: AgentUsageStats) {
+  if (!usage) {
+    return;
+  }
+
+  accumulator.prompt_tokens = (accumulator.prompt_tokens ?? 0) + (usage.prompt_tokens ?? 0);
+  accumulator.completion_tokens = (accumulator.completion_tokens ?? 0) + (usage.completion_tokens ?? 0);
+  accumulator.total_tokens = (accumulator.total_tokens ?? 0) + (usage.total_tokens ?? 0);
+}
+
+function getAssertionLabel(assertionId: AssertionId): string {
+  return ASSERTION_CATALOG.find((item) => item.id === assertionId)?.label ?? `Unknown (${assertionId})`;
+}
+
+function isRecoverableCompactAnalysisError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.message.includes("linow_agent_document_analysis_bundle") &&
+    (
+      error.message.includes("json_validate_failed") ||
+      error.message.includes("invalid JSON schema for response_format") ||
+      error.message.includes("Failed to validate JSON")
+    )
+  );
+}
+
+export function logAgentProgress(message: string, details: Record<string, unknown> = {}) {
+  if (process.env.AGENT_PROGRESS_LOGS === "off") {
+    return;
+  }
+
+  const payload = {
+    at: new Date().toISOString(),
+    ...details,
+  };
+  const suffix = Object.keys(payload).length > 0 ? ` ${JSON.stringify(payload)}` : "";
+  console.log(`[linow-agent] ${message}${suffix}`);
+}
+
+export function appendAgentProgressTrace(
+  entries: AgentProgressTraceEntry[],
+  message: string,
+  details: Record<string, unknown> = {},
+) {
+  const now = Date.now();
+  const previousEntry = entries.at(-1);
+  const previousLoggedAt = previousEntry ? Date.parse(previousEntry.logged_at) : now;
+  const previousTotalMs = previousEntry?.total_ms ?? 0;
+  const stepMs = Math.max(0, now - previousLoggedAt);
+  const totalMs = previousEntry ? previousTotalMs + stepMs : 0;
+  const entry: AgentProgressTraceEntry = {
+    message,
+    details,
+    logged_at: new Date(now).toISOString(),
+    step_ms: stepMs,
+    total_ms: totalMs,
+  };
+  entries.push(entry);
+  logAgentProgress(message, {
+    ...details,
+    step_ms: entry.step_ms,
+    total_ms: entry.total_ms,
+  });
+  return entry;
+}
+
+function createAgentProgressLogger() {
+  const startedAt = Date.now();
+  let previousAt = startedAt;
+  const entries: AgentProgressTraceEntry[] = [];
+
+  return {
+    entries,
+    log(message: string, details: Record<string, unknown> = {}) {
+      const now = Date.now();
+      const stepMs = now - previousAt;
+      previousAt = now;
+      const entry: AgentProgressTraceEntry = {
+        message,
+        details,
+        logged_at: new Date(now).toISOString(),
+        step_ms: stepMs,
+        total_ms: now - startedAt,
+      };
+      entries.push(entry);
+      logAgentProgress(message, {
+        ...details,
+        step_ms: entry.step_ms,
+        total_ms: entry.total_ms,
+      });
+    },
+  };
+}

@@ -1,0 +1,11 @@
+invoice_id,invoice_date,customer_id,customer_name,contract_ref,product_service,net_amount_idr,tax_amount_idr,gross_amount_idr,revenue_account,recognition_month,sales_owner,status
+INV-2026-0411,2026-04-30,CUST-001,PT Orion Mart Tbk,Contract C-ORION-2026-019,Implementation milestone 1,171000000,18810000,189810000,4100 Revenue,2026-04,Dewi Lestari,PAID
+INV-2026-0426,2026-04-28,CUST-002,PT Bali Fresh Market,Contract C-BALI-2026-008,April SaaS subscription,20000000,2200000,22200000,4100 Revenue,2026-04,Dewi Lestari,PAID
+INV-2026-0434,2026-04-29,CUST-003,PT Sentra Farma Nusantara,Contract C-SENTRA-2026-006,April SaaS subscription,15000000,1650000,16650000,4100 Revenue,2026-04,Dewi Lestari,PAID
+INV-2026-0517,2026-05-31,CUST-001,PT Orion Mart Tbk,Contract C-ORION-2026-019,May SaaS subscription,42750000,4702500,47452500,4100 Revenue,2026-05,Dewi Lestari,PAID
+INV-2026-0528,2026-05-30,CUST-004,PT MegaLogis Indonesia,Contract C-MEGA-2026-012,Implementation milestone,60000000,6600000,66600000,4100 Revenue,2026-05,Dewi Lestari,PAID
+INV-2026-0539,2026-05-31,CUST-005,PT Karya Moda Retail,Contract C-KARYA-2026-010,May SaaS subscription,8000000,880000,8880000,4100 Revenue,2026-05,Dewi Lestari,PAID
+INV-2026-0620,2026-06-28,CUST-002,PT Bali Fresh Market,Contract C-BALI-2026-008,June SaaS subscription,20000000,2200000,22200000,4100 Revenue,2026-06,Dewi Lestari,OPEN
+INV-2026-0624,2026-06-29,CUST-003,PT Sentra Farma Nusantara,Contract C-SENTRA-2026-006,June SaaS subscription,15000000,1650000,16650000,4100 Revenue,2026-06,Dewi Lestari,OPEN
+INV-2026-0630,2026-06-30,CUST-001,PT Orion Mart Tbk,Contract C-ORION-2026-019,Implementation milestone 2,171000000,18810000,189810000,4100 Revenue,2026-06,Dewi Lestari,OPEN
+CRN-2026-0702,2026-07-02,CUST-001,PT Orion Mart Tbk,Contract C-ORION-2026-019,Post-period credit note for service delay,-28500000,-3135000,-31635000,4100 Revenue,2026-07,Dewi Lestari,CREDIT_NOTE

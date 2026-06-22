@@ -72,6 +72,7 @@ export interface ProofArtifacts {
   packageId?: string;
   transactionDigest?: TransactionDigest;
   walrusBlobId?: BlobId;
+  auditPackId?: string;
   attestationId?: AttestationId;
 }
 
@@ -88,6 +89,7 @@ export interface EvidenceRecord {
   assertions: AssertionId[];
   metadata: EvidenceMetadata;
   blobId?: BlobId;
+  auditPackId?: string;
   registrantAddress?: WalletAddress;
   registeredAt?: IsoTimestamp;
   lastUpdatedAt?: IsoTimestamp;
@@ -101,6 +103,7 @@ export interface RegisterEvidenceInput {
   content: BinaryContent;
   metadata: EvidenceMetadata;
   assertions: AssertionId[];
+  auditPackId?: string;
   signerAddress?: WalletAddress;
 }
 
@@ -159,4 +162,49 @@ export interface GetEvidenceInput {
 export interface GetEvidenceResult {
   evidence: EvidenceRecord | null;
   fetchedAt: IsoTimestamp;
+}
+
+export const AUDIT_PACK_STATUSES = ["draft", "submitted", "underReview", "complete"] as const;
+export type AuditPackStatus = (typeof AUDIT_PACK_STATUSES)[number];
+
+export interface AuditPack {
+  id: string;
+  owner: WalletAddress;
+  auditor?: WalletAddress;
+  evidenceIds: EvidenceId[];
+  findingHashes: string[];
+  memoryBlobId?: BlobId;
+  assertionsCovered: AssertionId[];
+  status: number;
+  createdAt: IsoTimestamp;
+}
+
+export interface AgentAction {
+  packId: string;
+  evidenceId?: EvidenceId;
+  actionType: string;
+  agentOutputHash: string;
+  timestamp: IsoTimestamp;
+}
+
+export interface WalrusMemoryManifest {
+  schemaName: "memory_manifest";
+  schemaVersion: string;
+  packId: string;
+  createdAt: IsoTimestamp;
+  evidenceRefs: Array<{
+    evidenceId: EvidenceId;
+    walrusBlobId: BlobId;
+    commitment: CommitmentHex;
+  }>;
+  agentOutputHashes: Array<{
+    schemaName: string;
+    schemaVersion: string;
+    outputHash: string;
+  }>;
+  findingHashes: string[];
+  auditPackMeta: {
+    owner: WalletAddress;
+    auditor?: WalletAddress;
+  };
 }

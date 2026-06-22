@@ -1,3 +1,6 @@
+import { decryptJson, encryptJson, deserializeEncryptedPayload, serializeEncryptedPayload } from "./crypto.js";
+import type { WalrusMemoryManifest } from "./types.js";
+
 export const WALRUS_HTTP_ENDPOINTS = {
   testnet: {
     publisher: "https://publisher.walrus-testnet.walrus.space",
@@ -184,4 +187,106 @@ function isAlreadyCertifiedResponse(payload: unknown): payload is AlreadyCertifi
 
 function stripTrailingSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+// Memory artifact helpers: upload/read encrypted or plain-JSON memory manifests
+// and agent output artifacts using the existing WalrusClient (for encrypt path
+// we leverage crypto encryptJson + serialize, then the client's uploadEncryptedBlob).
+
+export async function uploadEncryptedMemoryManifest(
+  walrus: WalrusClient,
+  manifest: WalrusMemoryManifest,
+  key: CryptoKey,
+  options: Partial<UploadEncryptedBlobInput> = {},
+): Promise<WalrusUploadResult> {
+  const encrypted = await encryptJson(manifest, key);
+  const serialized = serializeEncryptedPayload(encrypted);
+  const content = new TextEncoder().encode(JSON.stringify(serialized));
+  return walrus.uploadEncryptedBlob({
+    encryptedContent: content,
+    ...options,
+  });
+}
+
+export async function readEncryptedMemoryManifest(
+  walrus: WalrusClient,
+  blobId: string,
+  key: CryptoKey,
+): Promise<WalrusMemoryManifest> {
+  const buffer = await walrus.readEncryptedBlob(blobId);
+  const serialized = JSON.parse(new TextDecoder().decode(buffer)) as any;
+  const payload = deserializeEncryptedPayload(serialized);
+  return decryptJson<WalrusMemoryManifest>(payload, key);
+}
+
+export async function uploadJsonMemoryManifest(
+  walrus: WalrusClient,
+  manifest: WalrusMemoryManifest,
+  options: Partial<UploadEncryptedBlobInput> = {},
+): Promise<WalrusUploadResult> {
+  const json = JSON.stringify(manifest);
+  const content = new TextEncoder().encode(json);
+  return walrus.uploadEncryptedBlob({
+    encryptedContent: content,
+    ...options,
+  });
+}
+
+export async function readJsonMemoryManifest(
+  walrus: WalrusClient,
+  blobId: string,
+): Promise<WalrusMemoryManifest> {
+  const buffer = await walrus.readEncryptedBlob(blobId);
+  const json = new TextDecoder().decode(buffer);
+  return JSON.parse(json) as WalrusMemoryManifest;
+}
+
+// Same for agent output artifacts (generic to support any validated artifact shape).
+
+export async function uploadEncryptedAgentArtifact<T>(
+  walrus: WalrusClient,
+  artifact: T,
+  key: CryptoKey,
+  options: Partial<UploadEncryptedBlobInput> = {},
+): Promise<WalrusUploadResult> {
+  const encrypted = await encryptJson(artifact, key);
+  const serialized = serializeEncryptedPayload(encrypted);
+  const content = new TextEncoder().encode(JSON.stringify(serialized));
+  return walrus.uploadEncryptedBlob({
+    encryptedContent: content,
+    ...options,
+  });
+}
+
+export async function readEncryptedAgentArtifact<T>(
+  walrus: WalrusClient,
+  blobId: string,
+  key: CryptoKey,
+): Promise<T> {
+  const buffer = await walrus.readEncryptedBlob(blobId);
+  const serialized = JSON.parse(new TextDecoder().decode(buffer)) as any;
+  const payload = deserializeEncryptedPayload(serialized);
+  return decryptJson<T>(payload, key);
+}
+
+export async function uploadJsonAgentArtifact<T>(
+  walrus: WalrusClient,
+  artifact: T,
+  options: Partial<UploadEncryptedBlobInput> = {},
+): Promise<WalrusUploadResult> {
+  const json = JSON.stringify(artifact);
+  const content = new TextEncoder().encode(json);
+  return walrus.uploadEncryptedBlob({
+    encryptedContent: content,
+    ...options,
+  });
+}
+
+export async function readJsonAgentArtifact<T>(
+  walrus: WalrusClient,
+  blobId: string,
+): Promise<T> {
+  const buffer = await walrus.readEncryptedBlob(blobId);
+  const json = new TextDecoder().decode(buffer);
+  return JSON.parse(json) as T;
 }

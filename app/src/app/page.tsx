@@ -1,1536 +1,1110 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import {
-  createAttestationFlow,
-  createRegisterEvidenceFlow,
-  createVerifyEvidenceFlow,
-  generateEncryptionKey,
-  type AssertionId,
-  type AttestationType,
-  type ExecuteTransactionBlockInput,
-  type JsonValue,
-  type SourceConfidenceLevel,
-  type SuiObjectReadOptions,
-} from "@linow/sdk";
-import { useWalletBridge } from "@/lib/wallet-context";
+import Link from "next/link";
+import "./landing.css";
 
-type RecordStatus = "Registered" | "Superseded";
-type ViewId = "register" | "verify" | "attest" | "records";
-
-interface AttestationSummary {
-  id: string;
-  action: string;
-  reviewer: string;
-  note: string;
-  txDigest: string;
-  createdAt: string;
-}
-
-interface EvidenceRecord {
-  id: string;
-  date: string;
-  type: string;
-  source: string;
-  commitment: string;
-  status: RecordStatus;
-  blobId: string;
-  assertions: string[];
-  reviewer: string;
-  notes: string;
-  fileSize?: string;
-  fileName?: string;
-  sourceFile?: File;
-  latestAttestation?: AttestationSummary;
-}
-
-interface ProgressStep {
-  label: string;
-  status: "pending" | "running" | "done" | "error";
-  detail?: string;
-}
-
-interface RegisterResult {
-  objectId: string;
-  txDigest: string;
-  blobId: string;
-  commitment: string;
-  encryptedFileSize: string;
-  encryptedMetadataSize: string;
-  sourceConfidence: string;
-}
-
-interface VerificationSession {
-  evidenceId: string;
-  status: "success" | "tampered";
-  checkedFileLabel: string;
-  checkedAt: string;
-}
-
-interface ProofArtifactsSnapshot {
-  evidenceId?: string;
-  txDigest?: string;
-  packageId?: string;
-  commitment?: string;
-  blobReference?: string;
-  attestationId?: string;
-  verificationStatus?: "success" | "tampered";
-  checkedFileLabel?: string;
-  updatedAt: string;
-}
-
-const ISA_ASSERTIONS = [
-  "Existence",
-  "Completeness",
-  "Valuation",
-  "Rights & Obligations",
-  "Cut-off",
-  "Classification",
-  "Occurrence",
-  "Accuracy",
+const benefitsNodes = [
+  {
+    id: 0,
+    role: "company" as const,
+    title: "Automated prep",
+    shortDesc: "Scan, categorize, and check gap coverage.",
+    detail: "Linow scans your folders, classifies contracts and bank statements, and flags assertion gaps before the audit begins.",
+    label: "Automated Prep",
+    x: 30,
+    y: 23,
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+      </svg>
+    )
+  },
+  {
+    id: 1,
+    role: "company" as const,
+    title: "Private commitments",
+    shortDesc: "Register file hashes locally.",
+    detail: "Your sensitive files stay local. We only register secure cryptographic hashes on-chain to guarantee absolute confidentiality.",
+    label: "Private Hashes",
+    x: 18,
+    y: 50,
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.599-3.75A11.902 11.902 0 0112 5.715z" />
+      </svg>
+    )
+  },
+  {
+    id: 2,
+    role: "company" as const,
+    title: "Instant readiness checks",
+    shortDesc: "Spot missing signatures and incomplete files.",
+    detail: "See your readiness score instantly. Spot missing signatures or incomplete files before writing anything to the blockchain.",
+    label: "Readiness Check",
+    x: 30,
+    y: 77,
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v5.25c0 .621-.504 1.125-1.125 1.125h-2.25A1.125 1.125 0 013 18.375v-5.25zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125v-9.75zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v14.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+      </svg>
+    )
+  },
+  {
+    id: 3,
+    role: "auditor" as const,
+    title: "Tamper-detection",
+    shortDesc: "Compare document hashes with ledger anchors.",
+    detail: "Verify file integrity in seconds. Linow automatically compares document hashes against Sui ledger anchors to flag any tampering.",
+    label: "Tamper-Proof",
+    x: 70,
+    y: 23,
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.637 10.637z" />
+      </svg>
+    )
+  },
+  {
+    id: 4,
+    role: "auditor" as const,
+    title: "Wallet attestations",
+    shortDesc: "Sign records directly to the Sui ledger.",
+    detail: "Attest with your wallet. Sign off on verified records directly to the Sui ledger, building a permanent, verifiable review trail.",
+    label: "Attestations",
+    x: 82,
+    y: 50,
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+      </svg>
+    )
+  },
+  {
+    id: 5,
+    role: "auditor" as const,
+    title: "Reasoning history",
+    shortDesc: "Replay agent categorization and decisions.",
+    detail: "Replay agent reasoning step-by-step. Get a transparent timeline showing how documents were categorized and when they were approved.",
+    label: "Reasoning Path",
+    x: 70,
+    y: 77,
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+      </svg>
+    )
+  }
 ];
 
-const PACKAGE_ID =
-  process.env.NEXT_PUBLIC_LINOW_PACKAGE_ID ??
-  "0x6b800d28cc87423198e6b35516885f9c6155a680424ac28aa47f59eabd2994d5";
+export default function LandingPage() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const stickyTrackRef = useRef<HTMLDivElement>(null);
+  
+  // Pipeline column refs
+  const pcolPrepRef = useRef<HTMLDivElement>(null);
+  const pcolStorageRef = useRef<HTMLDivElement>(null);
+  const pcolRegistryRef = useRef<HTMLDivElement>(null);
+  const pcolReviewRef = useRef<HTMLDivElement>(null);
+  
+  // Pipeline card refs for animation
+  const pcardUploadRef = useRef<HTMLDivElement>(null);
+  const pcardHashRef = useRef<HTMLDivElement>(null);
+  const pcardEncryptRef = useRef<HTMLDivElement>(null);
+  const pcardWalrusRef = useRef<HTMLDivElement>(null);
+  const pcardSuiRef = useRef<HTMLDivElement>(null);
+  const pcardVerifyRef = useRef<HTMLDivElement>(null);
+  const pcardAttestRef = useRef<HTMLDivElement>(null);
+  
+  const introExplanationRef = useRef<HTMLDivElement>(null);
+  
+  // Card elements references for explanations
+  const cardRefs = [
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null),
+    useRef<HTMLDivElement>(null),
+  ];
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  // We can track scroll state to handle navbar styling transitions
+  const [isScrolled, setIsScrolled] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [simPhase, setSimPhase] = useState(0);
 
-const VIEWS: {
-  id: ViewId;
-  label: string;
-  eyebrow: string;
-  title: string;
-  desc: string;
-  icon: React.ReactNode;
-}[] = [
-  {
-    id: "register",
-    label: "Upload Evidence",
-    eyebrow: "Company Portal",
-    title: "Register Audit Evidence",
-    desc: "Upload a document, hash it locally, encrypt it client-side, and prepare proof outputs for the chain flow.",
-    icon: (
-      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-      </svg>
-    ),
-  },
-  {
-    id: "verify",
-    label: "Verify Evidence",
-    eyebrow: "Verification Engine",
-    title: "Verify Evidence & Detect Tampering",
-    desc: "Compare a supplied file against the recorded commitment and surface tamper results clearly.",
-    icon: (
-      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-      </svg>
-    ),
-  },
-  {
-    id: "attest",
-    label: "Create Attestation",
-    eyebrow: "Auditor Workspace",
-    title: "Review & Attest Evidence",
-    desc: "Prepare a reviewer action after integrity checks are complete and record a separate attestation result.",
-    icon: (
-      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-      </svg>
-    ),
-  },
-  {
-    id: "records",
-    label: "Evidence Records",
-    eyebrow: "Registry",
-    title: "Evidence Registry",
-    desc: "Review the in-session evidence records and move directly into verification or attestation flows.",
-    icon: (
-      <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-      </svg>
-    ),
-  },
-];
+  // Hexagonal Trust Web states
+  const [activeRole, setActiveRole] = useState<'company' | 'auditor'>('company');
+  const [activeNodeIndex, setActiveNodeIndex] = useState<number>(0);
+  
+  // Agent loop delay state
+  const [isPending, setIsPending] = useState(true);
 
-function truncateValue(value: string, visible = 18): string {
-  return value.length > visible ? `${value.substring(0, visible)}...` : value;
-}
+  // Mock workspace-demo browser mockup state
+  const [browserStep, setBrowserStep] = useState(0);
 
-function formatMegabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function toSourceLabel(source: string): string {
-  const trimmed = source.trim();
-
-  if (!trimmed) {
-    return "Company Upload (L2)";
-  }
-
-  return trimmed.includes("(L") ? trimmed : `${trimmed} (L2)`;
-}
-
-function toAssertionId(assertion: string): AssertionId {
-  const index = ISA_ASSERTIONS.indexOf(assertion);
-
-  if (index < 0) {
-    throw new Error(`Unsupported ISA assertion: ${assertion}`);
-  }
-
-  return index as AssertionId;
-}
-
-function toAttestationType(action: string): AttestationType {
-  if (action === "IssueFlagged") {
-    return "rejected";
-  }
-
-  if (action === "EvidenceReviewed") {
-    return "evidenceVerified";
-  }
-
-  return "hashConfirmed";
-}
-
-function toAttestationLabel(value: AttestationType): string {
-  const labels: Record<AttestationType, string> = {
-    evidenceVerified: "Evidence reviewed",
-    packReviewed: "Pack reviewed",
-    hashConfirmed: "Hash confirmed",
-    rejected: "Issue flagged",
-  };
-
-  return labels[value];
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
-async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  const payload = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
-        ? payload.error
-        : `Request failed with HTTP ${response.status}.`,
-    );
-  }
-
-  return payload as TResponse;
-}
-
-const serverTatumExecute = {
-  executeTransactionBlock(input: ExecuteTransactionBlockInput) {
-    return postJson<JsonValue>("/api/sui/execute", input);
-  },
-};
-
-const serverTatumRead = {
-  getObject(objectId: string, options?: SuiObjectReadOptions) {
-    return postJson<JsonValue>("/api/sui/object", { objectId, options });
-  },
-};
-
-export default function Home() {
-  const wallet = useWalletBridge();
-  const [activeView, setActiveView] = useState<ViewId>("register");
-  const [isCompactViewport, setIsCompactViewport] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-  const [registry, setRegistry] = useState<EvidenceRecord[]>([]);
-
-  const [regFile, setRegFile] = useState<File | null>(null);
-  const [regDocType, setRegDocType] = useState("Bank Statement");
-  const [regSource, setRegSource] = useState("Company Upload (L2)");
-  const [regDesc, setRegDesc] = useState("");
-  const [regAssertions, setRegAssertions] = useState<string[]>(["Existence"]);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [registerError, setRegisterError] = useState<string | null>(null);
-  const [registerResult, setRegisterResult] = useState<RegisterResult | null>(null);
-
-  const [verifyRecordId, setVerifyRecordId] = useState(registry[0]?.id || "");
-  const [verifyFile, setVerifyFile] = useState<File | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationResult, setVerificationResult] = useState<{
-    status: "idle" | "success" | "tampered";
-    message: string;
-    computedHash?: string;
-    expectedHash?: string;
-    checkedFileLabel?: string;
-  }>({ status: "idle", message: "" });
-  const [lastVerificationSession, setLastVerificationSession] =
-    useState<VerificationSession | null>(null);
-
-  const [attestRecordId, setAttestRecordId] = useState(registry[1]?.id || "");
-  const [attestNotes, setAttestNotes] = useState("");
-  const [attestType, setAttestType] = useState("HashConfirmed");
-  const [isAttesting, setIsAttesting] = useState(false);
-  const [attestError, setAttestError] = useState<string | null>(null);
-  const [attestResult, setAttestResult] = useState<{
-    attestationId: string;
-    txDigest: string;
-    evidenceId: string;
-    reviewer: string;
-    action: string;
-    createdAt: string;
-  } | null>(null);
-
-  const [operationProgress, setOperationProgress] = useState<{
-    type: ViewId;
-    steps: ProgressStep[];
-  } | null>(null);
-  const [proofSnapshot, setProofSnapshot] = useState<ProofArtifactsSnapshot | null>(null);
-  const signerAddress = wallet.address ?? "";
-
-  const signTransaction = wallet.signTransaction;
+  const chatViewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 960px)");
-
-    const syncSidebar = (matchesCompact: boolean) => {
-      setIsCompactViewport(matchesCompact);
-      setIsSidebarOpen(!matchesCompact);
-    };
-
-    syncSidebar(mediaQuery.matches);
-
-    const handleChange = (event: MediaQueryListEvent) => syncSidebar(event.matches);
-
-    mediaQuery.addEventListener("change", handleChange);
-
-    return () => {
-      mediaQuery.removeEventListener("change", handleChange);
-    };
+    setIsLoaded(true);
+    
+    // Initial run to lay out elements correctly
+    handleScroll();
   }, []);
 
-  const handleSelectView = (viewId: ViewId) => {
-    setActiveView(viewId);
+  // Interval loop to cycle the workspace-demo mock animation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBrowserStep((prev) => (prev + 1) % 3);
+    }, 3800);
+    return () => clearInterval(interval);
+  }, []);
 
-    if (isCompactViewport) {
-      setIsSidebarOpen(false);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSimPhase((prev) => (prev + 1) % 4);
+    }, 4500);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (chatViewportRef.current) {
+      chatViewportRef.current.scrollTo({
+        top: chatViewportRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
+  }, [simPhase]);
+
+  useEffect(() => {
+    setIsPending(true);
+    const timer = setTimeout(() => {
+      setIsPending(false);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [simPhase]);
+
+  // Hexagon trust web auto-looping effect (cycles benefits within the currently active role)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveNodeIndex((prev) => {
+        if (activeRole === 'company') {
+          return (prev + 1) % 3;
+        } else {
+          const currentOffset = prev - 3;
+          const nextOffset = (currentOffset + 1) % 3;
+          return 3 + nextOffset;
+        }
+      });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [activeRole]);
+
+  const handleScroll = () => {
+    if (!containerRef.current || !stickyTrackRef.current) return;
+
+    const scrollTop = containerRef.current.scrollTop;
+    setIsScrolled(scrollTop > 50);
+
+    const clientHeight = containerRef.current.clientHeight;
+
+    const stickyTrack = stickyTrackRef.current;
+    const stickyTop = stickyTrack.offsetTop;
+    const stickyHeight = stickyTrack.offsetHeight;
+
+    // Local progress of the sticky section (0 to 1)
+    const stickyScrollRange = stickyHeight - clientHeight;
+    let localProgress = 0;
+    if (stickyScrollRange > 0) {
+      localProgress = (scrollTop - stickyTop) / stickyScrollRange;
+    }
+    
+    // Clamp progress
+    localProgress = Math.max(0, Math.min(1, localProgress));
+
+    requestAnimationFrame(() => {
+      animatePipeline(localProgress);
+      animateExplanations(localProgress);
+    });
   };
 
-  const handleToggleAssertion = (assertion: string) => {
-    setRegAssertions((prev) =>
-      prev.includes(assertion)
-        ? prev.filter((item) => item !== assertion)
-        : [...prev, assertion],
-    );
-  };
+  const animatePipeline = (progress: number) => {
+    const showIntro = progress < 0.08;
 
-  const resetRegisterDraft = () => {
-    setRegFile(null);
-    setRegDocType("Bank Statement");
-    setRegSource("Company Upload (L2)");
-    setRegDesc("");
-    setRegAssertions(["Existence"]);
-    setRegisterError(null);
-    setRegisterResult(null);
-    setOperationProgress((prev) => (prev?.type === "register" ? null : prev));
-  };
-
-  const handleRegister = async () => {
-    if (isRegistering) return;
-    if (!signerAddress) {
-      setRegisterError("Connect a Sui wallet before registering evidence.");
-      return;
-    }
-    if (!regFile) {
-      setRegisterError("Select a document before preparing the registration flow.");
-      return;
-    }
-    if (regAssertions.length === 0) {
-      setRegisterError("Select at least one ISA assertion for this evidence item.");
-      return;
-    }
-
-    setIsRegistering(true);
-    setRegisterError(null);
-    setRegisterResult(null);
-
-    const sourceLabel = toSourceLabel(regSource);
-    const metadata = {
-      fileName: regFile.name,
-      mediaType: regFile.type || "application/octet-stream",
-      documentType: regDocType,
-      description: regDesc || undefined,
-      claimedSource: sourceLabel,
-    };
-
-    const steps: ProgressStep[] = [
-      { label: "Computing SHA-256 hash", status: "pending" },
-      { label: "Encrypting file and metadata", status: "pending" },
-      { label: "Uploading encrypted blob to Walrus", status: "pending" },
-      { label: "Signing and submitting Sui registration", status: "pending" },
+    // 4 Columns matching 4 steps/scroll ranges
+    const cols = [
+      { ref: pcolPrepRef.current, start: 0.08, end: 0.31, cards: [pcardUploadRef, pcardHashRef] },
+      { ref: pcolStorageRef.current, start: 0.31, end: 0.54, cards: [pcardEncryptRef, pcardWalrusRef] },
+      { ref: pcolRegistryRef.current, start: 0.54, end: 0.77, cards: [pcardSuiRef] },
+      { ref: pcolReviewRef.current, start: 0.77, end: 1.01, cards: [pcardVerifyRef, pcardAttestRef] },
     ];
 
-    try {
-      steps[0].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      const encryptionKey = await generateEncryptionKey();
-      const registerEvidence = createRegisterEvidenceFlow({
-        packageId: PACKAGE_ID,
-        signerAddress,
-        signTransaction,
-        encryptionKey,
-        tatum: serverTatumExecute,
-        walrusNetwork: "testnet",
-        walrusPublisherUrl: process.env.NEXT_PUBLIC_WALRUS_PUBLISHER_URL,
-        walrusAggregatorUrl: process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL,
-      });
+    cols.forEach((col) => {
+      if (!col.ref) return;
+      
+      const isCompleted = !showIntro && progress >= col.end;
+      const isActive = !showIntro && progress >= col.start && progress < col.end;
 
-      steps[0] = {
-        ...steps[0],
-        status: "done",
-        detail: "Prepared locally",
-      };
-
-      steps[1].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      steps[1] = {
-        ...steps[1],
-        status: "done",
-        detail: "AES-GCM ready",
-      };
-
-      steps[2].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      const result = await registerEvidence({
-        content: regFile,
-        metadata,
-        assertions: regAssertions.map(toAssertionId),
-        signerAddress,
-      });
-      const commitment = result.evidence.commitment;
-      const blobId = result.evidence.blobId ?? result.evidence.proof?.walrusBlobId ?? "n/a";
-      const objectId = result.evidence.id;
-      const txDigest = result.transactionDigest ?? result.evidence.proof?.transactionDigest ?? "n/a";
-      const registeredAt = result.evidence.registeredAt ?? new Date().toISOString();
-
-      steps[2] = {
-        ...steps[2],
-        status: "done",
-        detail: truncateValue(blobId, 22),
-      };
-
-      steps[3].status = "running";
-      setOperationProgress({ type: "register", steps: [...steps] });
-      steps[3] = {
-        ...steps[3],
-        status: "done",
-        detail: txDigest,
-      };
-      setOperationProgress({ type: "register", steps: [...steps] });
-
-      const registeredAtLabel = registeredAt.replace("T", " ").substring(0, 16);
-      const newRecord: EvidenceRecord = {
-        id: objectId,
-        date: registeredAtLabel,
-        type: regDocType,
-        source: sourceLabel,
-        commitment,
-        status: "Registered",
-        blobId,
-        assertions: regAssertions,
-        reviewer: "n/a",
-        notes: regDesc || "No description provided.",
-        fileName: regFile.name,
-        fileSize: formatMegabytes(regFile.size),
-        sourceFile: regFile,
-      };
-
-      setRegistry((prev) => [
-        newRecord,
-        ...prev,
-      ]);
-      setVerifyRecordId(objectId);
-      setAttestRecordId(objectId);
-
-      setRegisterResult({
-        objectId,
-        txDigest,
-        blobId,
-        commitment,
-        encryptedFileSize: `${result.artifacts.encryptedFile.ciphertext.length} B`,
-        encryptedMetadataSize: `${result.artifacts.encryptedMetadata.ciphertext.length} B`,
-        sourceConfidence: "L2 - Company Upload",
-      });
-      setProofSnapshot({
-        evidenceId: objectId,
-        txDigest,
-        packageId: PACKAGE_ID,
-        commitment,
-        blobReference: blobId,
-        updatedAt: registeredAtLabel,
-      });
-    } catch (error) {
-      const message = getErrorMessage(error, "Registration failed while calling live infrastructure.");
-      setRegisterError(message);
-      setOperationProgress(null);
-    } finally {
-      setIsRegistering(false);
-    }
-  };
-
-  const resetVerifyDraft = () => {
-    setVerifyFile(null);
-    setVerificationResult({ status: "idle", message: "" });
-    setOperationProgress((prev) => (prev?.type === "verify" ? null : prev));
-  };
-
-  const resetAttestDraft = () => {
-    setAttestNotes("");
-    setAttestType("HashConfirmed");
-    setAttestError(null);
-    setAttestResult(null);
-    setOperationProgress((prev) => (prev?.type === "attest" ? null : prev));
-  };
-
-  const handleVerify = async () => {
-    if (!verifyRecordId || isVerifying) return;
-
-    setIsVerifying(true);
-    setVerificationResult({ status: "idle", message: "" });
-
-    const record = registry.find((item) => item.id === verifyRecordId);
-    if (!record) {
-      setIsVerifying(false);
-      return;
-    }
-
-    const sourceContent = verifyFile ?? record.sourceFile;
-    if (!sourceContent) {
-      setVerificationResult({
-        status: "tampered",
-        message: "Load the original evidence file before running live verification for this record.",
-      });
-      setIsVerifying(false);
-      return;
-    }
-
-    const steps: ProgressStep[] = [
-      { label: "Fetching on-chain EvidenceRecord", status: "pending" },
-      { label: "Preparing verification file", status: "pending" },
-      { label: "Computing comparison hash", status: "pending" },
-    ];
-
-    try {
-      steps[0].status = "running";
-      setOperationProgress({ type: "verify", steps: [...steps] });
-      const verifyEvidence = createVerifyEvidenceFlow({
-        tatum: serverTatumRead,
-        packageId: PACKAGE_ID,
-      });
-
-      steps[0] = {
-        ...steps[0],
-        status: "done",
-        detail: truncateValue(record.id, 14),
-      };
-
-      steps[1].status = "running";
-      setOperationProgress({ type: "verify", steps: [...steps] });
-      const checkedFileLabel = sourceContent.name || record.fileName || "Evidence file";
-      steps[1] = {
-        ...steps[1],
-        status: "done",
-        detail: checkedFileLabel,
-      };
-
-      steps[2].status = "running";
-      setOperationProgress({ type: "verify", steps: [...steps] });
-      const result = await verifyEvidence({
-        evidenceId: verifyRecordId,
-        content: sourceContent,
-      });
-      const checkedAt = result.checkedAt.replace("T", " ").substring(0, 16);
-
-      if (result.isMatch) {
-        steps[2] = {
-          ...steps[2],
-          status: "done",
-          detail: "Hash matches",
-        };
-        setOperationProgress({ type: "verify", steps: [...steps] });
-        setVerificationResult({
-          status: "success",
-          message:
-            "Hash matches the recorded Sui commitment. The supplied file is consistent with the evidence record.",
-          computedHash: result.actualCommitment,
-          expectedHash: result.expectedCommitment,
-          checkedFileLabel,
-        });
-        setLastVerificationSession({
-          evidenceId: verifyRecordId,
-          status: "success",
-          checkedFileLabel,
-          checkedAt,
-        });
-        setProofSnapshot((prev) => ({
-          evidenceId: verifyRecordId,
-          txDigest: prev?.txDigest,
-          packageId: PACKAGE_ID,
-          commitment: result.expectedCommitment,
-          blobReference: result.evidence?.blobId ?? record.blobId,
-          attestationId: prev?.attestationId,
-          verificationStatus: "success",
-          checkedFileLabel,
-          updatedAt: checkedAt,
-        }));
-        setAttestRecordId(verifyRecordId);
+      if (isCompleted) {
+        col.ref.classList.add("completed");
+        col.ref.classList.remove("active");
+      } else if (isActive) {
+        col.ref.classList.add("active");
+        col.ref.classList.remove("completed");
       } else {
-        const checkedAt = result.checkedAt.replace("T", " ").substring(0, 16);
-        steps[2] = {
-          ...steps[2],
-          status: "error",
-          detail: "Tamper detected",
-        };
-        setOperationProgress({ type: "verify", steps: [...steps] });
-        setVerificationResult({
-          status: "tampered",
-          message:
-            "Tamper detected. The supplied file does not match the recorded Sui commitment for this evidence item.",
-          computedHash: result.actualCommitment,
-          expectedHash: result.expectedCommitment,
-          checkedFileLabel,
-        });
-        setLastVerificationSession({
-          evidenceId: verifyRecordId,
-          status: "tampered",
-          checkedFileLabel,
-          checkedAt,
-        });
-        setProofSnapshot((prev) => ({
-          evidenceId: verifyRecordId,
-          txDigest: prev?.txDigest,
-          packageId: PACKAGE_ID,
-          commitment: result.expectedCommitment,
-          blobReference: result.evidence?.blobId ?? record.blobId,
-          attestationId: prev?.attestationId,
-          verificationStatus: "tampered",
-          checkedFileLabel,
-          updatedAt: checkedAt,
-        }));
+        col.ref.classList.remove("active", "completed");
       }
-    } catch (error) {
-      steps[2] = {
-        ...steps[2],
-        status: "error",
-        detail: "Verification failed",
-      };
-      setOperationProgress({ type: "verify", steps: [...steps] });
-      setVerificationResult({
-        status: "tampered",
-        message: getErrorMessage(error, "Verification failed while calling live infrastructure."),
-        expectedHash: record.commitment,
+
+      col.cards.forEach((cardRef) => {
+        const cardEl = cardRef.current;
+        if (!cardEl) return;
+        if (isCompleted) {
+          cardEl.classList.add("completed");
+          cardEl.classList.remove("active");
+        } else if (isActive) {
+          cardEl.classList.add("active");
+          cardEl.classList.remove("completed");
+        } else {
+          cardEl.classList.remove("active", "completed");
+        }
       });
-    } finally {
-      setIsVerifying(false);
-    }
+    });
+
   };
 
-  const handleAttest = async () => {
-    if (!attestRecordId || isAttesting) return;
-    if (!signerAddress) {
-      setAttestError("Connect a Sui wallet before creating an attestation.");
-      return;
-    }
-    if (
-      !lastVerificationSession ||
-      lastVerificationSession.evidenceId !== attestRecordId ||
-      lastVerificationSession.status !== "success"
-    ) {
-      return;
+  const animateExplanations = (progress: number) => {
+    const showIntro = progress < 0.08;
+    
+    if (introExplanationRef.current) {
+      if (showIntro) {
+        introExplanationRef.current.classList.add("active");
+      } else {
+        introExplanationRef.current.classList.remove("active");
+      }
     }
 
-    setIsAttesting(true);
-    setAttestError(null);
-    setAttestResult(null);
-
-    const steps: ProgressStep[] = [
-      { label: "Preparing reviewer statement", status: "pending" },
-      { label: "Preparing attestation proof", status: "pending" },
+    const stepThresholds = [
+      { start: 0.08, end: 0.31 },
+      { start: 0.31, end: 0.54 },
+      { start: 0.54, end: 0.77 },
+      { start: 0.77, end: 1.01 },
     ];
 
-    try {
-      steps[0].status = "running";
-      setOperationProgress({ type: "attest", steps: [...steps] });
-      const encryptionKey = await generateEncryptionKey();
-      const createAttestation = createAttestationFlow({
-        packageId: PACKAGE_ID,
-        signerAddress,
-        signTransaction,
-        encryptionKey,
-        tatum: serverTatumExecute,
-      });
-      const attestationType = toAttestationType(attestType);
-      steps[0] = {
-        ...steps[0],
-        status: "done",
-        detail: toAttestationLabel(attestationType),
-      };
+    cardRefs.forEach((ref, index) => {
+      const el = ref.current;
+      if (!el) return;
 
-      steps[1].status = "running";
-      setOperationProgress({ type: "attest", steps: [...steps] });
-      const result = await createAttestation({
-        evidenceId: attestRecordId,
-        reviewerAddress: signerAddress,
-        attestationType,
-        sourceConfidence: "L3" satisfies SourceConfidenceLevel,
-        note: attestNotes || "Attested via Linow Workspace.",
-      });
-      const attestationId = result.attestation.id;
-      const txDigest = result.attestation.transactionDigest ?? "n/a";
-      const createdAt = result.attestation.createdAt.replace("T", " ").substring(0, 16);
+      const threshold = stepThresholds[index];
+      const active = !showIntro && progress >= threshold.start && progress < threshold.end;
 
-      steps[1] = {
-        ...steps[1],
-        status: "done",
-        detail: txDigest,
-      };
-      setOperationProgress({ type: "attest", steps: [...steps] });
-
-      setRegistry((prev) =>
-        prev.map((record) =>
-          record.id === attestRecordId
-            ? {
-                ...record,
-                reviewer: signerAddress,
-                notes: attestNotes || "Attested via Linow Workspace.",
-                latestAttestation: {
-                  id: attestationId,
-                  action: toAttestationLabel(attestationType),
-                  reviewer: signerAddress,
-                  note: attestNotes || "Attested via Linow Workspace.",
-                  txDigest,
-                  createdAt,
-                },
-              }
-            : record,
-        ),
-      );
-
-      setAttestResult({
-        attestationId,
-        txDigest,
-        evidenceId: attestRecordId,
-        reviewer: signerAddress,
-        action: toAttestationLabel(attestationType),
-        createdAt,
-      });
-      const attestedRecord = registry.find((record) => record.id === attestRecordId);
-      setProofSnapshot((prev) => ({
-        evidenceId: attestRecordId,
-        txDigest,
-        packageId: PACKAGE_ID,
-        commitment: attestedRecord?.commitment || prev?.commitment,
-        blobReference: attestedRecord?.blobId || prev?.blobReference,
-        attestationId,
-        verificationStatus: prev?.verificationStatus,
-        checkedFileLabel: prev?.checkedFileLabel,
-        updatedAt: createdAt,
-      }));
-    } catch (error) {
-      setAttestError(getErrorMessage(error, "Attestation failed while calling live infrastructure."));
-      setOperationProgress(null);
-    } finally {
-      setIsAttesting(false);
-    }
+      if (active) {
+        el.classList.add("active");
+      } else {
+        el.classList.remove("active");
+      }
+    });
   };
-
-  const renderSteps = (viewType: ViewId) => {
-    if (!operationProgress || operationProgress.type !== viewType) return null;
-
-    return (
-      <div className="progress-card">
-        <div className="progress-title">Operation Progress</div>
-        <div className="progress-steps">
-          {operationProgress.steps.map((step, index) => (
-            <div key={`${step.label}-${index}`} className="step">
-              <div className={`step-icon ${step.status}`}>
-                {step.status === "done" && (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-                {step.status === "running" && <div className="spinner" />}
-                {step.status === "pending" && (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="8" />
-                  </svg>
-                )}
-                {step.status === "error" && (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-              </div>
-              <span className="step-label">{step.label}</span>
-              {step.detail && <span className="step-detail">{step.detail}</span>}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const currentView = VIEWS.find((view) => view.id === activeView) ?? VIEWS[0];
-  const selectedRecordVerified =
-    lastVerificationSession?.evidenceId === attestRecordId &&
-    lastVerificationSession.status === "success";
-  const selectedRecordTampered =
-    lastVerificationSession?.evidenceId === attestRecordId &&
-    lastVerificationSession.status === "tampered";
-  const showProofSnapshot = proofSnapshot && activeView !== "records";
 
   return (
-    <main className="app-container">
-      <header className="topbar">
-        <div className="topbar-left">
-          <button
-            type="button"
-            className="sidebar-toggle"
-            aria-label={isSidebarOpen ? "Collapse navigation" : "Expand navigation"}
-            aria-expanded={isSidebarOpen}
-            suppressHydrationWarning
-            onClick={() => setIsSidebarOpen((prev) => !prev)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h16M4 17h16" />
-            </svg>
-          </button>
-          <div className="topbar-logo-wrap">
-            <Image className="topbar-logo" src="/mascot.png" alt="Linow mascot" width={22} height={22} priority />
-          </div>
-          <div className="topbar-brand-block">
-            <span className="topbar-brand">Linow</span>
-            <span className="topbar-badge">TESTNET v0.1</span>
+    <div
+      className="landing-wrapper"
+      ref={containerRef}
+      onScroll={handleScroll}
+    >
+      {/* Background decoration grid overlays */}
+      <div className="landing-grid-overlay" />
+
+      {/* Navigation Bar */}
+      <nav className={`landing-nav ${isScrolled ? "scrolled" : ""}`}>
+        <Link href="/" className="nav-brand">
+          <Image
+            className="nav-logo-img"
+            src="/icon.png"
+            alt="Linow logo"
+            width={24}
+            height={24}
+            priority
+          />
+          <span>Linow</span>
+        </Link>
+
+        {/* Floating center links pill */}
+        <div className="nav-pill-wrapper">
+          <div className="nav-pill-container">
+            <a href="#how-it-works" className="nav-pill-link" onClick={(e) => {
+              e.preventDefault();
+              stickyTrackRef.current?.scrollIntoView({ behavior: "smooth" });
+            }}>
+              How It Works
+            </a>
+
+            <span className="nav-pill-separator">|</span>
+            <a href="#benefits" className="nav-pill-link" onClick={(e) => {
+              e.preventDefault();
+              const el = document.getElementById("benefits");
+              el?.scrollIntoView({ behavior: "smooth" });
+            }}>
+              Benefits
+            </a>
           </div>
         </div>
-        <div className="topbar-right">
-          <div className="topbar-status">
-            <span className="status-dot" />
-            <span>{signerAddress ? `Connected ${truncateValue(signerAddress, 14)}` : "Connect wallet for live Sui proofs"}</span>
+
+        <div className="nav-right-group">
+          <Link href="/workspace" className="nav-login-link">
+            Log in
+          </Link>
+          <button className="nav-cta-btn" disabled>
+            Coming soon
+          </button>
+        </div>
+      </nav>
+
+      {/* Hero Section with Scenic Backdrop placeholder */}
+      <header className="landing-hero">
+        <div className="hero-content">
+          <h1 className="hero-title">
+            Linow lets you run continuous pre-audits with co-auditor agents
+          </h1>
+          <p className="hero-subtitle">
+            Point Linow to your directories. Our browser co-auditor classifies evidence, checks assertion gaps, and stages verification logs. You control the keys, the agent proposes the facts, the chain proves the history.
+          </p>
+          
+          <div className="hero-cta-group">
+            <button className="hero-cta-primary" disabled>
+              Coming soon
+            </button>
+            <a href="#how-it-works" className="hero-cta-secondary" onClick={(e) => {
+              e.preventDefault();
+              stickyTrackRef.current?.scrollIntoView({ behavior: "smooth" });
+            }}>
+              Explore Architecture
+            </a>
           </div>
-          <div className="topbar-divider" />
-          <div className="topbar-encryption">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0110 0v4" />
-            </svg>
-            <span>AES-256-GCM</span>
-          </div>
-          <div className="topbar-wallet">{wallet.connectButton}</div>
         </div>
       </header>
+ 
+      {/* Meet Linow & Workspace Mockup Section */}
+      <section className="landing-meet-section" id="meet-linow">
+        <div className="meet-content">
+          <h2 className="meet-title">
+            Stop hunting down bank statements and contract PDFs. Linow scans your directories, maps documents to required assertions, and catches compliance gaps before your auditors do.
+          </h2>
+        </div>
 
-      <div
-        className={`app-body${isCompactViewport ? " is-compact" : ""}${isSidebarOpen ? " sidebar-open" : " sidebar-collapsed"}`}
-      >
-        {isCompactViewport && isSidebarOpen && (
-          <button
-            type="button"
-            className="sidebar-backdrop"
-            aria-label="Close navigation"
-            suppressHydrationWarning
-            onClick={() => setIsSidebarOpen(false)}
-          />
-        )}
-
-        <aside className="sidebar">
-          <div className="sidebar-section">
-            <div className="sidebar-section-label">Evidence Flows</div>
-            <nav className="sidebar-nav">
-              {VIEWS.map((view) => (
-                <div
-                  key={view.id}
-                  className={`nav-item${activeView === view.id ? " active" : ""}`}
-                  onClick={() => handleSelectView(view.id)}
-                >
-                  {view.icon}
-                  <span className="nav-text">{view.label}</span>
-                  {view.id === "records" && <span className="nav-count">{registry.length}</span>}
-                </div>
-              ))}
-            </nav>
-          </div>
-
-          <div className="sidebar-footer">
-            <div className="guardrails-block">
-              <div className="guardrails-title">Guardrails</div>
-              <ul className="guardrails-list">
-                <li>Commitments come from SHA-256 of the plaintext file.</li>
-                <li>Sui stores commitments and attestations, not raw evidence.</li>
-                <li>Walrus blobs must stay encrypted before storage.</li>
-                <li>Live proof outputs come from the SDK, Tatum, Walrus, and Sui testnet.</li>
-              </ul>
+        {/* Workspace Browser Mockup Container */}
+        <div className="meet-browser-wrapper">
+          <div className="hero-browser-window">
+            <div className="browser-header">
+              <div className="browser-dots">
+                <span className="dot dot-red"></span>
+                <span className="dot dot-yellow"></span>
+                <span className="dot dot-green"></span>
+              </div>
+              <div className="browser-address">linow.xyz/workspace</div>
+              <div className="browser-actions">
+                <span className="action-dot"></span>
+              </div>
             </div>
-          </div>
-        </aside>
-
-        <section className="workspace">
-          <div className="workspace-header">
-            <div className="workspace-eyebrow">{currentView.eyebrow}</div>
-            <h1 className="workspace-title">{currentView.title}</h1>
-            <p className="workspace-desc">{currentView.desc}</p>
-          </div>
-
-          <div className="workspace-content">
-            {showProofSnapshot && proofSnapshot && (
-              <div className="result-card success">
-                <div className="result-header">
-                  <div className="result-heading">
-                    <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="result-title success">Proof Output Surface</span>
-                  </div>
-                  <button
-                    className="result-dismiss"
-                    type="button"
-                    suppressHydrationWarning
-                    aria-label="Dismiss proof output"
-                    onClick={() => setProofSnapshot(null)}
-                  >
-                    x
-                  </button>
+            
+            <div className="browser-viewport-content">
+              {/* Left sidebar rail - Matches /workspace-demo nav rail */}
+              <div className="mock-nav-rail">
+                <div className="mock-rail-logo">
+                  <span className="mock-logo-dot"></span>
                 </div>
-                <p className="result-message">
-                  Judge-facing artifacts from the latest live SDK action.
-                </p>
-                <div className="proof-grid">
-                  <div className="proof-row">
-                    <span className="proof-label">Evidence ID</span>
-                    <span className="proof-value">{truncateValue(proofSnapshot.evidenceId || "n/a", 28)}</span>
+                <div className="mock-rail-item active">
+                  <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+                  </svg>
+                </div>
+                <div className="mock-rail-item">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                  </svg>
+                </div>
+                <div className="mock-rail-item">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.599-3.75A11.902 11.902 0 0112 5.715z"/>
+                  </svg>
+                </div>
+                <div className="mock-rail-spacer"></div>
+                <div className="mock-rail-profile"></div>
+              </div>
+              
+              {/* Pane 1: File Directory / PBC Checklist - Matches /workspace-demo */}
+              <div className="mock-pane mock-pane-pbc">
+                <div className="mock-pane-header">
+                  <span className="mock-pane-title">File Directory</span>
+                  <span className="mock-pane-badge">{browserStep === 2 ? "2/3" : "1/3"} Files</span>
+                </div>
+                
+                <div className="mock-pbc-folder">
+                  <div className="mock-folder-header">
+                    <span className="mock-folder-arrow">▼</span>
+                    <span className="mock-folder-name">contracts_invoices</span>
                   </div>
-                  <div className="proof-row">
-                    <span className="proof-label">Tx Digest</span>
-                    <span className="proof-value">{proofSnapshot.txDigest || "n/a"}</span>
-                  </div>
-                  <div className="proof-row">
-                    <span className="proof-label">Package ID</span>
-                    <span className="proof-value">{truncateValue(proofSnapshot.packageId || "n/a", 28)}</span>
-                  </div>
-                  <div className="proof-row">
-                    <span className="proof-label">Commitment</span>
-                    <span className="proof-value">{truncateValue(proofSnapshot.commitment || "n/a", 28)}</span>
-                  </div>
-                  <div className="proof-row">
-                    <span className="proof-label">Blob Reference</span>
-                    <span className="proof-value">{truncateValue(proofSnapshot.blobReference || "n/a", 28)}</span>
-                  </div>
-                  <div className="proof-row">
-                    <span className="proof-label">Attestation ID</span>
-                    <span className="proof-value">{truncateValue(proofSnapshot.attestationId || "pending", 28)}</span>
-                  </div>
-                  <div className="proof-row">
-                    <span className="proof-label">Verification</span>
-                    <span className={`proof-value ${proofSnapshot.verificationStatus === "tampered" ? "error" : "success"}`}>
-                      {proofSnapshot.verificationStatus || "pending"}
-                    </span>
-                  </div>
-                  <div className="proof-row">
-                    <span className="proof-label">Updated At</span>
-                    <span className="proof-value">{proofSnapshot.updatedAt}</span>
+                  
+                  <div className="mock-file-list">
+                    {/* Item 1: Orion Contract */}
+                    <div className={`mock-file-item ${browserStep >= 0 ? "selected" : ""}`}>
+                      <span className="mock-file-icon">📄</span>
+                      <span className="mock-file-name">09_orion_contract.pdf</span>
+                      <span className={`mock-status-dot ${browserStep === 2 ? "registered" : browserStep === 1 ? "analyzing" : "idle"}`}></span>
+                    </div>
+
+                    {/* Item 2: June Bank Statement */}
+                    <div className="mock-file-item">
+                      <span className="mock-file-icon">📄</span>
+                      <span className="mock-file-name">13_bank_statement.pdf</span>
+                      <span className="mock-status-dot idle"></span>
+                    </div>
+
+                    {/* Item 3: April Invoice */}
+                    <div className="mock-file-item">
+                      <span className="mock-file-icon">📄</span>
+                      <span className="mock-file-name">10_invoice_0411.pdf</span>
+                      <span className="mock-status-dot idle"></span>
+                    </div>
                   </div>
                 </div>
               </div>
-            )}
-            {activeView === "register" && (
-              <>
-                <div className="card">
-                  <div className="card-section-title">Prepare Evidence Registration</div>
-                  <div className="form-grid">
-                    <div className="field">
-                      <label className="field-label">Select File</label>
-                      <div className={`file-upload${regFile ? " has-file" : ""}`}>
-                        <svg className="file-upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                        </svg>
-                        <div className="file-upload-text">
-                          <div className="file-upload-name">
-                            {regFile ? regFile.name : "Click to select document"}
-                          </div>
-                          <div className="file-upload-hint">
-                            {regFile
-                              ? `${(regFile.size / 1024).toFixed(1)} KB`
-                              : "Supports PDF, CSV, PNG, DOCX"}
-                          </div>
+
+              {/* Pane 2: Document Preview - Matches /workspace-demo */}
+              <div className="mock-pane mock-pane-preview">
+                <div className="mock-pane-header">
+                  <span className="mock-pane-title">Document Preview</span>
+                  <span className="mock-pane-subtitle">09_orion_contract.pdf</span>
+                </div>
+                
+                <div className="mock-preview-container">
+                  <div className="mock-preview-doc">
+                    <div className="mock-doc-title">CUSTOMER CONTRACT — ORION</div>
+                    <div className="mock-doc-divider"></div>
+                    
+                    <div className="mock-doc-line">
+                      <span>Contract Ref:</span> <strong>C-ORION-2026-019</strong>
+                    </div>
+                    <div className="mock-doc-line">
+                      <span>Effective Date:</span> <span>2026-03-28</span>
+                    </div>
+                    
+                    {/* Animate highlights */}
+                    <div className={`mock-doc-paragraph ${browserStep >= 1 ? "highlight-yellow" : ""}`}>
+                      <strong>Milestone 1:</strong> 50% implementation fee payable upon user acceptance testing (UAT) sign-off.
+                    </div>
+                    
+                    <div className={`mock-doc-paragraph ${browserStep >= 1 ? "highlight-blue" : ""}`}>
+                      <strong>Approval limit:</strong> Contracts above IDR 750,000,000 require Commercial Committee approval.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pane 3: Agent activity sandbox - Matches /workspace-demo */}
+              <div className="mock-pane mock-pane-agent">
+                <div className="mock-pane-header">
+                  <span className="mock-pane-title">Agent Activities</span>
+                  <span className="mock-pane-status active">active</span>
+                </div>
+                
+                <div className="mock-agent-container">
+                  <div className="mock-agent-activity">
+                    <span className="mock-agent-header">classification & assertions</span>
+                    
+                    <div className="mock-log-box">
+                      {browserStep >= 0 && (
+                        <div className="mock-log-item success">
+                          <span className="mock-log-check">✔</span> Read file target successfully
                         </div>
-                        <input
-                          type="file"
-                          className="file-upload-input"
-                          suppressHydrationWarning
-                          onChange={(event) => {
-                            if (event.target.files?.[0]) {
-                              setRegFile(event.target.files[0]);
-                              setRegisterError(null);
-                            }
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="field">
-                      <label className="field-label">Document Type</label>
-                      <select
-                        className="field-select"
-                        value={regDocType}
-                        suppressHydrationWarning
-                        onChange={(event) => setRegDocType(event.target.value)}
-                      >
-                        <option>Bank Statement</option>
-                        <option>Vendor Contract</option>
-                        <option>Sales Invoice</option>
-                        <option>ERP Ledger Export</option>
-                        <option>Board Resolution</option>
-                      </select>
-
-                      <label className="field-label" style={{ marginTop: "0.75rem" }}>
-                        Claimed Source
-                      </label>
-                      <input
-                        type="text"
-                        className="field-input"
-                        value={regSource}
-                        suppressHydrationWarning
-                        onChange={(event) => setRegSource(event.target.value)}
-                        placeholder="e.g. Company Upload (L2)"
-                      />
-                    </div>
-
-                    <div className="field form-full">
-                      <label className="field-label">Description / Audit Objective</label>
-                      <textarea
-                        className="field-textarea"
-                        rows={2}
-                        value={regDesc}
-                        suppressHydrationWarning
-                        onChange={(event) => setRegDesc(event.target.value)}
-                        placeholder="e.g. Verification of Q2 bank reconciliation to support existence and accuracy."
-                      />
-                    </div>
-
-                    <div className="field form-full">
-                      <label className="field-label">ISA Assertions Covered</label>
-                      <div className="assertions-grid">
-                        {ISA_ASSERTIONS.map((assertion) => (
-                          <div
-                            key={assertion}
-                            className={`assertion-chip${regAssertions.includes(assertion) ? " selected" : ""}`}
-                            onClick={() => handleToggleAssertion(assertion)}
-                          >
-                            {assertion}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="btn-actions">
-                    <button
-                      className="btn-primary"
-                      disabled={isRegistering || !signerAddress || !regFile || regAssertions.length === 0}
-                      suppressHydrationWarning
-                      onClick={handleRegister}
-                    >
-                      {isRegistering ? (
+                      )}
+                      
+                      {browserStep >= 1 ? (
                         <>
-                          <span className="spinner" />
-                          <span>Preparing Proof...</span>
+                          <div className="mock-log-item success">
+                            <span className="mock-log-check">✔</span> Classified: customer_contract
+                          </div>
+                          <div className={`mock-log-item ${browserStep === 1 ? "running" : "success"}`}>
+                            <span className="mock-log-check">{browserStep === 1 ? "⎔" : "✔"}</span> Mapping assertions: Occurrence, Accuracy
+                          </div>
                         </>
                       ) : (
-                        "Upload & Register Evidence"
-                      )}
-                    </button>
-                    <button className="btn-secondary" suppressHydrationWarning onClick={resetRegisterDraft}>
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                {registerError && (
-                  <div className="result-card error">
-                    <div className="result-header">
-                      <svg className="result-icon error" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                      <span className="result-title error">Registration Blocked</span>
-                    </div>
-                    <p className="result-message">{registerError}</p>
-                  </div>
-                )}
-
-                {renderSteps("register")}
-
-                {registerResult && (
-                  <div className="result-card success">
-                    <div className="result-header">
-                      <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span className="result-title success">Registration Flow Prepared</span>
-                    </div>
-                    <p className="result-message">
-                      File hashing, encryption, Walrus storage, and Sui registration completed through the live SDK flow.
-                    </p>
-                    <div className="proof-grid">
-                      <div className="proof-row">
-                        <span className="proof-label">Evidence ID</span>
-                        <span className="proof-value">{truncateValue(registerResult.objectId, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Tx Digest</span>
-                        <span className="proof-value">{registerResult.txDigest}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Package ID</span>
-                        <span className="proof-value">{truncateValue(PACKAGE_ID, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Walrus Blob</span>
-                        <span className="proof-value">{truncateValue(registerResult.blobId, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Commitment</span>
-                        <span className="proof-value">{truncateValue(registerResult.commitment, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Encrypted File</span>
-                        <span className="proof-value">{registerResult.encryptedFileSize}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Encrypted Metadata</span>
-                        <span className="proof-value">{registerResult.encryptedMetadataSize}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Source Confidence</span>
-                        <span className="proof-value">{registerResult.sourceConfidence}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {activeView === "verify" && (
-              <>
-                <div className="card">
-                  <div className="card-section-title">Verify Evidence Integrity</div>
-                  <div className="form-grid">
-                    <div className="field">
-                      <label className="field-label">Select Evidence Record</label>
-                      <select
-                        className="field-select"
-                        value={verifyRecordId}
-                        suppressHydrationWarning
-                        onChange={(event) => setVerifyRecordId(event.target.value)}
-                      >
-                        <option value="">-- Choose registered record --</option>
-                        {registry.map((record) => (
-                          <option key={record.id} value={record.id}>
-                            {record.type} - {truncateValue(record.id, 10)} ({record.date})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="field">
-                      <label className="field-label">Verification File</label>
-                      <div className={`file-upload${verifyFile ? " has-file" : ""}`}>
-                        <svg className="file-upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <div className="file-upload-text">
-                          <div className="file-upload-name">
-                            {verifyFile ? verifyFile.name : "Click to load comparison file"}
-                          </div>
-                          <div className="file-upload-hint">
-                            {verifyFile
-                              ? `${(verifyFile.size / 1024).toFixed(1)} KB`
-                              : "Optional for shell verification"}
-                          </div>
+                        <div className="mock-log-item running">
+                          <span className="mock-log-check">⎔</span> Awaiting document scan...
                         </div>
-                        <input
-                          type="file"
-                          className="file-upload-input"
-                          suppressHydrationWarning
-                          onChange={(event) => {
-                            if (event.target.files?.[0]) {
-                              setVerifyFile(event.target.files[0]);
-                            }
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                      )}
 
-                  <div className="tamper-toggle">
-                    <div className="tamper-info">
-                      <div className="tamper-title">File comparison</div>
-                      <div className="tamper-desc">
-                        Verify the selected file against the recorded commitment. Use the original CSV to confirm a match, or upload your edited copy to confirm tamper detection.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="btn-actions">
-                    <button
-                      className="btn-primary"
-                      disabled={isVerifying || !verifyRecordId}
-                      suppressHydrationWarning
-                      onClick={handleVerify}
-                    >
-                      {isVerifying ? (
+                      {browserStep === 2 && (
                         <>
-                          <span className="spinner" />
-                          <span>Verifying...</span>
+                          <div className="mock-log-item success">
+                            <span className="mock-log-check">✔</span> Registered hash on Sui Ledger
+                          </div>
+                          <div className="mock-log-item success">
+                            <span className="mock-log-check">✔</span> Synced blob to Supabase Demo
+                          </div>
                         </>
-                      ) : (
-                        "Verify"
                       )}
-                    </button>
-                    <button className="btn-secondary" suppressHydrationWarning onClick={resetVerifyDraft}>
-                      Clear
-                    </button>
+                    </div>
                   </div>
+
+                  {browserStep === 2 && (
+                    <div className="mock-receipt-pop">
+                      <span className="mock-receipt-header">SUI REGISTRY RECEIPT</span>
+                      <div className="mock-receipt-details">
+                        <div><span>ID:</span> <code>0x92f...a12c</code></div>
+                        <div><span>Tx:</span> <code>0x7a2c...8f2b</code></div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-
-                {renderSteps("verify")}
-
-                {verificationResult.status !== "idle" && (
-                  <div className={`result-card ${verificationResult.status === "success" ? "success" : "error"}`}>
-                    <div className="result-header">
-                      {verificationResult.status === "success" ? (
-                        <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      ) : (
-                        <svg className="result-icon error" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                      )}
-                      <span className={`result-title ${verificationResult.status === "success" ? "success" : "error"}`}>
-                        {verificationResult.status === "success" ? "Hash Matches" : "Tamper Detected"}
-                      </span>
-                    </div>
-                    <p className="result-message">{verificationResult.message}</p>
-                    <div className="proof-grid">
-                      <div className="proof-row">
-                        <span className="proof-label">Checked File</span>
-                        <span className="proof-value">
-                          {verificationResult.checkedFileLabel || "Shell sample"}
-                        </span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Recorded Commitment</span>
-                        <span className="proof-value">{truncateValue(verificationResult.expectedHash || "", 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Computed Hash</span>
-                        <span className={`proof-value ${verificationResult.status === "success" ? "success" : "error"}`}>
-                          {truncateValue(verificationResult.computedHash || "", 28)}
-                        </span>
-                      </div>
-                    </div>
-                    {verificationResult.status === "success" && (
-                      <div className="btn-actions">
-                        <button
-                          className="btn-secondary"
-                          suppressHydrationWarning
-                          onClick={() => {
-                            setAttestRecordId(verifyRecordId);
-                            setAttestResult(null);
-                            setOperationProgress(null);
-                            setActiveView("attest");
-                          }}
-                        >
-                          Continue to Attestation
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-
-            {activeView === "attest" && (
-              <>
-                <div className="card">
-                  <div className="card-section-title">Prepare Reviewer Attestation</div>
-                  <div className="tamper-toggle">
-                    <div className="tamper-info">
-                      <div className="tamper-title">Verification Prerequisite</div>
-                      <div className="tamper-desc">
-                        {selectedRecordVerified
-                          ? `Ready to attest. ${lastVerificationSession?.checkedFileLabel || "Selected file"} matched the recorded commitment at ${lastVerificationSession?.checkedAt}.`
-                          : selectedRecordTampered
-                            ? "Attestation is blocked because the latest verification for this record detected tampering."
-                            : "Run a successful verification for this evidence item before creating a reviewer attestation."}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="form-grid">
-                    <div className="field">
-                      <label className="field-label">Target Evidence Record</label>
-                      <select
-                        className="field-select"
-                        value={attestRecordId}
-                        suppressHydrationWarning
-                        onChange={(event) => setAttestRecordId(event.target.value)}
-                      >
-                        <option value="">-- Choose record to attest --</option>
-                        {registry.map((record) => (
-                          <option key={record.id} value={record.id}>
-                            {record.type} - {truncateValue(record.id, 10)} ({record.latestAttestation ? "Attestation on file" : record.status})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="field">
-                      <label className="field-label">Reviewer Wallet Address</label>
-                      <div className="field-input mono field-display">
-                        {signerAddress ? truncateValue(signerAddress, 34) : "Connect your wallet"}
-                      </div>
-                    </div>
-
-                    <div className="field">
-                      <label className="field-label">Attestation Action</label>
-                      <select
-                        className="field-select"
-                        value={attestType}
-                        suppressHydrationWarning
-                        onChange={(event) => setAttestType(event.target.value)}
-                      >
-                        <option value="HashConfirmed">Hash confirmed</option>
-                        <option value="EvidenceReviewed">Evidence reviewed</option>
-                        <option value="IssueFlagged">Issue flagged</option>
-                      </select>
-                    </div>
-
-                    <div className="field">
-                      <label className="field-label">Source Confidence</label>
-                      <div className="field-input mono field-display" suppressHydrationWarning>
-                        L3 - Reviewer Wallet Attested
-                      </div>
-                    </div>
-
-                    <div className="field form-full">
-                      <label className="field-label">Reviewer Notes</label>
-                      <textarea
-                        className="field-textarea"
-                        rows={3}
-                        value={attestNotes}
-                        suppressHydrationWarning
-                        onChange={(event) => setAttestNotes(event.target.value)}
-                        placeholder="Optional reviewer note or scope limitation."
-                      />
-                    </div>
-                  </div>
-
-                  <div className="btn-actions">
-                    <button
-                      className="btn-primary"
-                      disabled={isAttesting || !signerAddress || !attestRecordId || !selectedRecordVerified}
-                      suppressHydrationWarning
-                      onClick={handleAttest}
-                    >
-                      {isAttesting ? (
-                        <>
-                          <span className="spinner" />
-                          <span>Preparing...</span>
-                        </>
-                      ) : (
-                        "Review and Sign"
-                      )}
-                    </button>
-                    <button
-                      className="btn-secondary"
-                      suppressHydrationWarning
-                      onClick={resetAttestDraft}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                {attestError && (
-                  <div className="result-card error">
-                    <div className="result-header">
-                      <svg className="result-icon error" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                      <span className="result-title error">Attestation Blocked</span>
-                    </div>
-                    <p className="result-message">{attestError}</p>
-                  </div>
-                )}
-
-                {renderSteps("attest")}
-
-                {attestResult && (
-                  <div className="result-card success">
-                    <div className="result-header">
-                      <svg className="result-icon success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span className="result-title success">Attestation Prepared</span>
-                    </div>
-                    <p className="result-message">
-                      Reviewer action captured in the shell and ready to map to a live attestation object later.
-                    </p>
-                    <div className="proof-grid">
-                      <div className="proof-row">
-                        <span className="proof-label">Evidence ID</span>
-                        <span className="proof-value">{truncateValue(attestResult.evidenceId, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Attestation ID</span>
-                        <span className="proof-value">{truncateValue(attestResult.attestationId, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Tx Digest</span>
-                        <span className="proof-value">{attestResult.txDigest}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Package ID</span>
-                        <span className="proof-value">{truncateValue(PACKAGE_ID, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Reviewer</span>
-                        <span className="proof-value">{truncateValue(attestResult.reviewer, 28)}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Action</span>
-                        <span className="proof-value">{attestResult.action}</span>
-                      </div>
-                      <div className="proof-row">
-                        <span className="proof-label">Created At</span>
-                        <span className="proof-value">{attestResult.createdAt}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {activeView === "records" && (
-              <>
-                <div className="table-header-row">
-                  <span />
-                  <span className="record-count-badge">{registry.length} Records</span>
-                </div>
-
-                <div className="table-wrapper">
-                  <table className="registry-table">
-                    <thead>
-                      <tr>
-                        <th>Record ID / Date</th>
-                        <th>Type</th>
-                        <th>Assertions</th>
-                        <th>Lifecycle</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {registry.length > 0 ? (
-                        registry.map((record) => (
-                          <tr key={record.id}>
-                            <td>
-                              <div className="record-id">{truncateValue(record.id, 16)}</div>
-                              <div className="record-meta">{record.date}</div>
-                            </td>
-                            <td>
-                              <span>{record.type}</span>
-                              <div className="record-meta">{record.fileName || "file_upload"}</div>
-                            </td>
-                            <td>
-                              <div className="assertion-tags">
-                                {record.assertions.map((assertion) => (
-                                  <span key={assertion} className="assertion-tag">
-                                    {assertion}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-                            <td>
-                              <span
-                                className={`badge ${record.status === "Superseded" ? "review" : "registered"}`}
-                              >
-                                {record.status}
-                              </span>
-                              {record.latestAttestation && (
-                                <div className="record-meta">
-                                  Attested by {truncateValue(record.latestAttestation.reviewer, 14)}
-                                </div>
-                              )}
-                            </td>
-                            <td>
-                              <div className="table-actions">
-                                <button
-                                  className="table-action"
-                                  suppressHydrationWarning
-                                  onClick={() => {
-                                    setVerifyRecordId(record.id);
-                                    setVerificationResult({ status: "idle", message: "" });
-                                    setOperationProgress(null);
-                                    setActiveView("verify");
-                                  }}
-                                >
-                                  Verify
-                                </button>
-                                <button
-                                  className="table-action warn"
-                                  suppressHydrationWarning
-                                  onClick={() => {
-                                    setAttestRecordId(record.id);
-                                    setAttestResult(null);
-                                    setOperationProgress(null);
-                                    setActiveView("attest");
-                                  }}
-                                >
-                                  {record.latestAttestation ? "Re-attest" : "Attest"}
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5}>
-                            <div className="empty-state">
-                              <div className="empty-state-title">No evidence records yet</div>
-                              <div className="record-meta">
-                                Register a file first, then it will appear here for verification and attestation.
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
+              </div>
+            </div>
           </div>
-        </section>
-      </div>
-    </main>
+        </div>
+      </section>
+
+      {/* Sticky Interactive Web3 Scroll Section */}
+      <section 
+        className="sticky-scroll-container" 
+        ref={stickyTrackRef}
+        id="how-it-works"
+      >
+        <div className="sticky-viewport">
+          <div className="sticky-layout-horizontal">
+            
+            {/* Left Side: Clean Step Explanations (No boxes, no backgrounds) */}
+            <div className="pipeline-explanations-col">
+              
+              <div className="clean-explanation-step" ref={introExplanationRef}>
+                <span className="step-badge">Pipeline Architecture</span>
+                <h3 className="step-title">Evidence Chain of Custody</h3>
+                <p className="step-desc">
+                  This system processes client documents into cryptographically secure and immutable audit logs. Scroll down to walk through each phase of the evidence lifecycle.
+                </p>
+              </div>
+
+              <div className="clean-explanation-step" ref={cardRefs[0]}>
+                <span className="step-badge">Step 1 — Zero-knowledge local scanning</span>
+                <h3 className="step-title">Map local files</h3>
+                <p className="step-desc">
+                  Drag your files into the workspace. Linow reads them locally in your browser. We generate secure SHA-256 hash commitments without uploading your raw, sensitive files anywhere.
+                </p>
+              </div>
+
+              <div className="clean-explanation-step" ref={cardRefs[1]}>
+                <span className="step-badge">Step 2 — Client-controlled encryption</span>
+                <h3 className="step-title">Encrypt and backup</h3>
+                <p className="step-desc">
+                  Linow encrypts your evidence using client-side AES-256-GCM before it ever leaves your machine. The encrypted backup is sent to Walrus, keeping it private and decentralized.
+                </p>
+              </div>
+
+              <div className="clean-explanation-step" ref={cardRefs[2]}>
+                <span className="step-badge">Step 3 — Sui ledger commitments</span>
+                <h3 className="step-title">Anchor to the ledger</h3>
+                <p className="step-desc">
+                  Every file hash, timestamp, and Walrus blob ID is anchored directly to the Sui blockchain. Once written, the timeline cannot be altered or falsified.
+                </p>
+              </div>
+
+              <div className="clean-explanation-step" ref={cardRefs[3]}>
+                <span className="step-badge">Step 4 — Peer-signed attestations</span>
+                <h3 className="step-title">Verify and attest</h3>
+                <p className="step-desc">
+                  Auditors verify your staged files against the on-chain ledger hashes with a single click. When they sign an attestation with their wallet, the Sui blockchain proves it.
+                </p>
+              </div>
+
+            </div>
+
+            {/* Right Side: Sticky Pipeline Board */}
+            <div className="pipeline-board-col">
+              <div className="pipeline-board">
+                
+                {/* Column 1: Local Prep */}
+                <div className="pipeline-column" ref={pcolPrepRef} id="col-prep">
+                  <div className="pipeline-col-header">
+                    <span className="col-num">01</span>
+                    <span className="col-title">LOCAL MAPPING</span>
+                  </div>
+                  <div className="pipeline-cards">
+                    <div className="pipeline-card" ref={pcardUploadRef} id="pcard-upload">
+                      <div className="pcard-role-tag company">Company Role</div>
+                      <h4 className="pcard-title">Drag & Drop Evidence</h4>
+                      <div className="pcard-indicator">Raw Files</div>
+                    </div>
+                    <div className="pipeline-card" ref={pcardHashRef} id="pcard-hash">
+                      <div className="pcard-role-tag system">Co-Auditor Agent</div>
+                      <h4 className="pcard-title">Generate Browser Hash</h4>
+                      <div className="pcard-indicator code-font">Local Commitment</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 2: Secure Storage */}
+                <div className="pipeline-column" ref={pcolStorageRef} id="col-storage">
+                  <div className="pipeline-col-header">
+                    <span className="col-num">02</span>
+                    <span className="col-title">SECURE STORAGE</span>
+                  </div>
+                  <div className="pipeline-cards">
+                    <div className="pipeline-card" ref={pcardEncryptRef} id="pcard-encrypt">
+                      <div className="pcard-role-tag system">Co-Auditor Agent</div>
+                      <h4 className="pcard-title">Client-Side AES Encrypt</h4>
+                      <div className="pcard-indicator code-font">Encrypted Payload</div>
+                    </div>
+                    <div className="pipeline-card" ref={pcardWalrusRef} id="pcard-walrus">
+                      <div className="pcard-role-tag storage">Walrus Network</div>
+                      <h4 className="pcard-title">Walrus Blob Upload</h4>
+                      <div className="pcard-indicator code-font">Decentralized Backup</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 3: Durable Registry */}
+                <div className="pipeline-column" ref={pcolRegistryRef} id="col-registry">
+                  <div className="pipeline-col-header">
+                    <span className="col-num">03</span>
+                    <span className="col-title">LEDGER ANCHOR</span>
+                  </div>
+                  <div className="pipeline-cards">
+                    <div className="pipeline-card" ref={pcardSuiRef} id="pcard-sui">
+                      <div className="pcard-role-tag sui">Sui Blockchain</div>
+                      <h4 className="pcard-title">Anchor EvidenceRecord</h4>
+                      <div className="pcard-indicator code-font">On-Chain Commit</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 4: Review Attestation */}
+                <div className="pipeline-column" ref={pcolReviewRef} id="col-review">
+                  <div className="pipeline-col-header">
+                    <span className="col-num">04</span>
+                    <span className="col-title">AUDITOR REVIEW</span>
+                  </div>
+                  <div className="pipeline-cards">
+                    <div className="pipeline-card" ref={pcardVerifyRef} id="pcard-verify">
+                      <div className="pcard-role-tag auditor">Auditor Role</div>
+                      <h4 className="pcard-title">Verify Ledger Hashes</h4>
+                      <div className="pcard-indicator">Match Commitments</div>
+                    </div>
+                    <div className="pipeline-card" ref={pcardAttestRef} id="pcard-attest">
+                      <div className="pcard-role-tag auditor">Auditor Role</div>
+                      <h4 className="pcard-title">Reviewer Signature</h4>
+                      <div className="pcard-indicator code-font">Attestation Object</div>
+                    </div>
+                  </div>
+                </div>
+
+
+
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+
+
+      {/* Agentic Flow Showcase Section */}
+      <section className="landing-agent-section" id="agent-flow">
+        <div className="agent-grid-layout">
+          
+          {/* Left Column: Copywriting */}
+          <div className="agent-desc-col">
+            <span className="section-eyebrow">Autonomous Compliance Loop</span>
+            <h2 className="agent-section-title">
+              A continuous compliance loop you actually control.
+            </h2>
+            <p className="agent-section-desc">
+              No autonomous rogue transactions. Linow acts as your browser co-auditor: classifying documents and staging ledger records. The agent proposes the transaction; you review and sign it.
+            </p>
+            
+            <div className="agent-feature-points">
+              <div className="feature-point">
+                <h4>In-Browser Gap Detection</h4>
+                <p>Find missing approvals and document mismatches before your audit starts. The agent flags gaps locally, keeping your workspace secure.</p>
+              </div>
+              
+              <div className="feature-point">
+                <h4>Immutable Audit Trail</h4>
+                <p>Log reviewer decisions and agent rationales directly on the Sui blockchain. Build a tamper-proof history of your compliance lifecycle.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Live Looping Simulation Card */}
+          <div className="agent-simulation-col">
+            <div className="agent-simulator-card mac-theme">
+              
+              {/* Mac Header */}
+              <div className="mac-header">
+                <div className="mac-controls">
+                  <span className="control-dot close"></span>
+                  <span className="control-dot minimize"></span>
+                  <span className="control-dot expand"></span>
+                </div>
+                <div className="mac-title">Linow Agent Sandbox</div>
+                <div className="mac-status-badge">
+                  <span className="status-dot"></span>
+                  <span className="status-text">
+                    {simPhase === 0 ? "scanning" : simPhase === 1 ? "analyzing" : simPhase === 2 ? "signing" : "synced"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Feed: Agent Activities logs - Matches /workspace-demo activity logs */}
+              <div className="sim-agent-activity-feed">
+                <div className="sim-activity-card">
+                  <div className="sim-activity-left">
+                    <span className={`sim-activity-dot ${simPhase === 0 ? "running" : "done"}`} />
+                    <span className="sim-activity-name">Coverage Check</span>
+                    <span className="sim-activity-desc">
+                      {simPhase === 0 ? "scanning PBC files..." : "4 of 7 required docs found"}
+                    </span>
+                  </div>
+                  <span className={`sim-activity-badge ${simPhase === 0 ? "running" : "done"}`}>
+                    {simPhase === 0 ? "Running" : "Done"}
+                  </span>
+                </div>
+
+                <div className="sim-activity-card">
+                  <div className="sim-activity-left">
+                    <span className={`sim-activity-dot ${simPhase === 0 ? "queued" : simPhase === 1 ? "running" : "done"}`} />
+                    <span className="sim-activity-name">Classify Contract</span>
+                    <span className="sim-activity-desc">
+                      {simPhase === 0 ? "queued" : simPhase === 1 ? "analyzing clauses..." : "Occurrence & Accuracy mapped"}
+                    </span>
+                  </div>
+                  <span className={`sim-activity-badge ${simPhase === 0 ? "queued" : simPhase === 1 ? "running" : "done"}`}>
+                    {simPhase === 0 ? "Queued" : simPhase === 1 ? "Running" : "Done"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Chat Viewport (Scrollable container for chat bubbles and permission popup) */}
+              <div className="sim-chat-viewport" ref={chatViewportRef}>
+                
+                {/* Bubble 1: Welcome Message */}
+                <div className="sim-chat-bubble agent">
+                  <span className="sim-bubble-prefix">::</span>
+                  <div>Welcome to Linow Agent Sandbox. I am scanning the active workspace engagement files for compliance gaps.</div>
+                </div>
+
+                {/* Bubble 2: Scanning result */}
+                {simPhase >= 1 && (
+                  <div className="sim-chat-bubble agent animate-fade-in">
+                    <span className="sim-bubble-prefix">::</span>
+                    <div>
+                      Compliance run complete. I have mapped the document to Required ISA Assertions:
+                      <div className="sim-msg-report-table">
+                        <div className="sim-table-row">
+                          <span>Existence Coverage</span>
+                          <strong>98% confidence</strong>
+                        </div>
+                        <div className="sim-table-row">
+                          <span>Completeness Gap</span>
+                          <strong style={{ color: '#d97706' }}>external confirmation missing</strong>
+                        </div>
+                        <div className="sim-table-row">
+                          <span>Readiness Score</span>
+                          <strong style={{ color: '#0d9488' }}>75 / 100</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Command approval popup - Matches /workspace-demo popup sheet */}
+                {simPhase === 1 && (
+                  <div className="sim-permission-popup-sheet animate-fade-in">
+                    <div className="sim-permission-header">
+                      <span className="sim-terminal-icon">$_</span>
+                      <span>Allow running this command?</span>
+                    </div>
+                    <div className="sim-permission-command-box">
+                      <code>
+                        sui_execute_transaction --module evidence --action register --file bank_recon_december.pdf --assertions ["Existence", "Completeness"]
+                      </code>
+                    </div>
+                    <div className="sim-permission-options">
+                      <div className="sim-permission-option-row active">
+                        <span>1. Yes, allow this time</span>
+                        <span className="sim-option-desc">Allow single execution</span>
+                      </div>
+                      <div className="sim-permission-option-row">
+                        <span>2. No (cancel transaction)</span>
+                        <span className="sim-option-desc">Deny execution request</span>
+                      </div>
+                    </div>
+                    <div className="sim-permission-actions">
+                      <button className="sim-btn-skip">Skip</button>
+                      <button className="sim-btn-submit flashing-btn">Submit ↵</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Bubble 3: Staged / Sign request */}
+                {simPhase >= 2 && (
+                  <>
+                    <div className="sim-chat-bubble user animate-fade-in">
+                      <div>Submit Command Resolved: Approved</div>
+                    </div>
+                    <div className="sim-chat-bubble agent animate-fade-in">
+                      <span className="sim-bubble-prefix">::</span>
+                      <div>
+                        Rationales and file hashes are staged. Please sign the attestation commitment to anchor to the Sui ledger.
+                        {simPhase === 2 ? (
+                          <div className="sim-chat-action-btn flashing">
+                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24" style={{ marginRight: '6px' }}>
+                              <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+                            </svg>
+                            <span>Sign Review Attestation</span>
+                          </div>
+                        ) : (
+                          <div className="sim-chat-attestation-success">
+                            <span className="success-icon">✔</span> registered on Sui ledger (RegisterEvidence)
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Sticking Output Panel (Active in all phases) */}
+              {simPhase === 3 ? (
+                isPending ? (
+                  <div className="sim-broadcasting-bar animate-fade-in">
+                    <span className="sim-spinner"></span>
+                    <span>Broadcasting registry transaction to Sui...</span>
+                  </div>
+                ) : (
+                  <div className="sim-ledger-log-panel animate-fade-in">
+                    <span className="sim-ledger-header">ledger confirmation</span>
+                    <div className="sim-ledger-box">
+                      <div className="sim-ledger-item">
+                        <span className="sim-dot"></span>
+                        <span>Sui Transaction: <code>0x7a2c...8f2b</code></span>
+                      </div>
+                      <div className="sim-ledger-item">
+                        <span className="sim-dot"></span>
+                        <span>Evidence Blob stored on Walrus</span>
+                      </div>
+                      <div className="sim-ledger-item">
+                        <span className="sim-dot"></span>
+                        <span>MemWal ledger index synchronized</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="sim-broadcasting-bar animate-fade-in">
+                  <span className="sim-spinner"></span>
+                  <span>
+                    {simPhase === 0 && "Broadcasting agent status: scanning local files..."}
+                    {simPhase === 1 && "Broadcasting agent status: mapping ISA 500 assertions..."}
+                    {simPhase === 2 && "Broadcasting agent status: awaiting reviewer signature..."}
+                  </span>
+                </div>
+              )}
+
+              {/* Chat Input Field (Minimalist, borderless top) */}
+              <div className="sim-chat-input-area">
+                <span className="sim-input-placeholder">Ask Co-Auditor a question...</span>
+                <svg className="sim-send-icon" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                </svg>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* Hexagonal Trust Web Benefits Section */}
+      <section className="landing-benefits-section" id="benefits">
+        <div className="benefits-header">
+          <span className="section-eyebrow">Engagement Benefits</span>
+          <h2 className="section-title">One ledger. Clear benefits for everyone.</h2>
+          <p className="benefits-subtitle">
+            No more chasing emails or arguing over dates. Linow creates a single, verifiable source of truth for both companies and auditors.
+          </p>
+        </div>
+
+        {/* Role Toggle Switcher */}
+        <div className="benefits-toggle-wrapper">
+          <div className="benefits-toggle-container">
+            <div className={`benefits-toggle-indicator role-${activeRole}`} />
+            <button
+              className={`benefits-toggle-btn ${activeRole === "company" ? "active" : ""}`}
+              onClick={() => {
+                setActiveRole("company");
+                setActiveNodeIndex(0);
+              }}
+            >
+              For Company
+            </button>
+            <button
+              className={`benefits-toggle-btn ${activeRole === "auditor" ? "active" : ""}`}
+              onClick={() => {
+                setActiveRole("auditor");
+                setActiveNodeIndex(3);
+              }}
+            >
+              For Auditor
+            </button>
+          </div>
+        </div>
+
+        {/* Interactive Hexagon Trust Web Layout */}
+        <div className="benefits-interactive-grid">
+          
+          {/* Left Panel: Desktop Hexagonal Trust Web Visual */}
+          <div className="benefits-visual-panel">
+            
+            {/* SVG Lines overlay */}
+            <svg className="benefits-svg-overlay" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+              {/* Outer Hexagon outline */}
+              <polygon
+                points="30,23 18,50 30,77 70,77 82,50 70,23"
+                className="hexagon-perimeter-line"
+              />
+              
+              {/* Radiating Spokes from Center Ledger (50, 50) */}
+              {benefitsNodes.map((node) => {
+                const isActive = activeNodeIndex === node.id;
+                const isRoleMatch = node.role === activeRole;
+                return (
+                  <line
+                    key={`spoke-${node.id}`}
+                    x1="50"
+                    y1="50"
+                    x2={node.x}
+                    y2={node.y}
+                    className={`hexagon-spoke-line ${isActive ? "active" : ""} ${isRoleMatch ? "active-role" : "standby-role"}`}
+                  />
+                );
+              })}
+            </svg>
+
+            {/* Central Shared Trust Ledger Hub */}
+            <div className="hexagon-center-hub">
+              <div className="center-hub-ring">
+                <Image
+                  src="/mascot.png"
+                  alt="Linow Mascot Hub"
+                  width={34}
+                  height={34}
+                  className="center-hub-mascot"
+                />
+              </div>
+              <span className="center-hub-label">Trust Ledger</span>
+            </div>
+
+            {/* 6 Outer Nodes */}
+            {benefitsNodes.map((node) => {
+              const isActive = activeNodeIndex === node.id;
+              const isRoleMatch = node.role === activeRole;
+              return (
+                <div
+                  key={node.id}
+                  className={`hexagon-node-wrapper ${isActive ? "active" : ""} ${isRoleMatch ? "active-role" : "standby-role"}`}
+                  style={{
+                    left: `${node.x}%`,
+                    top: `${node.y}%`,
+                  }}
+                  onClick={() => {
+                    setActiveNodeIndex(node.id);
+                    setActiveRole(node.role);
+                  }}
+                >
+                  <div className="hexagon-node-circle">
+                    {node.icon}
+                  </div>
+                  <span className="hexagon-node-pill">{node.label}</span>
+                </div>
+              );
+            })}
+
+          </div>
+
+          {/* Bottom Panel: Clean text-only explanation below hexagon */}
+          <div className="benefits-details-panel">
+            <div className="benefits-details-text-only" key={activeNodeIndex}>
+              <p className="details-full-text">
+                {benefitsNodes[activeNodeIndex].detail}
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Mobile-only benefits list fallback (hidden on desktop) */}
+        <div className="benefits-mobile-list">
+          {benefitsNodes
+            .filter((node) => node.role === activeRole)
+            .map((node) => (
+              <div
+                key={`mobile-${node.id}`}
+                className={`benefits-mobile-card ${activeNodeIndex === node.id ? "active" : ""}`}
+                onClick={() => setActiveNodeIndex(node.id)}
+              >
+                <div className="mobile-card-header">
+                  <div className="mobile-card-icon-wrap">
+                    {node.icon}
+                  </div>
+                  <h4>{node.title}</h4>
+                </div>
+                <p>{node.detail}</p>
+              </div>
+            ))}
+        </div>
+
+      </section>
+
+      {/* Bottom CTA Section */}
+      <section className="landing-cta-section">
+        <div className="cta-glass-card">
+          <h2 className="cta-title">Get audit-ready without the chaos.</h2>
+          <p className="cta-desc">
+            Connect your wallet, point Linow to your compliance files, and run your first browser-based pre-audit today.
+          </p>
+          <button className="cta-btn-primary" disabled>
+            Coming soon
+          </button>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="landing-footer">
+        <div className="footer-left">
+          <Link href="/" className="footer-brand">
+            <Image
+              className="footer-logo-img"
+              src="/icon.png"
+              alt="Linow logo"
+              width={16}
+              height={16}
+            />
+            <span>Linow</span>
+          </Link>
+          <span className="footer-copyright">&copy; {new Date().getFullYear()} Linow. Powered by Sui & Walrus.</span>
+        </div>
+        <div className="footer-right">
+          <a 
+            href="https://x.com/linow_ai" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="footer-x-link"
+            aria-label="X (formerly Twitter)"
+          >
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+          </a>
+        </div>
+      </footer>
+    </div>
   );
 }
